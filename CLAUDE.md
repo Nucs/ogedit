@@ -40,14 +40,66 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - Settings changes (word wrap, encoding, newline type, indentation)
   - Dialog open/close with results
   - Document switching
-  - Cursor movements
+  - Cursor movements (with line, column, and byte offset)
+  - Text selections (with range, offsets, and selected content)
   - File picker interactions
+  - Content snapshots (1 second after last change)
   - Panics/crashes (with location and message)
   - Error messages
 - **Implementation:** `src/bin/edit/logging.rs`
 - **Log format:** `[HH:MM:SS.mmm] EVENT_TYPE: details`
+- **Cursor and selection logging:** Includes line, column, and byte offset information
+  - **Mouse click (screen position + target area):**
+    ```
+    [12:34:56.789] MOUSE_CLICK: (15,8) [left] -> editor
+    [12:34:56.789] MOUSE_CLICK: (5,0) [left] -> menubar
+    [12:34:56.789] MOUSE_CLICK: (30,24) [left] -> statusbar
+    ```
+  - **Cursor movement from click (includes target):**
+    ```
+    [12:34:56.789] CURSOR_MOVE: Ln 5, Col 10 (offset 142) -> Ln 8, Col 15 (offset 247) [click:editor]
+    ```
+  - **Cursor movement from keyboard:**
+    ```
+    [12:34:56.789] CURSOR_MOVE: Ln 5, Col 10 (offset 142) -> Ln 5, Col 15 (offset 147) [navigation]
+    ```
+  - **Selection with content:**
+    ```
+    [12:34:56.789] SELECTION: Ln 1, Col 1 (offset 0) to Ln 3, Col 5 (offset 45) content="first line\nsecond line\nthird"
+    ```
+  - **Selection cleared:**
+    ```
+    [12:34:56.789] SELECTION_CLEAR
+    ```
+- **Content formatting:** Text content (paste, cut, copy, delete, text input, selections) uses adaptive formatting:
+  - **< 256 bytes:** Escaped one-liner with special chars shown as `\n`, `\r`, `\t`, etc.
+    ```
+    [12:34:56.789] PASTE: "Hello, World!\nSecond line"
+    ```
+  - **>= 256 bytes:** Diff-style output with line numbers
+    ```
+    [12:34:56.789] PASTE: [CONTENT: 512 bytes, 15 lines]
+      1| first line here
+      2| second line
+     ...
+     15| last line
+    ```
+  - **Binary data (invalid UTF-8, >= 256 bytes):** Hex dump with offsets
+    ```
+    [12:34:56.789] PASTE: [BINARY: 512 bytes]
+    00000000| 48 65 6c 6c 6f 20 57 6f  72 6c 64 21 0a 00 ff fe  |Hello World!....|
+    ```
+- **Content snapshots:** Full document content is logged 1 second after the last change (idle snapshot)
+  ```
+  [12:34:56.789] CONTENT_SNAPSHOT: doc="Untitled" "full document content here..."
+  ```
+  - Uses adaptive formatting (escaped one-liner for small content, diff-style for large content)
+  - Only logged when document is idle (no changes in the last second)
+  - Helps reconstruct document state timeline for debugging
 - **Panic handling:** A panic hook is installed to capture crashes to the log
+  - `logging::init()` is called FIRST in the startup sequence, before sys/arena/localization init
   - Logs panic message and source location before termination
+  - Panic hook chain: logging hook → terminal cleanup hook (debug) → default hook
   - **Limitation:** In release builds with `panic = "abort"`, the hook may not run (immediate termination)
 
 **Data Directory Structure:**

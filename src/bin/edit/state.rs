@@ -129,11 +129,58 @@ pub struct OscTitleFileStatus {
     pub dirty: bool,
 }
 
+/// Tracks selection state for logging purposes
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionState {
+    pub has_selection: bool,
+    pub start: Point,
+    pub end: Point,
+    pub start_offset: usize,
+    pub end_offset: usize,
+}
+
+/// Describes where a mouse click landed
+#[derive(Default, Clone, Copy)]
+pub enum ClickTarget {
+    #[default]
+    Unknown,
+    Editor,
+    Menubar,
+    Statusbar,
+    Dialog,
+    FilePicker,
+}
+
+impl ClickTarget {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ClickTarget::Unknown => "unknown",
+            ClickTarget::Editor => "editor",
+            ClickTarget::Menubar => "menubar",
+            ClickTarget::Statusbar => "statusbar",
+            ClickTarget::Dialog => "dialog",
+            ClickTarget::FilePicker => "filepicker",
+        }
+    }
+}
+
 /// Tracks the previous state for logging purposes
 #[derive(Default)]
 pub struct LoggingTracker {
     pub cursor_pos: Point,
+    pub cursor_offset: usize,
     pub text_generation: u32,
+    pub selection: SelectionState,
+    /// Set to true when a mouse click is processed, cleared after logging
+    pub last_input_was_click: bool,
+    /// Where the last click landed (set by UI handlers)
+    pub last_click_target: ClickTarget,
+    /// Last time we logged a content snapshot (in milliseconds since program start)
+    pub last_snapshot_time_ms: u64,
+    /// Buffer generation at the last change (to detect idle periods)
+    pub last_change_generation: u32,
+    /// Time of the last content change (in milliseconds since program start)
+    pub last_change_time_ms: u64,
 }
 
 pub struct State {
@@ -303,27 +350,110 @@ pub fn log_state_changes(state: &mut State) {
 
     let tb = doc.buffer.borrow();
     let cursor_pos = tb.cursor_logical_pos();
+    let cursor_offset = tb.cursor_offset();
     let generation = tb.generation();
+
+    // Get current selection state
+    let current_selection = if let Some((beg, end)) = tb.selection_range() {
+        SelectionState {
+            has_selection: true,
+            start: beg.logical_pos,
+            end: end.logical_pos,
+            start_offset: beg.offset,
+            end_offset: end.offset,
+        }
+    } else {
+        SelectionState::default()
+    };
+
     let tracker = &mut state.logging_tracker;
 
-    // Check for cursor movement
-    if cursor_pos != tracker.cursor_pos {
-        // Only log if it's not from text editing (generation unchanged)
-        if generation == tracker.text_generation {
-            logging::log_cursor_move(tracker.cursor_pos, cursor_pos, "navigation");
+    // Check for cursor movement (only when not editing text)
+    if (cursor_pos != tracker.cursor_pos || cursor_offset != tracker.cursor_offset)
+        && generation == tracker.text_generation
+    {
+        let method = if tracker.last_input_was_click {
+            // Include target info for clicks
+            match tracker.last_click_target {
+                ClickTarget::Editor => "click:editor",
+                ClickTarget::Menubar => "click:menubar",
+                ClickTarget::Statusbar => "click:statusbar",
+                ClickTarget::Dialog => "click:dialog",
+                ClickTarget::FilePicker => "click:filepicker",
+                ClickTarget::Unknown => "click",
+            }
+        } else {
+            "navigation"
+        };
+        logging::log_cursor_move(
+            tracker.cursor_pos,
+            cursor_pos,
+            tracker.cursor_offset,
+            cursor_offset,
+            method,
+        );
+    }
+
+    // Clear the click flags after processing
+    tracker.last_input_was_click = false;
+    tracker.last_click_target = ClickTarget::Unknown;
+
+    // Check for selection changes
+    if current_selection != tracker.selection {
+        if current_selection.has_selection {
+            // Selection exists - get content and log it
+            let content = tb.extract_bytes(current_selection.start_offset..current_selection.end_offset);
+            logging::log_selection(
+                current_selection.start,
+                current_selection.end,
+                current_selection.start_offset,
+                current_selection.end_offset,
+                Some(&content),
+            );
+        } else if tracker.selection.has_selection {
+            // Selection was cleared
+            logging::log_selection_clear();
         }
-        tracker.cursor_pos = cursor_pos;
+        tracker.selection = current_selection;
     }
 
-    // Check for text changes (generation changed means text was modified)
+    // Update tracker state
     if generation != tracker.text_generation {
-        // Text was edited - we log this generically since we can't know exactly what was typed
-        // The detailed text input logging happens elsewhere when we know the exact input
         tracker.text_generation = generation;
-        tracker.cursor_pos = cursor_pos; // Update cursor pos too since it likely changed
+    }
+    tracker.cursor_pos = cursor_pos;
+    tracker.cursor_offset = cursor_offset;
+}
+
+/// Check if we should log a content snapshot (1 second of idle after last change)
+/// Call this at the end of each frame with the current timestamp in milliseconds
+pub fn log_periodic_content_snapshot(state: &mut State, now_ms: u64) {
+    let Some(doc) = state.documents.active_mut() else {
+        return;
+    };
+
+    let generation = doc.buffer.borrow().generation();
+    let tracker = &mut state.logging_tracker;
+
+    // Detect content change
+    if generation != tracker.last_change_generation {
+        tracker.last_change_generation = generation;
+        tracker.last_change_time_ms = now_ms;
     }
 
-    // Selection tracking is complex because TextBuffer doesn't expose selection state
-    // directly in a way we can easily track here. The selection logging happens
-    // in other places where we know the context (e.g., select all, shift+arrow, etc.)
+    // Check if 1 second has passed since the last change
+    // and we haven't logged a snapshot since that change
+    const SNAPSHOT_INTERVAL_MS: u64 = 1000;
+
+    if tracker.last_change_time_ms > 0
+        && now_ms >= tracker.last_change_time_ms + SNAPSHOT_INTERVAL_MS
+        && tracker.last_snapshot_time_ms < tracker.last_change_time_ms + SNAPSHOT_INTERVAL_MS
+    {
+        // Time to log a snapshot
+        let mut content = String::new();
+        doc.buffer.borrow_mut().save_as_string(&mut content);
+
+        logging::log_content_snapshot(&content, &doc.filename);
+        tracker.last_snapshot_time_ms = now_ms;
+    }
 }

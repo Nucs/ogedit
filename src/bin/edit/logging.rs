@@ -283,13 +283,14 @@ fn write_log(message: &str) {
     });
 }
 
-/// Escape special characters in text for logging
+/// Escape special characters in text for logging.
+/// Note: \r is stripped (not escaped) to normalize Windows line endings.
 fn escape_text(text: &str) -> String {
     let mut result = String::with_capacity(text.len() * 2);
     for ch in text.chars() {
         match ch {
             '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
+            '\r' => {} // Strip carriage returns (normalize CRLF to LF)
             '\t' => result.push_str("\\t"),
             '\\' => result.push_str("\\\\"),
             '"' => result.push_str("\\\""),
@@ -302,7 +303,8 @@ fn escape_text(text: &str) -> String {
     result
 }
 
-/// Escape special characters in bytes for logging
+/// Escape special characters in bytes for logging.
+/// Note: \r is stripped (not escaped) to normalize Windows line endings.
 fn escape_bytes(bytes: &[u8]) -> String {
     match std::str::from_utf8(bytes) {
         Ok(s) => escape_text(s),
@@ -310,7 +312,9 @@ fn escape_bytes(bytes: &[u8]) -> String {
             // Fall back to hex representation for invalid UTF-8
             let mut result = String::with_capacity(bytes.len() * 4);
             for &b in bytes {
-                if b.is_ascii_graphic() || b == b' ' {
+                if b == b'\r' {
+                    // Strip carriage returns
+                } else if b.is_ascii_graphic() || b == b' ' {
                     result.push(b as char);
                 } else {
                     result.push_str(&format!("\\x{:02x}", b));
@@ -319,6 +323,99 @@ fn escape_bytes(bytes: &[u8]) -> String {
             result
         }
     }
+}
+
+/// Content size threshold for switching from inline to diff format
+const CONTENT_THRESHOLD: usize = 256;
+
+/// Format content for logging based on size:
+/// - If < 256 chars: return escaped one-liner
+/// - If >= 256 chars: return diff-style output with line numbers
+fn format_content(text: &str) -> String {
+    if text.len() < CONTENT_THRESHOLD {
+        // Short content: escaped one-liner
+        format!("\"{}\"", escape_text(text))
+    } else {
+        // Long content: diff-style with line numbers
+        format_with_line_numbers(text)
+    }
+}
+
+/// Format bytes content for logging based on size
+fn format_content_bytes(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => format_content(s),
+        Err(_) => {
+            // Invalid UTF-8: show hex dump with line numbers if large
+            if bytes.len() < CONTENT_THRESHOLD {
+                format!("\"{}\"", escape_bytes(bytes))
+            } else {
+                format_hex_with_offset(bytes)
+            }
+        }
+    }
+}
+
+/// Format text with line numbers in diff style
+fn format_with_line_numbers(text: &str) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let line_count = lines.len();
+    let width = line_count.to_string().len().max(3); // At least 3 digits for alignment
+
+    let mut result = format!("[CONTENT: {} bytes, {} lines]\n", text.len(), line_count);
+
+    for (i, line) in lines.iter().enumerate() {
+        let line_num = i + 1;
+        let escaped_line = escape_text(line);
+        // Truncate very long lines for readability
+        let display_line = if escaped_line.len() > 200 {
+            format!("{}...", &escaped_line[..200])
+        } else {
+            escaped_line
+        };
+        result.push_str(&format!("{:>width$}| {}\n", line_num, display_line));
+    }
+
+    result.trim_end().to_string()
+}
+
+/// Format binary data with hex dump and offsets
+fn format_hex_with_offset(bytes: &[u8]) -> String {
+    let mut result = format!("[BINARY: {} bytes]\n", bytes.len());
+
+    for (i, chunk) in bytes.chunks(16).enumerate() {
+        let offset = i * 16;
+        result.push_str(&format!("{:08x}| ", offset));
+
+        // Hex values
+        for (j, &b) in chunk.iter().enumerate() {
+            if j == 8 {
+                result.push(' '); // Extra space at midpoint
+            }
+            result.push_str(&format!("{:02x} ", b));
+        }
+
+        // Padding for incomplete last line
+        for j in chunk.len()..16 {
+            if j == 8 {
+                result.push(' ');
+            }
+            result.push_str("   ");
+        }
+
+        // ASCII representation
+        result.push_str(" |");
+        for &b in chunk {
+            if b.is_ascii_graphic() || b == b' ' {
+                result.push(b as char);
+            } else {
+                result.push('.');
+            }
+        }
+        result.push_str("|\n");
+    }
+
+    result.trim_end().to_string()
 }
 
 /// Format a keyboard shortcut for logging
@@ -412,19 +509,14 @@ pub fn log_app_exit() {
 
 /// Log text input from the user
 pub fn log_text_input(text: &str) {
-    let escaped = escape_text(text);
-    write_log(&format!("TEXT_INPUT: \"{}\"", escaped));
+    let formatted = format_content(text);
+    write_log(&format!("TEXT_INPUT: {}", formatted));
 }
 
 /// Log text input from paste
 pub fn log_paste(text: &[u8]) {
-    let escaped = escape_bytes(text);
-    let len = text.len();
-    if len > 100 {
-        write_log(&format!("PASTE: ({} bytes) \"{}...\"", len, &escaped[..100.min(escaped.len())]));
-    } else {
-        write_log(&format!("PASTE: \"{}\"", escaped));
-    }
+    let formatted = format_content_bytes(text);
+    write_log(&format!("PASTE: {}", formatted));
 }
 
 /// Log a keyboard shortcut
@@ -433,37 +525,55 @@ pub fn log_shortcut(key: InputKey, action: &str) {
     write_log(&format!("SHORTCUT: {} -> {}", shortcut, action));
 }
 
-/// Log cursor movement
-pub fn log_cursor_move(from: Point, to: Point, method: &str) {
+/// Log cursor movement with offset information
+/// - from/to: logical (column, line) positions
+/// - from_offset/to_offset: byte offsets in buffer
+/// - method: what caused the movement (e.g., "arrow_left", "arrow_up", "click", "navigation")
+pub fn log_cursor_move(
+    from: Point,
+    to: Point,
+    from_offset: usize,
+    to_offset: usize,
+    method: &str,
+) {
     write_log(&format!(
-        "CURSOR_MOVE: ({},{}) -> ({},{}) [{}]",
-        from.x, from.y, to.x, to.y, method
+        "CURSOR_MOVE: Ln {}, Col {} (offset {}) -> Ln {}, Col {} (offset {}) [{}]",
+        from.y + 1,
+        from.x + 1,
+        from_offset,
+        to.y + 1,
+        to.x + 1,
+        to_offset,
+        method
     ));
 }
 
-/// Log selection start
-pub fn log_selection_start(pos: Point) {
-    write_log(&format!("SELECTION_START: ({},{})", pos.x, pos.y));
-}
+/// Log selection with full details including offsets and content
+/// - start/end: logical (column, line) positions
+/// - start_offset/end_offset: byte offsets in buffer
+/// - content: the selected text (will use adaptive formatting based on size)
+pub fn log_selection(
+    start: Point,
+    end: Point,
+    start_offset: usize,
+    end_offset: usize,
+    content: Option<&[u8]>,
+) {
+    let range_info = format!(
+        "Ln {}, Col {} (offset {}) to Ln {}, Col {} (offset {})",
+        start.y + 1,
+        start.x + 1,
+        start_offset,
+        end.y + 1,
+        end.x + 1,
+        end_offset
+    );
 
-/// Log selection update
-pub fn log_selection_update(start: Point, end: Point, text_preview: Option<&str>) {
-    if let Some(preview) = text_preview {
-        let escaped = escape_text(preview);
-        let preview_str = if escaped.len() > 50 {
-            format!("\"{}...\"", &escaped[..50])
-        } else {
-            format!("\"{}\"", escaped)
-        };
-        write_log(&format!(
-            "SELECTION: ({},{}) to ({},{}) {}",
-            start.x, start.y, end.x, end.y, preview_str
-        ));
+    if let Some(bytes) = content {
+        let formatted = format_content_bytes(bytes);
+        write_log(&format!("SELECTION: {} content={}", range_info, formatted));
     } else {
-        write_log(&format!(
-            "SELECTION: ({},{}) to ({},{})",
-            start.x, start.y, end.x, end.y
-        ));
+        write_log(&format!("SELECTION: {}", range_info));
     }
 }
 
@@ -553,35 +663,20 @@ pub fn log_encoding_change(from: &str, to: &str) {
 
 /// Log delete operation
 pub fn log_delete(deleted_text: &str, method: &str) {
-    let escaped = escape_text(deleted_text);
-    let preview = if escaped.len() > 50 {
-        format!("\"{}...\"", &escaped[..50])
-    } else {
-        format!("\"{}\"", escaped)
-    };
-    write_log(&format!("DELETE: {} {}", preview, method));
+    let formatted = format_content(deleted_text);
+    write_log(&format!("DELETE: {} [{}]", formatted, method));
 }
 
 /// Log cut operation
 pub fn log_cut(text: &[u8]) {
-    let escaped = escape_bytes(text);
-    let preview = if escaped.len() > 50 {
-        format!("\"{}...\"", &escaped[..50])
-    } else {
-        format!("\"{}\"", escaped)
-    };
-    write_log(&format!("CUT: {}", preview));
+    let formatted = format_content_bytes(text);
+    write_log(&format!("CUT: {}", formatted));
 }
 
 /// Log copy operation
 pub fn log_copy(text: &[u8]) {
-    let escaped = escape_bytes(text);
-    let preview = if escaped.len() > 50 {
-        format!("\"{}...\"", &escaped[..50])
-    } else {
-        format!("\"{}\"", escaped)
-    };
-    write_log(&format!("COPY: {}", preview));
+    let formatted = format_content_bytes(text);
+    write_log(&format!("COPY: {}", formatted));
 }
 
 /// Log duplicate line operation
@@ -594,9 +689,9 @@ pub fn log_select_all() {
     write_log("SELECT_ALL");
 }
 
-/// Log mouse click
-pub fn log_mouse_click(pos: Point, button: &str) {
-    write_log(&format!("MOUSE_CLICK: ({},{}) [{}]", pos.x, pos.y, button));
+/// Log mouse click with screen position and target area
+pub fn log_mouse_click(pos: Point, button: &str, target: &str) {
+    write_log(&format!("MOUSE_CLICK: ({},{}) [{}] -> {}", pos.x, pos.y, button, target));
 }
 
 /// Log mouse drag
@@ -625,4 +720,11 @@ pub fn log_action(action: &str) {
 /// Log error
 pub fn log_error(error: &str) {
     write_log(&format!("ERROR: {}", error));
+}
+
+/// Log content snapshot (periodic idle logging)
+/// Uses the 256-byte threshold: short content is one-liner, long content gets line numbers
+pub fn log_content_snapshot(content: &str, doc_name: &str) {
+    let formatted = format_content(content);
+    write_log(&format!("CONTENT_SNAPSHOT: doc=\"{}\" {}", escape_text(doc_name), formatted));
 }

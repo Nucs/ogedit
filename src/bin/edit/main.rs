@@ -34,7 +34,7 @@ use ogedit::tui::*;
 use ogedit::vt::{self, Token};
 use ogedit::{apperr, arena_format, base64, path, sys, unicode};
 use localization::*;
-use state::{log_state_changes, *};
+use state::{log_periodic_content_snapshot, log_state_changes, *};
 
 #[cfg(target_pointer_width = "32")]
 const SCRATCH_ARENA_CAPACITY: usize = 128 * MEBI;
@@ -61,15 +61,22 @@ fn main() -> process::ExitCode {
 }
 
 fn run() -> apperr::Result<()> {
-    // Init `sys` first, as everything else may depend on its functionality (IO, function pointers, etc.).
-    let _sys_deinit = sys::init();
-    // Next init `arena`, so that `scratch_arena` works. `loc` depends on it.
-    arena::init(SCRATCH_ARENA_CAPACITY)?;
-    // Init the `loc` module, so that error messages are localized.
-    localization::init();
-    // Init the logging system
+    // Init logging FIRST so panics during other init are captured.
+    // This only uses std library functions, no dependencies on sys/arena/loc.
     logging::init();
     logging::log_app_start();
+
+    // Init `sys` first, as everything else may depend on its functionality (IO, function pointers, etc.).
+    let _sys_deinit = sys::init();
+    logging::log_action("INIT: sys initialized");
+
+    // Next init `arena`, so that `scratch_arena` works. `loc` depends on it.
+    arena::init(SCRATCH_ARENA_CAPACITY)?;
+    logging::log_action("INIT: arena initialized");
+
+    // Init the `loc` module, so that error messages are localized.
+    localization::init();
+    logging::log_action("INIT: localization initialized");
 
     let mut state = State::new()?;
     if handle_args(&mut state)? {
@@ -116,6 +123,9 @@ fn run() -> apperr::Result<()> {
     #[cfg(feature = "debug-latency")]
     let mut last_latency_width = 0;
 
+    // Track start time for periodic content snapshots
+    let start_time = std::time::Instant::now();
+
     loop {
         #[cfg(feature = "debug-latency")]
         let time_beg;
@@ -155,6 +165,34 @@ fn run() -> apperr::Result<()> {
                         input::Input::Resize(size) => {
                             logging::log_action(&format!("TERMINAL_RESIZE: {}x{}", size.width, size.height));
                         }
+                        input::Input::Mouse(mouse) => {
+                            use input::InputMouseState;
+                            use crate::state::ClickTarget;
+                            let button = match mouse.state {
+                                InputMouseState::Left => Some("left"),
+                                InputMouseState::Right => Some("right"),
+                                InputMouseState::Middle => Some("middle"),
+                                _ => None,
+                            };
+                            if let Some(btn) = button {
+                                // Determine click target based on position and UI state
+                                let size = tui.size();
+                                let target = if state.wants_about || state.wants_goto || state.wants_encoding_picker || state.wants_indentation_picker {
+                                    ClickTarget::Dialog
+                                } else if !matches!(state.wants_file_picker, StateFilePicker::None) {
+                                    ClickTarget::FilePicker
+                                } else if mouse.position.y == 0 {
+                                    ClickTarget::Menubar
+                                } else if mouse.position.y >= size.height - 1 {
+                                    ClickTarget::Statusbar
+                                } else {
+                                    ClickTarget::Editor
+                                };
+                                logging::log_mouse_click(mouse.position, btn, target.as_str());
+                                state.logging_tracker.last_input_was_click = true;
+                                state.logging_tracker.last_click_target = target;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -192,6 +230,10 @@ fn run() -> apperr::Result<()> {
 
         // Log state changes (cursor movement, etc.)
         log_state_changes(&mut state);
+
+        // Log periodic content snapshot (1 second after last change)
+        let elapsed_ms = start_time.elapsed().as_millis() as u64;
+        log_periodic_content_snapshot(&mut state, elapsed_ms);
 
         // Render the UI and write it to the terminal.
         {

@@ -454,6 +454,11 @@ impl TextBuffer {
         self.cursor.visual_pos
     }
 
+    /// Gets the cursor byte offset in the buffer.
+    pub fn cursor_offset(&self) -> usize {
+        self.cursor.offset
+    }
+
     /// Gets the width of the left margin.
     pub fn margin_width(&self) -> CoordType {
         self.margin_width
@@ -2068,6 +2073,175 @@ impl TextBuffer {
         }
     }
 
+    /// Duplicates the current line or selection.
+    ///
+    /// Behavior follows Rider/VS Code conventions:
+    /// - No selection: duplicate entire line below
+    /// - Full line selection (col 0 to end of line, or col 0 to col 0 of later line): duplicate lines
+    /// - Partial selection: duplicate selection inline
+    pub fn duplicate_line_or_selection(&mut self) {
+        // Determine if this is "line mode" or "inline mode"
+        // Line mode: no selection, OR selection covers full line(s)
+        // Full line = starts at column 0 AND (ends at column 0 of later line OR covers to end of line)
+        let line_mode = if let Some((beg, end)) = self.selection_range() {
+            if beg.logical_pos.x != 0 {
+                // Doesn't start at column 0 - inline mode
+                false
+            } else if end.logical_pos.x == 0 && end.logical_pos.y > beg.logical_pos.y {
+                // Starts at col 0, ends at col 0 of a later line - full line selection
+                true
+            } else if beg.logical_pos.y == end.logical_pos.y {
+                // Same line selection starting at col 0 - check if it covers the whole line
+                // Get the end of line position
+                let eol = self.cursor_move_to_logical_internal(
+                    end,
+                    Point { x: CoordType::MAX, y: end.logical_pos.y },
+                );
+                // If selection end matches end of line, it's a full line selection
+                end.logical_pos.x == eol.logical_pos.x
+            } else {
+                // Multi-line selection starting at col 0 but not ending at col 0 - line mode
+                true
+            }
+        } else {
+            // No selection - line mode
+            true
+        };
+
+        let newline: &[u8] = if self.newlines_are_crlf { b"\r\n" } else { b"\n" };
+
+        // Temporarily disable word wrap to avoid cursor state issues during edit
+        let saved_word_wrap_column = self.word_wrap_column;
+        if self.word_wrap_column > 0 {
+            self.word_wrap_column = 0;
+        }
+
+        if self.has_selection() && !line_mode {
+            // Inline mode: duplicate selection immediately after itself
+            if let Some((beg, end)) = self.selection_range() {
+                let mut text = Vec::new();
+                self.buffer.extract_raw(beg.offset..end.offset, &mut text, 0);
+
+                self.clear_selection();
+                self.cursor_move_to_logical(end.logical_pos);
+
+                let insert_start = self.cursor_logical_pos();
+                self.write_raw(&text);
+
+                let insert_end = self.cursor_logical_pos();
+                self.cursor_move_to_logical(insert_start);
+                self.start_selection();
+                self.selection_update_logical(insert_end);
+            }
+        } else if let Some((beg, end)) = self.selection_range() {
+            // Line mode with selection: duplicate all selected lines below
+            let first_line = beg.logical_pos.y;
+            let last_line = if end.logical_pos.x == 0 && end.logical_pos.y > first_line {
+                end.logical_pos.y - 1
+            } else {
+                end.logical_pos.y
+            };
+            let num_lines = last_line - first_line + 1;
+
+            self.clear_selection();
+
+            let start_cursor = self.cursor_move_to_logical_internal(self.cursor, Point { x: 0, y: first_line });
+            let start_offset = start_cursor.offset;
+            let end_cursor = self.cursor_move_to_logical_internal(start_cursor, Point { x: CoordType::MAX, y: last_line });
+            let end_offset = end_cursor.offset;
+
+            let mut text = Vec::new();
+            self.buffer.extract_raw(start_offset..end_offset, &mut text, 0);
+
+            let content = if text.ends_with(b"\r\n") {
+                &text[..text.len() - 2]
+            } else if text.ends_with(b"\n") {
+                &text[..text.len() - 1]
+            } else {
+                &text[..]
+            };
+
+            let mut to_insert = Vec::new();
+            to_insert.extend_from_slice(newline);
+            to_insert.extend_from_slice(content);
+
+            self.cursor_move_to_logical(Point { x: CoordType::MAX, y: last_line });
+            let insert_line = last_line;
+
+            self.write_raw(&to_insert);
+
+            // Re-enable word wrap before setting selection
+            if saved_word_wrap_column > 0 {
+                self.word_wrap_column = saved_word_wrap_column;
+                let saved_width = self.width;
+                self.width = 0;
+                self.set_width(saved_width);
+            }
+
+            self.cursor_move_to_logical(Point { x: 0, y: insert_line + 1 });
+            self.start_selection();
+            self.selection_update_logical(Point { x: CoordType::MAX, y: insert_line + num_lines });
+            return;
+        } else {
+            // No selection - duplicate current line
+            let current_line = self.cursor_logical_pos().y;
+
+            let start_cursor = self.cursor_move_to_logical_internal(self.cursor, Point { x: 0, y: current_line });
+            let start_offset = start_cursor.offset;
+            let end_cursor = self.cursor_move_to_logical_internal(start_cursor, Point { x: 0, y: current_line + 1 });
+            let end_offset = end_cursor.offset;
+
+            let mut text = Vec::new();
+            self.buffer.extract_raw(start_offset..end_offset, &mut text, 0);
+
+            if text.is_empty() && start_offset == end_offset {
+                // Re-enable word wrap
+                if saved_word_wrap_column > 0 {
+                    self.word_wrap_column = saved_word_wrap_column;
+                }
+                return;
+            }
+
+            let line_content = if text.ends_with(b"\r\n") {
+                &text[..text.len() - 2]
+            } else if text.ends_with(b"\n") {
+                &text[..text.len() - 1]
+            } else {
+                &text[..]
+            };
+
+            self.cursor_move_to_logical(Point { x: CoordType::MAX, y: current_line });
+
+            let mut to_insert = Vec::new();
+            to_insert.extend_from_slice(newline);
+            to_insert.extend_from_slice(line_content);
+
+            let insert_pos = self.cursor_logical_pos();
+            self.write_raw(&to_insert);
+
+            // Re-enable word wrap before setting selection
+            if saved_word_wrap_column > 0 {
+                self.word_wrap_column = saved_word_wrap_column;
+                let saved_width = self.width;
+                self.width = 0;
+                self.set_width(saved_width);
+            }
+
+            self.cursor_move_to_logical(Point { x: 0, y: insert_pos.y + 1 });
+            self.start_selection();
+            self.selection_update_logical(Point { x: CoordType::MAX, y: insert_pos.y + 1 });
+            return;
+        }
+
+        // Re-enable word wrap if we didn't return early
+        if saved_word_wrap_column > 0 {
+            self.word_wrap_column = saved_word_wrap_column;
+            let saved_width = self.width;
+            self.width = 0;
+            self.set_width(saved_width);
+        }
+    }
+
     /// Inserts the user input `text` at the current cursor position.
     /// Replaces tabs with whitespace if needed, etc.
     pub fn write_canon(&mut self, text: &[u8]) {
@@ -2843,6 +3017,14 @@ impl TextBuffer {
     /// For interfacing with ICU.
     pub fn read_forward(&self, off: usize) -> &[u8] {
         self.buffer.read_forward(off)
+    }
+
+    /// Extract bytes from the buffer in the given range.
+    /// This is useful for logging selection content without modifying the buffer.
+    pub fn extract_bytes(&self, range: std::ops::Range<usize>) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.buffer.extract_raw(range, &mut out, 0);
+        out
     }
 }
 
