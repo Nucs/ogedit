@@ -3,11 +3,11 @@
 
 use std::num::ParseIntError;
 
-use edit::framebuffer::IndexedColor;
-use edit::helpers::*;
-use edit::icu;
-use edit::input::{kbmod, vk};
-use edit::tui::*;
+use ogedit::framebuffer::IndexedColor;
+use ogedit::helpers::*;
+use ogedit::icu;
+use ogedit::input::{kbmod, vk};
+use ogedit::tui::*;
 
 use crate::localization::*;
 use crate::state::*;

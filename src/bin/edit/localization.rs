@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use edit::arena::scratch_arena;
-use edit::helpers::AsciiStringHelpers;
-use edit::sys;
+use ogedit::arena::scratch_arena;
+use ogedit::helpers::AsciiStringHelpers;
+use ogedit::sys;
 
 include!(concat!(env!("OUT_DIR"), "/i18n_edit.rs"));
 

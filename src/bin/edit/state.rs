@@ -6,11 +6,11 @@ use std::ffi::{OsStr, OsString};
 use std::mem;
 use std::path::{Path, PathBuf};
 
-use edit::framebuffer::IndexedColor;
-use edit::helpers::*;
-use edit::oklab::StraightRgba;
-use edit::tui::*;
-use edit::{apperr, buffer, icu, sys};
+use ogedit::framebuffer::IndexedColor;
+use ogedit::helpers::*;
+use ogedit::oklab::StraightRgba;
+use ogedit::tui::*;
+use ogedit::{apperr, buffer, icu, sys};
 
 use crate::documents::DocumentManager;
 use crate::localization::*;

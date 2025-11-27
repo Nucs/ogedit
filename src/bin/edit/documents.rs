@@ -6,9 +6,9 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use edit::buffer::{RcTextBuffer, TextBuffer};
-use edit::helpers::{CoordType, Point};
-use edit::{apperr, path, sys};
+use ogedit::buffer::{RcTextBuffer, TextBuffer};
+use ogedit::helpers::{CoordType, Point};
+use ogedit::{apperr, path, sys};
 
 use crate::state::DisplayablePathBuf;
 

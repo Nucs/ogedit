@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use edit::arena::scratch_arena;
-use edit::framebuffer::{Attributes, IndexedColor};
-use edit::fuzzy::score_fuzzy;
-use edit::helpers::*;
-use edit::input::vk;
-use edit::tui::*;
-use edit::{arena_format, icu};
+use ogedit::arena::scratch_arena;
+use ogedit::framebuffer::{Attributes, IndexedColor};
+use ogedit::fuzzy::score_fuzzy;
+use ogedit::helpers::*;
+use ogedit::input::vk;
+use ogedit::tui::*;
+use ogedit::{arena_format, icu};
 
 use crate::localization::*;
 use crate::state::*;

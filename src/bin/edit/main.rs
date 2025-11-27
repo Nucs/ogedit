@@ -22,14 +22,14 @@ use draw_editor::*;
 use draw_filepicker::*;
 use draw_menubar::*;
 use draw_statusbar::*;
-use edit::arena::{self, Arena, ArenaString, scratch_arena};
-use edit::framebuffer::{self, IndexedColor};
-use edit::helpers::{CoordType, KIBI, MEBI, MetricFormatter, Rect, Size};
-use edit::input::{self, kbmod, vk};
-use edit::oklab::StraightRgba;
-use edit::tui::*;
-use edit::vt::{self, Token};
-use edit::{apperr, arena_format, base64, path, sys, unicode};
+use ogedit::arena::{self, Arena, ArenaString, scratch_arena};
+use ogedit::framebuffer::{self, IndexedColor};
+use ogedit::helpers::{CoordType, KIBI, MEBI, MetricFormatter, Rect, Size};
+use ogedit::input::{self, kbmod, vk};
+use ogedit::oklab::StraightRgba;
+use ogedit::tui::*;
+use ogedit::vt::{self, Token};
+use ogedit::{apperr, arena_format, base64, path, sys, unicode};
 use localization::*;
 use state::*;
 
@@ -286,7 +286,7 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
 
 fn print_help() {
     sys::write_stdout(concat!(
-        "Usage: edit [OPTIONS] [FILE[:LINE[:COLUMN]]]\n",
+        "Usage: ogedit [OPTIONS] [FILE[:LINE[:COLUMN]]]\n",
         "Options:\n",
         "    -h, --help       Print this help message\n",
         "    -v, --version    Print the version number\n",
@@ -297,7 +297,7 @@ fn print_help() {
 }
 
 fn print_version() {
-    sys::write_stdout(concat!("edit version ", env!("CARGO_PKG_VERSION"), "\n"));
+    sys::write_stdout(concat!("ogedit version ", env!("CARGO_PKG_VERSION"), "\n"));
 }
 
 fn draw(ctx: &mut Context, state: &mut State) {

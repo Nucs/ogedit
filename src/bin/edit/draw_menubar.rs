@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use edit::arena_format;
-use edit::helpers::*;
-use edit::input::{kbmod, vk};
-use edit::tui::*;
+use ogedit::arena_format;
+use ogedit::helpers::*;
+use ogedit::input::{kbmod, vk};
+use ogedit::tui::*;
 
 use crate::localization::*;
 use crate::state::*;

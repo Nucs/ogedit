@@ -5,12 +5,12 @@ use std::cmp::Ordering;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use edit::arena::scratch_arena;
-use edit::framebuffer::IndexedColor;
-use edit::helpers::*;
-use edit::input::{kbmod, vk};
-use edit::tui::*;
-use edit::{icu, path};
+use ogedit::arena::scratch_arena;
+use ogedit::framebuffer::IndexedColor;
+use ogedit::helpers::*;
+use ogedit::input::{kbmod, vk};
+use ogedit::tui::*;
+use ogedit::{icu, path};
 
 use crate::localization::*;
 use crate::state::*;
@@ -310,7 +310,7 @@ fn draw_dialog_saveas_refresh_files(state: &mut State) {
     if dir.as_os_str().is_empty() {
         // If the path is empty, we are at the drive picker.
         // Add all drives as entries.
-        for drive in edit::sys::drives() {
+        for drive in ogedit::sys::drives() {
             dirs_files[1].push(DisplayablePathBuf::from_string(format!("{drive}:\\")));
         }
 

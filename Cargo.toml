@@ -1,5 +1,5 @@
 [package]
-name = "edit"
+name = "ogedit"
 version = "1.2.1"
 edition = "2024"
 rust-version = "1.87"
@@ -9,6 +9,10 @@ homepage = "https://github.com/microsoft/edit"
 license = "MIT"
 categories = ["text-editors"]
 build = "build/main.rs"
+
+[[bin]]
+name = "ogedit"
+path = "src/bin/edit/main.rs"
 
 [[bench]]
 name = "lib"
