@@ -356,6 +356,8 @@ fn draw(ctx: &mut Context, state: &mut State) {
             state.wants_exit = true;
         } else if key == kbmod::CTRL | vk::G {
             state.wants_goto = true;
+        } else if key == kbmod::CTRL | vk::D {
+            draw_duplicate_line(state);
         } else if key == kbmod::CTRL | vk::F && state.wants_search.kind != StateSearchKind::Disabled
         {
             state.wants_search.kind = StateSearchKind::Search;
