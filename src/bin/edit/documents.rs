@@ -10,6 +10,7 @@ use ogedit::buffer::{RcTextBuffer, TextBuffer};
 use ogedit::helpers::{CoordType, Point};
 use ogedit::{apperr, path, sys};
 
+use crate::config::Config;
 use crate::state::DisplayablePathBuf;
 
 pub struct Document {
@@ -112,8 +113,8 @@ impl DocumentManager {
         self.list.pop_front();
     }
 
-    pub fn add_untitled(&mut self) -> apperr::Result<&mut Document> {
-        let buffer = Self::create_buffer()?;
+    pub fn add_untitled(&mut self, config: &Config) -> apperr::Result<&mut Document> {
+        let buffer = Self::create_buffer(config)?;
         let mut doc = Document {
             buffer,
             path: None,
@@ -139,7 +140,7 @@ impl DocumentManager {
         doc.new_file_counter = new_file_counter;
     }
 
-    pub fn add_file_path(&mut self, path: &Path) -> apperr::Result<&mut Document> {
+    pub fn add_file_path(&mut self, path: &Path, config: &Config) -> apperr::Result<&mut Document> {
         let (path, goto) = Self::parse_filename_goto(path);
         let path = path::normalize(path);
 
@@ -160,7 +161,7 @@ impl DocumentManager {
             return Ok(doc);
         }
 
-        let buffer = Self::create_buffer()?;
+        let buffer = Self::create_buffer(config)?;
         {
             if let Some(file) = &mut file {
                 let mut tb = buffer.borrow_mut();
@@ -213,13 +214,14 @@ impl DocumentManager {
         File::create(path).map_err(apperr::Error::from)
     }
 
-    fn create_buffer() -> apperr::Result<RcTextBuffer> {
+    fn create_buffer(config: &Config) -> apperr::Result<RcTextBuffer> {
         let buffer = TextBuffer::new_rc(false)?;
         {
             let mut tb = buffer.borrow_mut();
             tb.set_insert_final_newline(!cfg!(windows)); // As mandated by POSIX.
             tb.set_margin_enabled(true);
             tb.set_line_highlight_enabled(true);
+            tb.set_word_wrap(config.word_wrap);
         }
         Ok(buffer)
     }

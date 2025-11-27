@@ -62,29 +62,32 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
-    let doc = state.documents.active().unwrap();
-    let mut tb = doc.buffer.borrow_mut();
+    {
+        let doc = state.documents.active().unwrap();
+        let mut tb = doc.buffer.borrow_mut();
 
-    if ctx.menubar_menu_button(loc(LocId::EditUndo), 'U', kbmod::CTRL | vk::Z) {
-        tb.undo();
-        ctx.needs_rerender();
+        if ctx.menubar_menu_button(loc(LocId::EditUndo), 'U', kbmod::CTRL | vk::Z) {
+            tb.undo();
+            ctx.needs_rerender();
+        }
+        if ctx.menubar_menu_button(loc(LocId::EditRedo), 'R', kbmod::CTRL | vk::Y) {
+            tb.redo();
+            ctx.needs_rerender();
+        }
+        if ctx.menubar_menu_button(loc(LocId::EditCut), 'T', kbmod::CTRL | vk::X) {
+            tb.cut(ctx.clipboard_mut());
+            ctx.needs_rerender();
+        }
+        if ctx.menubar_menu_button(loc(LocId::EditCopy), 'C', kbmod::CTRL | vk::C) {
+            tb.copy(ctx.clipboard_mut());
+            ctx.needs_rerender();
+        }
+        if ctx.menubar_menu_button(loc(LocId::EditPaste), 'P', kbmod::CTRL | vk::V) {
+            tb.paste(ctx.clipboard_ref());
+            ctx.needs_rerender();
+        }
     }
-    if ctx.menubar_menu_button(loc(LocId::EditRedo), 'R', kbmod::CTRL | vk::Y) {
-        tb.redo();
-        ctx.needs_rerender();
-    }
-    if ctx.menubar_menu_button(loc(LocId::EditCut), 'T', kbmod::CTRL | vk::X) {
-        tb.cut(ctx.clipboard_mut());
-        ctx.needs_rerender();
-    }
-    if ctx.menubar_menu_button(loc(LocId::EditCopy), 'C', kbmod::CTRL | vk::C) {
-        tb.copy(ctx.clipboard_mut());
-        ctx.needs_rerender();
-    }
-    if ctx.menubar_menu_button(loc(LocId::EditPaste), 'P', kbmod::CTRL | vk::V) {
-        tb.paste(ctx.clipboard_ref());
-        ctx.needs_rerender();
-    }
+
     if state.wants_search.kind != StateSearchKind::Disabled {
         if ctx.menubar_menu_button(loc(LocId::EditFind), 'F', kbmod::CTRL | vk::F) {
             state.wants_search.kind = StateSearchKind::Search;
@@ -95,10 +98,16 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
             state.wants_search.focus = true;
         }
     }
-    if ctx.menubar_menu_button(loc(LocId::EditSelectAll), 'A', kbmod::CTRL | vk::A) {
-        tb.select_all();
-        ctx.needs_rerender();
+
+    {
+        let doc = state.documents.active().unwrap();
+        let mut tb = doc.buffer.borrow_mut();
+        if ctx.menubar_menu_button(loc(LocId::EditSelectAll), 'A', kbmod::CTRL | vk::A) {
+            tb.select_all();
+            ctx.needs_rerender();
+        }
     }
+
     ctx.menubar_menu_end();
 }
 
@@ -119,6 +128,9 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
         }
         if ctx.menubar_menu_checkbox(loc(LocId::ViewWordWrap), 'W', kbmod::ALT | vk::Z, word_wrap) {
             tb.set_word_wrap(!word_wrap);
+            state.config.word_wrap = !word_wrap;
+            // Save config to disk
+            let _ = state.config.save();
             ctx.needs_rerender();
         }
     }

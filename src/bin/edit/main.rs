@@ -3,6 +3,7 @@
 
 #![feature(allocator_api, linked_list_cursors, string_from_utf8_lossy_owned)]
 
+mod config;
 mod documents;
 mod draw_editor;
 mod draw_filepicker;
@@ -261,17 +262,17 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
     }
 
     for p in &paths {
-        state.documents.add_file_path(p)?;
+        state.documents.add_file_path(p, &state.config)?;
     }
 
     if let Some(mut file) = sys::open_stdin_if_redirected() {
-        let doc = state.documents.add_untitled()?;
+        let doc = state.documents.add_untitled(&state.config)?;
         let mut tb = doc.buffer.borrow_mut();
         tb.read_file(&mut file, None)?;
         tb.mark_as_dirty();
     } else if paths.is_empty() {
         // No files were passed, and stdin is not redirected.
-        state.documents.add_untitled()?;
+        state.documents.add_untitled(&state.config)?;
     }
 
     if dir.is_none()

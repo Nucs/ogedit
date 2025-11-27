@@ -12,6 +12,7 @@ use ogedit::oklab::StraightRgba;
 use ogedit::tui::*;
 use ogedit::{apperr, buffer, icu, sys};
 
+use crate::config::Config;
 use crate::documents::DocumentManager;
 use crate::localization::*;
 
@@ -131,6 +132,7 @@ pub struct State {
     pub menubar_color_bg: StraightRgba,
     pub menubar_color_fg: StraightRgba,
 
+    pub config: Config,
     pub documents: DocumentManager,
 
     // A ring buffer of the last 10 errors.
@@ -180,6 +182,7 @@ impl State {
             menubar_color_bg: StraightRgba::zero(),
             menubar_color_fg: StraightRgba::zero(),
 
+            config: Config::load(),
             documents: Default::default(),
 
             error_log: [const { String::new() }; 10],
@@ -225,7 +228,7 @@ impl State {
 }
 
 pub fn draw_add_untitled_document(ctx: &mut Context, state: &mut State) {
-    if let Err(err) = state.documents.add_untitled() {
+    if let Err(err) = state.documents.add_untitled(&state.config) {
         error_log_add(ctx, state, err);
     }
 }
