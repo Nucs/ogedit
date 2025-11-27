@@ -10,6 +10,7 @@ use ogedit::tui::*;
 use ogedit::{arena_format, icu};
 
 use crate::localization::*;
+use crate::logging;
 use crate::state::*;
 
 pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
@@ -28,6 +29,9 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
 
         if ctx.button("newline", if tb.is_crlf() { "CRLF" } else { "LF" }, ButtonStyle::default()) {
             let is_crlf = tb.is_crlf();
+            let from = if is_crlf { "CRLF" } else { "LF" };
+            let to = if is_crlf { "LF" } else { "CRLF" };
+            logging::log_action(&format!("NEWLINE_CHANGE: {} -> {}", from, to));
             tb.normalize_newlines(!is_crlf);
         }
         if state.wants_statusbar_focus {
@@ -51,10 +55,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                 ctx.attr_border();
                 {
                     if ctx.button("reopen", loc(LocId::EncodingReopen), ButtonStyle::default()) {
+                        logging::log_action("ENCODING_METHOD: Reopen");
                         state.wants_encoding_change = StateEncodingChange::Reopen;
                     }
                     ctx.focus_on_first_present();
                     if ctx.button("convert", loc(LocId::EncodingConvert), ButtonStyle::default()) {
+                        logging::log_action("ENCODING_METHOD: Convert");
                         state.wants_encoding_change = StateEncodingChange::Convert;
                     }
                 }
@@ -110,12 +116,18 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                     if ctx.list_item(tb.indent_with_tabs(), loc(LocId::IndentationTabs))
                         != ListSelection::Unchanged
                     {
+                        if !tb.indent_with_tabs() {
+                            logging::log_action("INDENTATION_TYPE: Spaces -> Tabs");
+                        }
                         tb.set_indent_with_tabs(true);
                         ctx.needs_rerender();
                     }
                     if ctx.list_item(!tb.indent_with_tabs(), loc(LocId::IndentationSpaces))
                         != ListSelection::Unchanged
                     {
+                        if tb.indent_with_tabs() {
+                            logging::log_action("INDENTATION_TYPE: Tabs -> Spaces");
+                        }
                         tb.set_indent_with_tabs(false);
                         ctx.needs_rerender();
                     }
@@ -132,6 +144,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                         if ctx.list_item(tb.tab_size() == width as CoordType, label)
                             != ListSelection::Unchanged
                         {
+                            let old_width = tb.tab_size();
+                            if old_width != width as CoordType {
+                                logging::log_action(&format!("TAB_WIDTH: {} -> {}", old_width, width));
+                            }
                             tb.set_tab_size(width as CoordType);
                             ctx.needs_rerender();
                         }
@@ -164,6 +180,7 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
         );
 
         if tb.is_overtype() && ctx.button("overtype", "OVR", ButtonStyle::default()) {
+            logging::log_action("OVERTYPE_MODE: disabled");
             tb.set_overtype(false);
             ctx.needs_rerender();
         }
@@ -184,7 +201,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                 filename = &filename_buf;
             }
 
-            state.wants_go_to_file |= ctx.button("filename", filename, ButtonStyle::default());
+            if ctx.button("filename", filename, ButtonStyle::default()) {
+                logging::log_action("BUTTON_CLICK: Go to file (filename)");
+                state.wants_go_to_file = true;
+            }
             ctx.inherit_focus();
             ctx.attr_overflow(Overflow::TruncateMiddle);
             ctx.attr_position(Position::Right);
@@ -250,12 +270,18 @@ pub fn draw_dialog_encoding_change(ctx: &mut Context, state: &mut State) {
         }
         ctx.scrollarea_end();
     }
-    done |= ctx.modal_end();
+    if ctx.modal_end() {
+        logging::log_dialog_close("Encoding", "Escape");
+        done = true;
+    }
     done |= change.is_some();
 
     if let Some(encoding) = change
         && let Some(doc) = state.documents.active_mut()
     {
+        let old_encoding = doc.buffer.borrow().encoding();
+        logging::log_encoding_change(old_encoding, encoding);
+
         if reopen && doc.path.is_some() {
             let mut res = Ok(());
             if doc.buffer.borrow().is_dirty() {
@@ -265,6 +291,7 @@ pub fn draw_dialog_encoding_change(ctx: &mut Context, state: &mut State) {
                 res = doc.reread(Some(encoding));
             }
             if let Err(err) = res {
+                logging::log_error(&format!("Encoding reopen failed: {}", encoding));
                 error_log_add(ctx, state, err);
             }
         } else {
@@ -332,7 +359,11 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
                     ctx.styled_label_add_text(path.as_str());
                 }
 
-                ctx.styled_list_item_end(false) == ListSelection::Activated
+                let activated = ctx.styled_list_item_end(false) == ListSelection::Activated;
+                if activated {
+                    logging::log_action(&format!("SWITCH_DOCUMENT: {}", doc.filename));
+                }
+                activated
             }) {
                 state.wants_go_to_file = false;
                 ctx.needs_rerender();
@@ -343,6 +374,7 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
         ctx.scrollarea_end();
     }
     if ctx.modal_end() {
+        logging::log_dialog_close("Go to File", "Escape");
         state.wants_go_to_file = false;
     }
 }

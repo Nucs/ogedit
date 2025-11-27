@@ -8,6 +8,7 @@ use ogedit::tui::*;
 
 use crate::draw_editor::draw_duplicate_line;
 use crate::localization::*;
+use crate::logging;
 use crate::state::*;
 
 pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
@@ -40,23 +41,29 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
 
 fn draw_menu_file(ctx: &mut Context, state: &mut State) {
     if ctx.menubar_menu_button(loc(LocId::FileNew), 'N', kbmod::CTRL | vk::N) {
+        logging::log_menu_click("File->New");
         draw_add_untitled_document(ctx, state);
     }
     if ctx.menubar_menu_button(loc(LocId::FileOpen), 'O', kbmod::CTRL | vk::O) {
+        logging::log_menu_click("File->Open");
         state.wants_file_picker = StateFilePicker::Open;
     }
     if state.documents.active().is_some() {
         if ctx.menubar_menu_button(loc(LocId::FileSave), 'S', kbmod::CTRL | vk::S) {
+            logging::log_menu_click("File->Save");
             state.wants_save = true;
         }
         if ctx.menubar_menu_button(loc(LocId::FileSaveAs), 'A', vk::NULL) {
+            logging::log_menu_click("File->Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
         }
         if ctx.menubar_menu_button(loc(LocId::FileClose), 'C', kbmod::CTRL | vk::W) {
+            logging::log_menu_click("File->Close");
             state.wants_close = true;
         }
     }
     if ctx.menubar_menu_button(loc(LocId::FileExit), 'X', kbmod::CTRL | vk::Q) {
+        logging::log_menu_click("File->Exit");
         state.wants_exit = true;
     }
     ctx.menubar_menu_end();
@@ -68,38 +75,49 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
         let mut tb = doc.buffer.borrow_mut();
 
         if ctx.menubar_menu_button(loc(LocId::EditUndo), 'U', kbmod::CTRL | vk::Z) {
+            logging::log_menu_click("Edit->Undo");
+            logging::log_undo();
             tb.undo();
             ctx.needs_rerender();
         }
         if ctx.menubar_menu_button(loc(LocId::EditRedo), 'R', kbmod::CTRL | vk::Y) {
+            logging::log_menu_click("Edit->Redo");
+            logging::log_redo();
             tb.redo();
             ctx.needs_rerender();
         }
         if ctx.menubar_menu_button(loc(LocId::EditCut), 'T', kbmod::CTRL | vk::X) {
+            logging::log_menu_click("Edit->Cut");
             tb.cut(ctx.clipboard_mut());
             ctx.needs_rerender();
         }
         if ctx.menubar_menu_button(loc(LocId::EditCopy), 'C', kbmod::CTRL | vk::C) {
+            logging::log_menu_click("Edit->Copy");
             tb.copy(ctx.clipboard_mut());
             ctx.needs_rerender();
         }
         if ctx.menubar_menu_button(loc(LocId::EditPaste), 'P', kbmod::CTRL | vk::V) {
+            logging::log_menu_click("Edit->Paste");
             tb.paste(ctx.clipboard_ref());
             ctx.needs_rerender();
         }
     }
 
     if ctx.menubar_menu_button(loc(LocId::EditDuplicate), 'D', kbmod::CTRL | vk::D) {
+        logging::log_menu_click("Edit->Duplicate");
+        logging::log_duplicate_line();
         draw_duplicate_line(state);
         ctx.needs_rerender();
     }
 
     if state.wants_search.kind != StateSearchKind::Disabled {
         if ctx.menubar_menu_button(loc(LocId::EditFind), 'F', kbmod::CTRL | vk::F) {
+            logging::log_menu_click("Edit->Find");
             state.wants_search.kind = StateSearchKind::Search;
             state.wants_search.focus = true;
         }
         if ctx.menubar_menu_button(loc(LocId::EditReplace), 'L', kbmod::CTRL | vk::R) {
+            logging::log_menu_click("Edit->Replace");
             state.wants_search.kind = StateSearchKind::Replace;
             state.wants_search.focus = true;
         }
@@ -109,6 +127,8 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
         let doc = state.documents.active().unwrap();
         let mut tb = doc.buffer.borrow_mut();
         if ctx.menubar_menu_button(loc(LocId::EditSelectAll), 'A', kbmod::CTRL | vk::A) {
+            logging::log_menu_click("Edit->Select All");
+            logging::log_select_all();
             tb.select_all();
             ctx.needs_rerender();
         }
@@ -124,17 +144,23 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
 
         // All values on the statusbar are currently document specific.
         if ctx.menubar_menu_button(loc(LocId::ViewFocusStatusbar), 'S', vk::NULL) {
+            logging::log_menu_click("View->Focus Statusbar");
             state.wants_statusbar_focus = true;
         }
         if ctx.menubar_menu_button(loc(LocId::ViewGoToFile), 'F', kbmod::CTRL | vk::P) {
+            logging::log_menu_click("View->Go To File");
             state.wants_go_to_file = true;
         }
         if ctx.menubar_menu_button(loc(LocId::FileGoto), 'G', kbmod::CTRL | vk::G) {
+            logging::log_menu_click("View->Go To Line");
             state.wants_goto = true;
         }
         if ctx.menubar_menu_checkbox(loc(LocId::ViewWordWrap), 'W', kbmod::ALT | vk::Z, word_wrap) {
-            tb.set_word_wrap(!word_wrap);
-            state.config.word_wrap = !word_wrap;
+            let new_state = !word_wrap;
+            logging::log_menu_checkbox("View->Word Wrap", new_state);
+            logging::log_word_wrap_toggle(new_state);
+            tb.set_word_wrap(new_state);
+            state.config.word_wrap = new_state;
             // Save config to disk
             let _ = state.config.save();
             ctx.needs_rerender();
@@ -146,6 +172,7 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
 
 fn draw_menu_help(ctx: &mut Context, state: &mut State) {
     if ctx.menubar_menu_button(loc(LocId::HelpAbout), 'A', vk::NULL) {
+        logging::log_menu_click("Help->About");
         state.wants_about = true;
     }
     ctx.menubar_menu_end();
@@ -192,6 +219,7 @@ pub fn draw_dialog_about(ctx: &mut Context, state: &mut State) {
             ctx.attr_position(Position::Center);
             {
                 if ctx.button("ok", loc(LocId::Ok), ButtonStyle::default()) {
+                    logging::log_dialog_close("About", "Ok");
                     state.wants_about = false;
                 }
                 ctx.inherit_focus();
@@ -201,6 +229,7 @@ pub fn draw_dialog_about(ctx: &mut Context, state: &mut State) {
         ctx.block_end();
     }
     if ctx.modal_end() {
+        logging::log_dialog_close("About", "Escape");
         state.wants_about = false;
     }
 }

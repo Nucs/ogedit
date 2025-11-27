@@ -13,6 +13,7 @@ use ogedit::tui::*;
 use ogedit::{icu, path};
 
 use crate::localization::*;
+use crate::logging;
 use crate::state::*;
 
 pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
@@ -94,9 +95,11 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                     for (idx, suggestion) in state.file_picker_autocomplete.iter().enumerate() {
                         let sel = ctx.list_item(false, suggestion.as_str());
                         if sel != ListSelection::Unchanged {
+                            logging::log_action(&format!("AUTOCOMPLETE_SELECT: {}", suggestion.as_str()));
                             state.file_picker_pending_name = suggestion.as_path().into();
                         }
                         if sel == ListSelection::Activated {
+                            logging::log_action(&format!("AUTOCOMPLETE_ACTIVATE: {}", suggestion.as_str()));
                             autocomplete_done = true;
                         }
 
@@ -157,9 +160,13 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                     match ctx.list_item(false, entry.as_str()) {
                         ListSelection::Unchanged => {}
                         ListSelection::Selected => {
+                            logging::log_action(&format!("FILE_LIST_SELECT: {}", entry.as_str()));
                             state.file_picker_pending_name = entry.as_path().into()
                         }
-                        ListSelection::Activated => activated = true,
+                        ListSelection::Activated => {
+                            logging::log_action(&format!("FILE_LIST_ACTIVATE: {}", entry.as_str()));
+                            activated = true;
+                        }
                     }
                     ctx.attr_overflow(Overflow::TruncateMiddle);
                 }
@@ -172,6 +179,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         if contains_focus
             && (ctx.consume_shortcut(vk::BACK) || ctx.consume_shortcut(kbmod::ALT | vk::UP))
         {
+            logging::log_action("NAVIGATE_BACK: ..");
             state.file_picker_pending_name = "..".into();
             activated = true;
         }
@@ -189,6 +197,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         }
     }
     if ctx.modal_end() {
+        logging::log_dialog_close("File Picker", "Escape");
         done = true;
     }
 
@@ -226,21 +235,26 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
             if contains_focus {
                 save |= ctx.consume_shortcut(vk::Y);
                 if ctx.consume_shortcut(vk::N) {
+                    logging::log_dialog_close("Overwrite Warning", "No");
                     state.file_picker_overwrite_warning = None;
                 }
             }
         }
         if ctx.modal_end() {
+            logging::log_dialog_close("Overwrite Warning", "Cancel");
             state.file_picker_overwrite_warning = None;
         }
 
         if save {
+            logging::log_dialog_close("Overwrite Warning", "Yes (overwrite)");
             doit = state.file_picker_overwrite_warning.take();
         }
     }
 
     if let Some(path) = doit {
-        let res = if state.wants_file_picker == StateFilePicker::Open {
+        let path_str = path.to_string_lossy().to_string();
+        let is_open = state.wants_file_picker == StateFilePicker::Open;
+        let res = if is_open {
             state.documents.add_file_path(&path, &state.config).map(|_| ())
         } else if let Some(doc) = state.documents.active_mut() {
             doc.save(Some(path))
@@ -249,10 +263,18 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         };
         match res {
             Ok(..) => {
+                if is_open {
+                    logging::log_file_open(&path_str);
+                } else {
+                    logging::log_file_save(&path_str);
+                }
                 ctx.needs_rerender();
                 done = true;
             }
-            Err(err) => error_log_add(ctx, state, err),
+            Err(err) => {
+                logging::log_error(&format!("Failed to {}: {}", if is_open { "open" } else { "save" }, path_str));
+                error_log_add(ctx, state, err);
+            }
         }
     }
 

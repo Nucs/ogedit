@@ -10,6 +10,7 @@ use ogedit::input::{kbmod, vk};
 use ogedit::tui::*;
 
 use crate::localization::*;
+use crate::logging;
 use crate::state::*;
 
 pub fn draw_editor(ctx: &mut Context, state: &mut State) {
@@ -69,6 +70,7 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
     ctx.attr_foreground_rgba(ctx.indexed(IndexedColor::Black));
     {
         if ctx.contains_focus() && ctx.consume_shortcut(vk::ESCAPE) {
+            logging::log_dialog_close("Find/Replace", "Escape");
             state.wants_search.kind = StateSearchKind::Hidden;
         }
 
@@ -123,28 +125,45 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
 
             ctx.table_next_row();
 
+            let old_match_case = state.search_options.match_case;
             change |= ctx.checkbox(
                 "match-case",
                 loc(LocId::SearchMatchCase),
                 &mut state.search_options.match_case,
             );
+            if old_match_case != state.search_options.match_case {
+                logging::log_action(&format!("SEARCH_OPTION: match_case={}", state.search_options.match_case));
+            }
+
+            let old_whole_word = state.search_options.whole_word;
             change |= ctx.checkbox(
                 "whole-word",
                 loc(LocId::SearchWholeWord),
                 &mut state.search_options.whole_word,
             );
+            if old_whole_word != state.search_options.whole_word {
+                logging::log_action(&format!("SEARCH_OPTION: whole_word={}", state.search_options.whole_word));
+            }
+
+            let old_use_regex = state.search_options.use_regex;
             change |= ctx.checkbox(
                 "use-regex",
                 loc(LocId::SearchUseRegex),
                 &mut state.search_options.use_regex,
             );
+            if old_use_regex != state.search_options.use_regex {
+                logging::log_action(&format!("SEARCH_OPTION: use_regex={}", state.search_options.use_regex));
+            }
+
             if state.wants_search.kind == StateSearchKind::Replace
                 && ctx.button("replace-all", loc(LocId::SearchReplaceAll), ButtonStyle::default())
             {
+                logging::log_action("BUTTON_CLICK: Replace All");
                 change = true;
                 change_action = Some(SearchAction::ReplaceAll);
             }
             if ctx.button("close", loc(LocId::SearchClose), ButtonStyle::default()) {
+                logging::log_dialog_close("Find/Replace", "Close");
                 state.wants_search.kind = StateSearchKind::Hidden;
             }
 
@@ -176,18 +195,31 @@ pub fn search_execute(ctx: &mut Context, state: &mut State, action: SearchAction
 
     state.search_success = match action {
         SearchAction::Search => {
-            doc.buffer.borrow_mut().find_and_select(&state.search_needle, state.search_options)
+            let result = doc.buffer.borrow_mut().find_and_select(&state.search_needle, state.search_options);
+            logging::log_search(&state.search_needle, result.is_ok());
+            result
         }
-        SearchAction::Replace => doc.buffer.borrow_mut().find_and_replace(
-            &state.search_needle,
-            state.search_options,
-            state.search_replacement.as_bytes(),
-        ),
-        SearchAction::ReplaceAll => doc.buffer.borrow_mut().find_and_replace_all(
-            &state.search_needle,
-            state.search_options,
-            state.search_replacement.as_bytes(),
-        ),
+        SearchAction::Replace => {
+            let result = doc.buffer.borrow_mut().find_and_replace(
+                &state.search_needle,
+                state.search_options,
+                state.search_replacement.as_bytes(),
+            );
+            if result.is_ok() {
+                logging::log_replace(&state.search_needle, &state.search_replacement, 1);
+            }
+            result
+        }
+        SearchAction::ReplaceAll => {
+            let result = doc.buffer.borrow_mut().find_and_replace_all(
+                &state.search_needle,
+                state.search_options,
+                state.search_replacement.as_bytes(),
+            );
+            // Note: We don't have the count here, but we log that replace all was executed
+            logging::log_action(&format!("Replace all '{}' with '{}'", state.search_needle, state.search_replacement));
+            result
+        }
     }
     .is_ok();
 
@@ -197,8 +229,12 @@ pub fn search_execute(ctx: &mut Context, state: &mut State, action: SearchAction
 pub fn draw_handle_save(ctx: &mut Context, state: &mut State) {
     if let Some(doc) = state.documents.active_mut() {
         if doc.path.is_some() {
+            let path_str = doc.path.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
             if let Err(err) = doc.save(None) {
+                logging::log_error(&format!("Failed to save: {}", path_str));
                 error_log_add(ctx, state, err);
+            } else {
+                logging::log_file_save(&path_str);
             }
         } else {
             // No path? Show the file picker.
@@ -218,6 +254,7 @@ pub fn draw_handle_wants_close(ctx: &mut Context, state: &mut State) {
     };
 
     if !doc.buffer.borrow().is_dirty() {
+        logging::log_file_close(&doc.filename, false);
         state.documents.remove_active();
         state.wants_close = false;
         ctx.needs_rerender();
@@ -287,13 +324,19 @@ pub fn draw_handle_wants_close(ctx: &mut Context, state: &mut State) {
     match action {
         Action::None => return,
         Action::Save => {
+            logging::log_dialog_close("Unsaved Changes", "Save");
             state.wants_save = true;
         }
         Action::Discard => {
+            logging::log_dialog_close("Unsaved Changes", "Discard");
+            if let Some(doc) = state.documents.active() {
+                logging::log_file_close(&doc.filename, true);
+            }
             state.documents.remove_active();
             state.wants_close = false;
         }
         Action::Cancel => {
+            logging::log_dialog_close("Unsaved Changes", "Cancel");
             state.wants_exit = false;
             state.wants_close = false;
         }
@@ -322,17 +365,24 @@ pub fn draw_goto_menu(ctx: &mut Context, state: &mut State) {
             if ctx.consume_shortcut(vk::RETURN) {
                 match validate_goto_point(&state.goto_target) {
                     Ok(point) => {
+                        logging::log_goto(point);
                         let mut buf = doc.buffer.borrow_mut();
                         buf.cursor_move_to_logical(point);
                         buf.make_cursor_visible();
                         done = true;
                     }
-                    Err(_) => state.goto_invalid = true,
+                    Err(_) => {
+                        logging::log_error(&format!("Invalid goto target: {}", state.goto_target));
+                        state.goto_invalid = true;
+                    }
                 }
                 ctx.needs_rerender();
             }
         }
-        done |= ctx.modal_end();
+        if ctx.modal_end() {
+            logging::log_dialog_close("Go to Line", "Escape");
+            done = true;
+        }
     } else {
         done = true;
     }

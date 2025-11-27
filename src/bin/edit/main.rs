@@ -10,6 +10,8 @@ mod draw_filepicker;
 mod draw_menubar;
 mod draw_statusbar;
 mod localization;
+#[allow(dead_code)]
+mod logging;
 mod state;
 
 use std::borrow::Cow;
@@ -32,7 +34,7 @@ use ogedit::tui::*;
 use ogedit::vt::{self, Token};
 use ogedit::{apperr, arena_format, base64, path, sys, unicode};
 use localization::*;
-use state::*;
+use state::{log_state_changes, *};
 
 #[cfg(target_pointer_width = "32")]
 const SCRATCH_ARENA_CAPACITY: usize = 128 * MEBI;
@@ -65,6 +67,9 @@ fn run() -> apperr::Result<()> {
     arena::init(SCRATCH_ARENA_CAPACITY)?;
     // Init the `loc` module, so that error messages are localized.
     localization::init();
+    // Init the logging system
+    logging::init();
+    logging::log_app_start();
 
     let mut state = State::new()?;
     if handle_args(&mut state)? {
@@ -135,6 +140,20 @@ fn run() -> apperr::Result<()> {
             while {
                 let input = input_iter.next();
                 let more = input.is_some();
+
+                // Log text input and paste events
+                if let Some(ref inp) = input {
+                    match inp {
+                        input::Input::Text(text) => {
+                            logging::log_text_input(text);
+                        }
+                        input::Input::Paste(data) => {
+                            logging::log_paste(data);
+                        }
+                        _ => {}
+                    }
+                }
+
                 let mut ctx = tui.create_context(input);
 
                 draw(&mut ctx, &mut state);
@@ -162,8 +181,12 @@ fn run() -> apperr::Result<()> {
         }
 
         if state.exit {
+            logging::log_app_exit();
             break;
         }
+
+        // Log state changes (cursor movement, etc.)
+        log_state_changes(&mut state);
 
         // Render the UI and write it to the terminal.
         {
@@ -341,32 +364,45 @@ fn draw(ctx: &mut Context, state: &mut State) {
         // Shortcuts that are not handled as part of the textarea, etc.
 
         if key == kbmod::CTRL | vk::N {
+            logging::log_shortcut(key, "New file");
             draw_add_untitled_document(ctx, state);
         } else if key == kbmod::CTRL | vk::O {
+            logging::log_shortcut(key, "Open file");
             state.wants_file_picker = StateFilePicker::Open;
         } else if key == kbmod::CTRL | vk::S {
+            logging::log_shortcut(key, "Save");
             state.wants_save = true;
         } else if key == kbmod::CTRL_SHIFT | vk::S {
+            logging::log_shortcut(key, "Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
         } else if key == kbmod::CTRL | vk::W {
+            logging::log_shortcut(key, "Close");
             state.wants_close = true;
         } else if key == kbmod::CTRL | vk::P {
+            logging::log_shortcut(key, "Go to file");
             state.wants_go_to_file = true;
         } else if key == kbmod::CTRL | vk::Q {
+            logging::log_shortcut(key, "Exit");
             state.wants_exit = true;
         } else if key == kbmod::CTRL | vk::G {
+            logging::log_shortcut(key, "Go to line");
             state.wants_goto = true;
         } else if key == kbmod::CTRL | vk::D {
+            logging::log_shortcut(key, "Duplicate line");
+            logging::log_duplicate_line();
             draw_duplicate_line(state);
         } else if key == kbmod::CTRL | vk::F && state.wants_search.kind != StateSearchKind::Disabled
         {
+            logging::log_shortcut(key, "Find");
             state.wants_search.kind = StateSearchKind::Search;
             state.wants_search.focus = true;
         } else if key == kbmod::CTRL | vk::R && state.wants_search.kind != StateSearchKind::Disabled
         {
+            logging::log_shortcut(key, "Replace");
             state.wants_search.kind = StateSearchKind::Replace;
             state.wants_search.focus = true;
         } else if key == vk::F3 {
+            logging::log_shortcut(key, "Find next");
             search_execute(ctx, state, SearchAction::Search);
         } else {
             return;

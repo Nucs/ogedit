@@ -15,6 +15,7 @@ use ogedit::{apperr, buffer, icu, sys};
 use crate::config::Config;
 use crate::documents::DocumentManager;
 use crate::localization::*;
+use crate::logging;
 
 #[repr(transparent)]
 pub struct FormatApperr(apperr::Error);
@@ -128,6 +129,13 @@ pub struct OscTitleFileStatus {
     pub dirty: bool,
 }
 
+/// Tracks the previous state for logging purposes
+#[derive(Default)]
+pub struct LoggingTracker {
+    pub cursor_pos: Point,
+    pub text_generation: u32,
+}
+
 pub struct State {
     pub menubar_color_bg: StraightRgba,
     pub menubar_color_fg: StraightRgba,
@@ -174,6 +182,8 @@ pub struct State {
     pub osc_clipboard_sync: bool,
     pub osc_clipboard_always_send: bool,
     pub exit: bool,
+
+    pub logging_tracker: LoggingTracker,
 }
 
 impl State {
@@ -223,13 +233,20 @@ impl State {
             osc_clipboard_sync: false,
             osc_clipboard_always_send: false,
             exit: false,
+
+            logging_tracker: Default::default(),
         })
     }
 }
 
 pub fn draw_add_untitled_document(ctx: &mut Context, state: &mut State) {
-    if let Err(err) = state.documents.add_untitled(&state.config) {
-        error_log_add(ctx, state, err);
+    match state.documents.add_untitled(&state.config) {
+        Ok(doc) => {
+            logging::log_file_new(&doc.filename);
+        }
+        Err(err) => {
+            error_log_add(ctx, state, err);
+        }
     }
 }
 
@@ -275,4 +292,38 @@ pub fn draw_error_log(ctx: &mut Context, state: &mut State) {
     if ctx.modal_end() {
         state.error_log_count = 0;
     }
+}
+
+/// Check for state changes and log them
+/// Call this at the end of each frame
+pub fn log_state_changes(state: &mut State) {
+    let Some(doc) = state.documents.active() else {
+        return;
+    };
+
+    let tb = doc.buffer.borrow();
+    let cursor_pos = tb.cursor_logical_pos();
+    let generation = tb.generation();
+    let tracker = &mut state.logging_tracker;
+
+    // Check for cursor movement
+    if cursor_pos != tracker.cursor_pos {
+        // Only log if it's not from text editing (generation unchanged)
+        if generation == tracker.text_generation {
+            logging::log_cursor_move(tracker.cursor_pos, cursor_pos, "navigation");
+        }
+        tracker.cursor_pos = cursor_pos;
+    }
+
+    // Check for text changes (generation changed means text was modified)
+    if generation != tracker.text_generation {
+        // Text was edited - we log this generically since we can't know exactly what was typed
+        // The detailed text input logging happens elsewhere when we know the exact input
+        tracker.text_generation = generation;
+        tracker.cursor_pos = cursor_pos; // Update cursor pos too since it likely changed
+    }
+
+    // Selection tracking is complex because TextBuffer doesn't expose selection state
+    // directly in a way we can easily track here. The selection logging happens
+    // in other places where we know the context (e.g., select all, shift+arrow, etc.)
 }
