@@ -204,6 +204,9 @@ fn days_to_ymd(days: i64) -> (i32, u32, u32) {
 
 /// Initialize the logger with session information.
 /// Must be called once at application startup before any logging.
+///
+/// Also installs a panic hook to capture panics to the log.
+/// Note: In release builds with `panic = "abort"`, the hook may not run.
 pub fn init() {
     // Capture session info (cwd and pid) - only done once
     let _ = SESSION_INFO.get_or_init(|| {
@@ -224,6 +227,51 @@ pub fn init() {
             *logger = Logger::new();
         }
     });
+
+    // Install panic hook to capture panics to log
+    // Note: With panic=abort in release builds, this may not run
+    install_panic_hook();
+}
+
+/// Install a panic hook that logs panics before the program terminates.
+/// This captures the panic message and location to the log file.
+fn install_panic_hook() {
+    use std::panic;
+
+    let default_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |panic_info| {
+        // Extract panic message
+        let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic".to_string()
+        };
+
+        // Extract location
+        let location = if let Some(loc) = panic_info.location() {
+            format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
+        } else {
+            "unknown location".to_string()
+        };
+
+        // Log the panic
+        let panic_msg = format!("PANIC at {}: {}", location, message);
+        write_log(&format!("!!! {} !!!", panic_msg));
+        write_log("=== Application crashed ===");
+
+        // Ensure log is flushed
+        LOGGER.with(|logger| {
+            if let Some(ref mut l) = *logger.borrow_mut() {
+                let _ = l.file.flush();
+            }
+        });
+
+        // Call the default hook (prints to stderr)
+        default_hook(panic_info);
+    }));
 }
 
 /// Write a log message

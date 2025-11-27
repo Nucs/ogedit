@@ -81,12 +81,14 @@ fn run() -> apperr::Result<()> {
     // `handle_args` may want to print a help message (must not fail),
     // and reads files (may hang; should be cancelable with Ctrl+C).
     // As such, we call this after `handle_args`.
+    logging::log_action("INIT: Switching terminal to raw mode");
     sys::switch_modes()?;
 
     let mut vt_parser = vt::Parser::new();
     let mut input_parser = input::Parser::new();
     let mut tui = Tui::new()?;
 
+    logging::log_action("INIT: Terminal setup complete");
     let _restore = setup_terminal(&mut tui, &mut state, &mut vt_parser);
 
     state.menubar_color_bg = tui.indexed(IndexedColor::Background).oklab_blend(tui.indexed_alpha(
@@ -141,7 +143,7 @@ fn run() -> apperr::Result<()> {
                 let input = input_iter.next();
                 let more = input.is_some();
 
-                // Log text input and paste events
+                // Log input events
                 if let Some(ref inp) = input {
                     match inp {
                         input::Input::Text(text) => {
@@ -149,6 +151,9 @@ fn run() -> apperr::Result<()> {
                         }
                         input::Input::Paste(data) => {
                             logging::log_paste(data);
+                        }
+                        input::Input::Resize(size) => {
+                            logging::log_action(&format!("TERMINAL_RESIZE: {}x{}", size.width, size.height));
                         }
                         _ => {}
                     }
@@ -285,10 +290,12 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
     }
 
     for p in &paths {
+        logging::log_action(&format!("STARTUP_FILE: {}", p.to_string_lossy()));
         state.documents.add_file_path(p, &state.config)?;
     }
 
     if let Some(mut file) = sys::open_stdin_if_redirected() {
+        logging::log_action("STARTUP_STDIN: Reading from redirected stdin");
         let doc = state.documents.add_untitled(&state.config)?;
         let mut tb = doc.buffer.borrow_mut();
         tb.read_file(&mut file, None)?;

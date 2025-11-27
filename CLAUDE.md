@@ -21,6 +21,45 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - Unknown fields in the JSON are ignored (forward compatibility)
   - Invalid values for known fields trigger corruption recovery
 
+**Debug Logging:**
+- Logs are written to `~/.ogedit/logs/` for debugging and tracing user interactions
+- **Log file naming:** `{sanitized_cwd}_{YYYYMMDD}_{pid}.log`
+  - `{sanitized_cwd}`: Working directory with path separators replaced by `--` (e.g., `c--users--john--project`)
+  - `{YYYYMMDD}`: Date in compact format
+  - `{pid}`: Process ID (ensures uniqueness when multiple instances run)
+  - Example: `users--john--myproject_20251127_12345.log`
+- **Logged events include:**
+  - Application start/exit with session info (cwd, pid)
+  - Startup sequence (terminal mode switch, files loaded from command line)
+  - Terminal resize events
+  - Text input and paste operations
+  - Keyboard shortcuts (Ctrl+S, Ctrl+N, Ctrl+D, etc.)
+  - Menu clicks and checkbox toggles
+  - File operations (new, open, save, close)
+  - Search/replace operations and option toggles
+  - Settings changes (word wrap, encoding, newline type, indentation)
+  - Dialog open/close with results
+  - Document switching
+  - Cursor movements
+  - File picker interactions
+  - Panics/crashes (with location and message)
+  - Error messages
+- **Implementation:** `src/bin/edit/logging.rs`
+- **Log format:** `[HH:MM:SS.mmm] EVENT_TYPE: details`
+- **Panic handling:** A panic hook is installed to capture crashes to the log
+  - Logs panic message and source location before termination
+  - **Limitation:** In release builds with `panic = "abort"`, the hook may not run (immediate termination)
+
+**Data Directory Structure:**
+```
+~/.ogedit/
+├── state.json                                    # Configuration file
+├── state.json.backup                             # Backup of corrupted config (if any)
+└── logs/
+    ├── users--john--project_20251127_12345.log   # Log per session
+    └── ...
+```
+
 ## Build and Test Commands
 
 ### Building
@@ -331,6 +370,7 @@ src/
 │   ├── main.rs              # Entry point and main loop
 │   ├── state.rs             # Application state
 │   ├── config.rs            # Global configuration (~/.ogedit/state.json)
+│   ├── logging.rs           # Debug logging system (~/.ogedit/logs/)
 │   ├── documents.rs         # Document management
 │   ├── draw_*.rs            # UI rendering modules
 │   └── localization.rs      # i18n wrapper
