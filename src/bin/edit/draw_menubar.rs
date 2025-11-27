@@ -6,6 +6,7 @@ use ogedit::helpers::*;
 use ogedit::input::{kbmod, vk};
 use ogedit::tui::*;
 
+use crate::draw_editor::draw_duplicate_line;
 use crate::localization::*;
 use crate::state::*;
 
@@ -88,6 +89,11 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
         }
     }
 
+    if ctx.menubar_menu_button(loc(LocId::EditDuplicate), 'D', kbmod::CTRL | vk::D) {
+        draw_duplicate_line(state);
+        ctx.needs_rerender();
+    }
+
     if state.wants_search.kind != StateSearchKind::Disabled {
         if ctx.menubar_menu_button(loc(LocId::EditFind), 'F', kbmod::CTRL | vk::F) {
             state.wants_search.kind = StateSearchKind::Search;
@@ -152,7 +158,7 @@ pub fn draw_dialog_about(ctx: &mut Context, state: &mut State) {
         ctx.inherit_focus();
         ctx.attr_padding(Rect::three(1, 2, 1));
         {
-            ctx.label("description", "Microsoft Edit");
+            ctx.label("description", "OGEdit");
             ctx.attr_overflow(Overflow::TruncateTail);
             ctx.attr_position(Position::Center);
 
@@ -166,6 +172,14 @@ pub fn draw_dialog_about(ctx: &mut Context, state: &mut State) {
                 ),
             );
             ctx.attr_overflow(Overflow::TruncateHead);
+            ctx.attr_position(Position::Center);
+
+            ctx.label("maintainer", "Maintained by EliBelash");
+            ctx.attr_overflow(Overflow::TruncateTail);
+            ctx.attr_position(Position::Center);
+
+            ctx.label("fork", "Fork of Microsoft Edit");
+            ctx.attr_overflow(Overflow::TruncateTail);
             ctx.attr_position(Position::Center);
 
             ctx.label("copyright", "Copyright (c) Microsoft Corp 2025");

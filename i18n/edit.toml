@@ -623,6 +623,9 @@ vi = "Dán"
 zh_hans = "粘贴"
 zh_hant = "貼上"
 
+[EditDuplicate]
+en = "Duplicate"
+
 [EditFind]
 en = "Find"
 bn = "অনুসন্ধান"
