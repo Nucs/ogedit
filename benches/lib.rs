@@ -6,9 +6,9 @@ use std::io::Cursor;
 use std::{mem, vec};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use edit::helpers::*;
-use edit::simd::MemsetSafe;
-use edit::{arena, buffer, hash, oklab, simd, unicode};
+use ogedit::helpers::*;
+use ogedit::simd::MemsetSafe;
+use ogedit::{arena, buffer, hash, oklab, simd, unicode};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
