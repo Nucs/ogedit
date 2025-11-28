@@ -262,7 +262,7 @@ fn run() -> apperr::Result<()> {
                 );
 
                 // "μs" is 3 bytes and 2 columns.
-                let cols = status.len() as edit::helpers::CoordType - 3 + 2;
+                let cols = status.len() as CoordType - 3 + 2;
 
                 // Since the status may shrink and grow, we may have to overwrite the previous one with whitespace.
                 let padding = (last_latency_width - cols).max(0);
