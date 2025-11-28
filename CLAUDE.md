@@ -718,9 +718,108 @@ When preparing a new release:
 
 ### Version Numbering Scheme
 
-Follow semantic versioning (semver):
-- **Major** (X.0.0): Breaking changes, incompatible API changes
-- **Minor** (x.Y.0): New features, backwards compatible
-- **Patch** (x.y.Z): Bug fixes, backwards compatible
+OGEdit uses a **fork versioning** scheme based on Microsoft Edit's version:
 
-Current version: **1.2.1**
+```
+{Edit Major}.{Edit Minor}.{OGEdit Release}
+```
+
+| Component | Description | Example |
+|-----------|-------------|---------|
+| Edit Major.Minor | Upstream Microsoft Edit version | `1.2` |
+| OGEdit Release | OGEdit-specific release number | `.1`, `.2`, `.3` |
+
+**Examples:**
+- `1.2.1` = Based on Edit v1.2, first OGEdit release
+- `1.2.2` = Based on Edit v1.2, second OGEdit release
+- `1.3.1` = Based on Edit v1.3 (after upstream sync), first OGEdit release
+
+When syncing with upstream Edit:
+1. Merge/rebase upstream changes
+2. Update version to `{new Edit version}.1`
+3. Reset OGEdit release counter
+
+Current version: **1.2.2** (based on Microsoft Edit 1.2)
+
+## GitHub Actions CI/CD
+
+The project uses GitHub Actions for continuous integration and releases.
+
+### CI Workflow (`.github/workflows/ci.yml`)
+
+Runs on every push/PR to `main`:
+
+| Job | Platforms | Steps |
+|-----|-----------|-------|
+| `check` | Ubuntu, Windows, macOS | Tests, Clippy |
+| `release-build` | Ubuntu, Windows, macOS | Verify release build works |
+
+### Release Workflow (`.github/workflows/release.yml`)
+
+Triggered by tags matching `release/v*` (e.g., `release/v1.2.1`).
+
+**Build Targets:**
+
+| Platform | Target | Artifact |
+|----------|--------|----------|
+| Windows x64 | `x86_64-pc-windows-msvc` | `ogedit-windows-x64.zip` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `ogedit-windows-arm64.zip` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | `ogedit-linux-x64.zip` |
+| macOS x64 | `x86_64-apple-darwin` | `ogedit-macos-x64.zip` |
+| macOS ARM64 | `aarch64-apple-darwin` | `ogedit-macos-arm64.zip` |
+
+**Each zip contains:**
+- `ogedit` (or `ogedit.exe` on Windows)
+- `ogmsedit` (alternative binary name)
+- `README.md`
+- `LICENSE`
+
+**SHA256 checksums** are generated for each artifact (`.sha256` files).
+
+**Prerelease detection:** Tags containing `-alpha`, `-beta`, or `-rc` are marked as prereleases.
+
+### Creating a Release
+
+When the user asks to "release" or "release vX.Y.Z", follow these steps:
+
+**Step 1: Determine new version**
+```bash
+# Check current version
+grep '^version' Cargo.toml
+```
+
+- If user specifies version: use that
+- If user says "release": increment OGEdit release number (1.2.1 → 1.2.2)
+- If user says "release beta": use next version with `-beta.1` suffix
+
+**Step 2: Update Cargo.toml**
+```toml
+version = "1.2.2"  # New version
+```
+
+**Step 3: Commit and tag**
+```bash
+git add Cargo.toml
+git commit -m "Release v1.2.2"
+git tag release/v1.2.2
+git push origin main
+git push origin release/v1.2.2
+```
+
+**Step 4: Verify**
+- GitHub Actions will build all 5 platforms
+- Release appears at: `https://github.com/Nucs/ogedit/releases`
+
+**Prerelease examples:**
+```bash
+# Beta release
+git tag release/v1.2.2-beta.1
+
+# Alpha release
+git tag release/v1.2.2-alpha.1
+
+# Release candidate
+git tag release/v1.2.2-rc.1
+```
+
+Tags with `-alpha`, `-beta`, or `-rc` are automatically marked as prereleases.
