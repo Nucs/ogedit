@@ -14,7 +14,15 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
 - Global settings are stored in `~/.ogedit/state.json`
 - Configuration is automatically loaded on startup and saved when settings change
 - Current configurable settings:
-  - `word_wrap`: Whether Word Wrap is enabled by default for new documents
+  - `word_wrap`: Whether Word Wrap is enabled by default (default: false)
+  - `indent_with_tabs`: Use tabs (true) or spaces (false) for indentation (default: false)
+  - `tab_size`: Tab width / spaces for indentation, 1-8 (default: 4)
+  - `newline_crlf`: Use CRLF (true) or LF (false) for newlines (default: true on Windows)
+  - `line_numbers`: Show line numbers in left margin (default: true)
+  - `line_highlight`: Highlight the current line (default: true)
+  - `insert_final_newline`: Add newline at end of file when saving (default: true on Unix)
+  - `ruler_column`: Show vertical ruler at column, 0=disabled (default: 0)
+- Settings are automatically saved when changed via the status bar or View menu
 - **Corruption Handling:**
   - If `state.json` is corrupted or contains invalid JSON, it will be backed up to `state.json.backup`
   - A fresh configuration file with default values will be automatically created

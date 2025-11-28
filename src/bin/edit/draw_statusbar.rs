@@ -33,6 +33,9 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             let to = if is_crlf { "LF" } else { "CRLF" };
             logging::log_action(&format!("NEWLINE_CHANGE: {} -> {}", from, to));
             tb.normalize_newlines(!is_crlf);
+            // Save as new default
+            state.config.newline_crlf = !is_crlf;
+            let _ = state.config.save();
         }
         if state.wants_statusbar_focus {
             state.wants_statusbar_focus = false;
@@ -118,8 +121,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                     {
                         if !tb.indent_with_tabs() {
                             logging::log_action("INDENTATION_TYPE: Spaces -> Tabs");
+                            tb.set_indent_with_tabs(true);
+                            state.config.indent_with_tabs = true;
+                            let _ = state.config.save();
                         }
-                        tb.set_indent_with_tabs(true);
                         ctx.needs_rerender();
                     }
                     if ctx.list_item(!tb.indent_with_tabs(), loc(LocId::IndentationSpaces))
@@ -127,8 +132,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                     {
                         if tb.indent_with_tabs() {
                             logging::log_action("INDENTATION_TYPE: Tabs -> Spaces");
+                            tb.set_indent_with_tabs(false);
+                            state.config.indent_with_tabs = false;
+                            let _ = state.config.save();
                         }
-                        tb.set_indent_with_tabs(false);
                         ctx.needs_rerender();
                     }
                 }
@@ -147,8 +154,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                             let old_width = tb.tab_size();
                             if old_width != width as CoordType {
                                 logging::log_action(&format!("TAB_WIDTH: {} -> {}", old_width, width));
+                                tb.set_tab_size(width as CoordType);
+                                state.config.tab_size = width;
+                                let _ = state.config.save();
                             }
-                            tb.set_tab_size(width as CoordType);
                             ctx.needs_rerender();
                         }
                     }

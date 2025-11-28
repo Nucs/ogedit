@@ -215,13 +215,18 @@ impl DocumentManager {
     }
 
     fn create_buffer(config: &Config) -> apperr::Result<RcTextBuffer> {
-        let buffer = TextBuffer::new_rc(false)?;
+        let buffer = TextBuffer::new_rc(config.newline_crlf)?;
         {
             let mut tb = buffer.borrow_mut();
-            tb.set_insert_final_newline(!cfg!(windows)); // As mandated by POSIX.
-            tb.set_margin_enabled(true);
-            tb.set_line_highlight_enabled(true);
+            tb.set_insert_final_newline(config.insert_final_newline);
+            tb.set_margin_enabled(config.line_numbers);
+            tb.set_line_highlight_enabled(config.line_highlight);
             tb.set_word_wrap(config.word_wrap);
+            tb.set_indent_with_tabs(config.indent_with_tabs);
+            tb.set_tab_size(config.tab_size as ogedit::helpers::CoordType);
+            if config.ruler_column > 0 {
+                tb.set_ruler(config.ruler_column as ogedit::helpers::CoordType);
+            }
         }
         Ok(buffer)
     }
