@@ -22,6 +22,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
     ctx.attr_intrinsic_size(Size { width: COORD_TYPE_SAFE_MAX, height: 1 });
     ctx.attr_padding(Rect::two(0, 1));
 
+    // Check if file has changed on disk (before borrowing doc)
+    let file_changed_on_disk = state
+        .documents
+        .active()
+        .map_or(false, |d| d.has_file_changed_on_disk());
+
     if let Some(doc) = state.documents.active() {
         let mut tb = doc.buffer.borrow_mut();
 
@@ -198,6 +204,15 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             ctx.label("dirty", "*");
         }
 
+        // Show indicator if file has changed on disk
+        if file_changed_on_disk {
+            state.wants_reload_menu |= ctx.button(
+                "file-changed",
+                "[File On Disk Changed]",
+                ButtonStyle::default(),
+            );
+        }
+
         ctx.block_begin("filename-container");
         ctx.attr_intrinsic_size(Size { width: COORD_TYPE_SAFE_MAX, height: 1 });
         {
@@ -223,6 +238,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
         state.wants_statusbar_focus = false;
         state.wants_encoding_picker = false;
         state.wants_indentation_picker = false;
+        state.wants_reload_menu = false;
+    }
+
+    // Draw reload menu if needed (outside the doc borrow scope)
+    if state.wants_reload_menu && file_changed_on_disk {
+        draw_reload_menu(ctx, state);
     }
 
     ctx.table_end();
@@ -386,4 +407,44 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
         logging::log_dialog_close("Go to File", "Escape");
         state.wants_go_to_file = false;
     }
+}
+
+fn draw_reload_menu(ctx: &mut Context, state: &mut State) {
+    ctx.block_begin("reload-menu");
+    ctx.attr_float(FloatSpec {
+        anchor: Anchor::Last,
+        gravity_x: 0.0,
+        gravity_y: 1.0,
+        offset_x: 0.0,
+        offset_y: 0.0,
+    });
+    ctx.attr_border();
+    ctx.attr_padding(Rect::two(0, 1));
+    {
+        if ctx.button("reload", "Reload", ButtonStyle::default()) {
+            logging::log_action("FILE_RELOAD: User clicked Reload");
+            // Perform the reload
+            if let Err(err) = reload_file_from_disk(state) {
+                crate::state::error_log_add(ctx, state, err);
+            }
+            state.wants_reload_menu = false;
+            ctx.needs_rerender();
+        }
+        ctx.focus_on_first_present();
+    }
+    ctx.block_end();
+
+    if !ctx.contains_focus() {
+        state.wants_reload_menu = false;
+        ctx.needs_rerender();
+    }
+}
+
+fn reload_file_from_disk(state: &mut State) -> ogedit::apperr::Result<()> {
+    if let Some(doc) = state.documents.active_mut() {
+        // Reload the file with current encoding
+        doc.reread(None)?;
+        logging::log_action(&format!("FILE_RELOADED: {}", doc.filename));
+    }
+    Ok(())
 }
