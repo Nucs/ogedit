@@ -26,7 +26,7 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
     let file_changed_on_disk = state
         .documents
         .active()
-        .map_or(false, |d| d.has_file_changed_on_disk());
+        .is_some_and(|d| d.has_file_changed_on_disk());
 
     if let Some(doc) = state.documents.active() {
         let mut tb = doc.buffer.borrow_mut();
