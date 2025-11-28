@@ -5,6 +5,7 @@ use std::collections::LinkedList;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use ogedit::buffer::{RcTextBuffer, TextBuffer};
 use ogedit::helpers::{CoordType, Point};
@@ -20,6 +21,9 @@ pub struct Document {
     pub filename: String,
     pub file_id: Option<sys::FileId>,
     pub new_file_counter: usize,
+
+    // File change detection (lightweight - hybrid approach)
+    pub last_modified: Option<SystemTime>,
 }
 
 impl Document {
@@ -35,6 +39,11 @@ impl Document {
         if let Ok(id) = sys::file_id(None, path) {
             self.file_id = Some(id);
         }
+
+        // Capture file modification timestamp after successful save
+        self.last_modified = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok());
 
         if let Some(path) = new_path {
             self.set_path(path);
@@ -56,6 +65,11 @@ impl Document {
             self.file_id = Some(id);
         }
 
+        // Capture file modification timestamp after reload
+        self.last_modified = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
         Ok(())
     }
 
@@ -71,6 +85,23 @@ impl Document {
     fn update_file_mode(&mut self) {
         let mut tb = self.buffer.borrow_mut();
         tb.set_ruler(if self.filename == "COMMIT_EDITMSG" { 72 } else { 0 });
+    }
+
+    /// Check if the file has been modified on disk since we last read/saved it.
+    /// Returns false if:
+    /// - The document has no associated file path
+    /// - We don't have a baseline timestamp
+    /// - The file no longer exists on disk
+    /// - The timestamps match (file hasn't changed)
+    pub fn has_file_changed_on_disk(&self) -> bool {
+        if let (Some(path), Some(last_modified)) = (&self.path, self.last_modified) {
+            if let Ok(metadata) = std::fs::metadata(path) {
+                if let Ok(current_modified) = metadata.modified() {
+                    return current_modified != last_modified;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -122,6 +153,7 @@ impl DocumentManager {
             filename: Default::default(),
             file_id: None,
             new_file_counter: 0,
+            last_modified: None,
         };
         self.gen_untitled_name(&mut doc);
 
@@ -175,6 +207,11 @@ impl DocumentManager {
             }
         }
 
+        // Capture file modification timestamp when loading file
+        let last_modified = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
         let mut doc = Document {
             buffer,
             path: None,
@@ -182,6 +219,7 @@ impl DocumentManager {
             filename: Default::default(),
             file_id,
             new_file_counter: 0,
+            last_modified,
         };
         doc.set_path(path);
 
