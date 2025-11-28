@@ -208,7 +208,7 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
         if file_changed_on_disk {
             state.wants_reload_menu |= ctx.button(
                 "file-changed",
-                "[File On Disk Changed]",
+                "Modified",
                 ButtonStyle::default(),
             );
         }
