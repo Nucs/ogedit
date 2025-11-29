@@ -9,6 +9,7 @@ OGEdit aims to deliver more features faster with less bureaucracy.
 - [Key Features](#features)
   - [Ctrl+D Duplicate Line](#ctrld-duplicate-line)
   - [Persistent Configuration](#persistent-configuration)
+  - [Per-Project Folder Memory](#per-project-folder-memory)
   - [File Reload Detection](#file-reload-detection)
   - [Debug Logging](#debug-logging)
   - [Data Directory](#data-directory)
@@ -49,8 +50,20 @@ Settings are saved to `~/.ogedit/state.json` and restored on startup:
 | `line_highlight` | Highlight the current line | `true` |
 | `insert_final_newline` | Add newline at end of file when saving | `true` on Unix, `false` on Windows |
 | `ruler_column` | Vertical ruler position (0-255, 0=disabled) | `0` |
+| `project_folders` | Per-project last-used save folders (auto-managed) | `{}` |
 
 Changes via status bar or View menu are saved automatically. The config file supports `//` comments.
+
+### Per-Project Folder Memory
+
+OGEdit remembers the last folder you saved to, per project:
+
+- **Project**: The working directory where the editor was launched
+- **Behavior**: When you save a file via Save As, the folder is remembered
+- **Persistence**: Next time you open OGEdit in the same project, the Save As dialog defaults to the remembered folder
+- **Fallback**: If the saved folder no longer exists, falls back to current working directory
+
+This is useful when working on projects where you frequently save files to a specific subfolder.
 
 ### File Reload Detection
 

@@ -257,7 +257,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         let res = if is_open {
             state.documents.add_file_path(&path, &state.config).map(|_| ())
         } else if let Some(doc) = state.documents.active_mut() {
-            doc.save(Some(path))
+            doc.save(Some(path.clone()))
         } else {
             Ok(())
         };
@@ -267,6 +267,11 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                     logging::log_file_open(&path_str);
                 } else {
                     logging::log_file_save(&path_str);
+                    // Save the parent directory as the last-used save folder for this project
+                    if let Some(parent) = path.parent() {
+                        let parent_str = parent.to_string_lossy().to_string();
+                        state.config.set_project_folder(&state.startup_cwd, &parent_str);
+                    }
                 }
                 ctx.needs_rerender();
                 done = true;

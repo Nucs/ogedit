@@ -5,6 +5,7 @@
 //!
 //! Configuration is stored in `~/.ogedit/state.json`.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -29,6 +30,8 @@ pub struct Config {
     pub insert_final_newline: bool,
     /// Ruler column position (0 = disabled, typically 80 or 120 for code)
     pub ruler_column: u8,
+    /// Per-project last-used save folder mapping (project_cwd -> last_save_dir)
+    pub project_folders: HashMap<String, String>,
 }
 
 impl Default for Config {
@@ -42,6 +45,7 @@ impl Default for Config {
             line_highlight: true,     // Highlight current line by default
             insert_final_newline: !cfg!(windows), // POSIX compliance on Unix
             ruler_column: 0,          // No ruler by default (0 = disabled)
+            project_folders: HashMap::new(),
         }
     }
 }
@@ -209,7 +213,129 @@ impl Config {
         config.insert_final_newline = parse_bool(content, "insert_final_newline", defaults.insert_final_newline)?;
         config.ruler_column = parse_u8(content, "ruler_column", defaults.ruler_column, 0, 255)?;
 
+        // Parse project_folders HashMap
+        config.project_folders = Self::parse_project_folders(content);
+
         Some(config)
+    }
+
+    /// Parse a JSON object for project_folders: {"key": "value", ...}
+    fn parse_project_folders(content: &str) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+
+        // Find "project_folders" field
+        let Some(pos) = content.find("\"project_folders\"") else {
+            return map;
+        };
+
+        let rest = content[pos + 17..].trim_start();
+        if !rest.starts_with(':') {
+            return map;
+        }
+
+        let value_part = rest[1..].trim_start();
+        if !value_part.starts_with('{') {
+            return map;
+        }
+
+        // Find the matching closing brace (accounting for strings)
+        let mut depth = 0;
+        let mut end_pos = 0;
+        let mut in_string = false;
+        let mut escape_next = false;
+        for (i, c) in value_part.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+            match c {
+                '\\' if in_string => escape_next = true,
+                '"' => in_string = !in_string,
+                '{' if !in_string => depth += 1,
+                '}' if !in_string => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if end_pos == 0 {
+            return map;
+        }
+
+        // Extract the object content between the braces
+        let obj_content = &value_part[1..end_pos];
+
+        // Parse key-value pairs: "key": "value"
+        let mut remaining = obj_content;
+        while let Some(key_start) = remaining.find('"') {
+            remaining = &remaining[key_start + 1..];
+
+            // Parse key (handle escapes)
+            let (key, key_end) = Self::parse_json_string_content(remaining);
+            if key_end == 0 {
+                break;
+            }
+            remaining = &remaining[key_end + 1..];
+
+            // Skip to colon
+            remaining = remaining.trim_start();
+            if !remaining.starts_with(':') {
+                break;
+            }
+            remaining = &remaining[1..].trim_start();
+
+            // Parse value
+            if !remaining.starts_with('"') {
+                break;
+            }
+            remaining = &remaining[1..];
+
+            // Parse value (handle escapes)
+            let (value, value_end) = Self::parse_json_string_content(remaining);
+            if value_end == 0 {
+                break;
+            }
+            remaining = &remaining[value_end + 1..];
+
+            map.insert(key, value);
+        }
+
+        map
+    }
+
+    /// Parse a JSON string's content (after the opening quote), returning the unescaped string
+    /// and the position of the closing quote
+    fn parse_json_string_content(s: &str) -> (String, usize) {
+        let mut result = String::new();
+        let mut chars = s.char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '"' => return (result, i),
+                '\\' => {
+                    if let Some((_, next)) = chars.next() {
+                        match next {
+                            'n' => result.push('\n'),
+                            'r' => result.push('\r'),
+                            't' => result.push('\t'),
+                            '\\' => result.push('\\'),
+                            '"' => result.push('"'),
+                            '/' => result.push('/'),
+                            _ => {
+                                result.push('\\');
+                                result.push(next);
+                            }
+                        }
+                    }
+                }
+                _ => result.push(c),
+            }
+        }
+        (result, 0) // No closing quote found
     }
 
     /// Convert configuration to JSON string with comments
@@ -217,6 +343,9 @@ impl Config {
         // Get platform-specific defaults for the comment
         let default_newline = if cfg!(windows) { "true" } else { "false" };
         let default_final_newline = if cfg!(windows) { "false" } else { "true" };
+
+        // Build project_folders JSON object
+        let project_folders_json = Self::project_folders_to_json(&self.project_folders);
 
         format!(
             concat!(
@@ -246,7 +375,10 @@ impl Config {
                 "  \"insert_final_newline\": {},\n",
                 "\n",
                 "  // Show vertical ruler at column, 0 to disable (0-255, default: 0)\n",
-                "  \"ruler_column\": {}\n",
+                "  \"ruler_column\": {},\n",
+                "\n",
+                "  // Per-project last-used save folder (auto-managed, do not edit)\n",
+                "  \"project_folders\": {}\n",
                 "}}\n"
             ),
             self.word_wrap,
@@ -258,8 +390,59 @@ impl Config {
             self.line_highlight,
             default_final_newline,
             self.insert_final_newline,
-            self.ruler_column
+            self.ruler_column,
+            project_folders_json
         )
+    }
+
+    /// Convert project_folders HashMap to a JSON object string
+    fn project_folders_to_json(map: &HashMap<String, String>) -> String {
+        if map.is_empty() {
+            return "{}".to_string();
+        }
+
+        let mut json = String::from("{\n");
+        let mut first = true;
+        for (key, value) in map {
+            if !first {
+                json.push_str(",\n");
+            }
+            first = false;
+            json.push_str("    \"");
+            json.push_str(&Self::escape_json_string(key));
+            json.push_str("\": \"");
+            json.push_str(&Self::escape_json_string(value));
+            json.push('"');
+        }
+        json.push_str("\n  }");
+        json
+    }
+
+    /// Escape a string for JSON output
+    fn escape_json_string(s: &str) -> String {
+        let mut escaped = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '"' => escaped.push_str("\\\""),
+                '\\' => escaped.push_str("\\\\"),
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                _ => escaped.push(c),
+            }
+        }
+        escaped
+    }
+
+    /// Get the last-used save folder for a project, if any
+    pub fn get_project_folder(&self, project_cwd: &str) -> Option<&str> {
+        self.project_folders.get(project_cwd).map(|s| s.as_str())
+    }
+
+    /// Set the last-used save folder for a project and save config
+    pub fn set_project_folder(&mut self, project_cwd: &str, last_save_dir: &str) {
+        self.project_folders.insert(project_cwd.to_string(), last_save_dir.to_string());
+        let _ = self.save();
     }
 }
 
@@ -356,6 +539,7 @@ mod tests {
             line_highlight: false,
             insert_final_newline: true,
             ruler_column: 120,
+            project_folders: HashMap::new(),
         };
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();
@@ -365,6 +549,29 @@ mod tests {
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn test_project_folders_roundtrip() {
+        // Test that project_folders can be serialized and deserialized
+        let mut original = Config::default();
+        original.project_folders.insert("/home/user/project".to_string(), "/home/user/project/src".to_string());
+        original.project_folders.insert("C:\\Users\\Test".to_string(), "C:\\Users\\Test\\Documents".to_string());
+
+        let json = original.to_json();
+        let parsed = Config::parse(&json).unwrap();
+        assert_eq!(parsed.project_folders, original.project_folders);
+    }
+
+    #[test]
+    fn test_project_folders_escaping() {
+        // Test that special characters in paths are properly escaped and parsed
+        let mut original = Config::default();
+        original.project_folders.insert("path\"with\"quotes".to_string(), "value\\with\\backslashes".to_string());
+
+        let json = original.to_json();
+        let parsed = Config::parse(&json).unwrap();
+        assert_eq!(parsed.project_folders, original.project_folders);
     }
 
     #[test]

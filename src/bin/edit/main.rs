@@ -235,6 +235,11 @@ fn run() -> apperr::Result<()> {
         let elapsed_ms = start_time.elapsed().as_millis() as u64;
         log_periodic_content_snapshot(&mut state, elapsed_ms);
 
+        // Trigger file change check every 2 seconds by forcing counter
+        if elapsed_ms % 2000 < 16 { // Check roughly every 2 seconds
+            state.file_check_counter = 120; // Force check on next statusbar draw
+        }
+
         // Render the UI and write it to the terminal.
         {
             let scratch = scratch_arena(None);
@@ -353,7 +358,24 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
         dir = Some(parent.to_path_buf());
     }
 
-    state.file_picker_pending_dir = DisplayablePathBuf::from_path(dir.unwrap_or(cwd));
+    // Determine the initial file picker directory:
+    // 1. If a directory was explicitly passed as argument, use that
+    // 2. Otherwise, check if we have a saved folder for this project
+    // 3. Fall back to current working directory
+    let initial_dir = if let Some(d) = dir {
+        d
+    } else if let Some(saved) = state.config.get_project_folder(&state.startup_cwd) {
+        let saved_path = PathBuf::from(saved);
+        if saved_path.is_dir() {
+            saved_path
+        } else {
+            cwd
+        }
+    } else {
+        cwd
+    };
+
+    state.file_picker_pending_dir = DisplayablePathBuf::from_path(initial_dir);
     Ok(false)
 }
 

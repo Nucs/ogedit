@@ -22,7 +22,13 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - `line_highlight`: Highlight the current line (default: true)
   - `insert_final_newline`: Add newline at end of file when saving (default: true on Unix)
   - `ruler_column`: Show vertical ruler at column, 0=disabled (default: 0)
+  - `project_folders`: Per-project last-used save folder mapping (auto-managed, do not edit manually)
 - Settings are automatically saved when changed via the status bar or View menu
+- **Per-project folder memory:**
+  - When you save a file using Save As, the editor remembers the folder you saved to
+  - This is stored per-project, where "project" is the working directory where the editor was launched
+  - Next time you open the editor in the same project, the Save As dialog will default to the last-used folder
+  - This helps when working on projects where you frequently save files to a specific folder
 - **Corruption Handling:**
   - If `state.json` is corrupted or contains invalid JSON, it will be backed up to `state.json.backup`
   - A fresh configuration file with default values will be automatically created
@@ -760,19 +766,26 @@ Triggered by tags matching `release/v*` (e.g., `release/v1.2.1`).
 
 **Build Targets:**
 
-| Platform | Target | Artifact |
-|----------|--------|----------|
-| Windows x64 | `x86_64-pc-windows-msvc` | `ogedit-windows-x64.zip` |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | `ogedit-windows-arm64.zip` |
-| Linux x64 | `x86_64-unknown-linux-gnu` | `ogedit-linux-x64.zip` |
-| macOS x64 | `x86_64-apple-darwin` | `ogedit-macos-x64.zip` |
-| macOS ARM64 | `aarch64-apple-darwin` | `ogedit-macos-arm64.zip` |
+| Platform | Target | Portable | Installer |
+|----------|--------|----------|-----------|
+| Windows x64 | `x86_64-pc-windows-msvc` | `.zip` | `.msi` |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `.zip` | `.msi` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | `.zip` | - |
+| macOS x64 | `x86_64-apple-darwin` | `.zip` | - |
+| macOS ARM64 | `aarch64-apple-darwin` | `.zip` | - |
 
-**Each zip contains:**
+**Portable zip contains:**
 - `ogedit` (or `ogedit.exe` on Windows)
 - `ogmsedit` (alternative binary name)
 - `README.md`
 - `LICENSE`
+
+**MSI Installer (Windows only):**
+- Installs to `Program Files\OGEdit`
+- Adds installation directory to system PATH
+- Creates Start Menu shortcuts
+- Built using WiX Toolset v5
+- Configuration: `wix/main.wxs`
 
 **SHA256 checksums** are generated for each artifact (`.sha256` files).
 

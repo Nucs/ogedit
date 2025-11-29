@@ -190,6 +190,9 @@ pub struct State {
     pub config: Config,
     pub documents: DocumentManager,
 
+    /// The working directory when the editor was started (for per-project settings)
+    pub startup_cwd: String,
+
     // A ring buffer of the last 10 errors.
     pub error_log: [String; 10],
     pub error_log_index: usize,
@@ -232,16 +235,26 @@ pub struct State {
     pub exit: bool,
 
     pub logging_tracker: LoggingTracker,
+
+    // File reload check counter (debounce to every 120 frames)
+    pub file_check_counter: u32,
+    pub file_changed_cached: bool,
 }
 
 impl State {
     pub fn new() -> apperr::Result<Self> {
+        let startup_cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+
         Ok(Self {
             menubar_color_bg: StraightRgba::zero(),
             menubar_color_fg: StraightRgba::zero(),
 
             config: Config::load(),
             documents: Default::default(),
+
+            startup_cwd,
 
             error_log: [const { String::new() }; 10],
             error_log_index: 0,
@@ -284,6 +297,9 @@ impl State {
             exit: false,
 
             logging_tracker: Default::default(),
+
+            file_check_counter: 120, // Start at 120 to trigger immediate check
+            file_changed_cached: false,
         })
     }
 }
