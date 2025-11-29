@@ -2856,8 +2856,13 @@ impl TextBuffer {
             let deleted_count = self.undo_stack.back_mut().unwrap().borrow_mut().deleted.len();
             let target = self.cursor.logical_pos;
 
+            // After the edit, info.safe_start has stale visual_pos values because the buffer
+            // content has changed. We need to recalculate the safe_start position for the
+            // NEW buffer content by navigating from scratch.
+            let safe_start = self.measurement_config().goto_logical(Point { x: 0, y: target.y });
+
             // From our safe position we can measure the actual visual position of the cursor.
-            self.set_cursor_internal(self.cursor_move_to_logical_internal(info.safe_start, target));
+            self.set_cursor_internal(self.cursor_move_to_logical_internal(safe_start, target));
 
             // If content is added at the insertion position, that's not a problem:
             // We can just remeasure the height of this one line and calculate the delta.
@@ -2871,7 +2876,7 @@ impl TextBuffer {
                 let next_line = self
                     .cursor_move_to_logical_internal(self.cursor, Point { x: 0, y: target.y + 1 });
                 let lines_before = info.line_height_in_rows;
-                let lines_after = next_line.visual_pos.y - info.safe_start.visual_pos.y;
+                let lines_after = next_line.visual_pos.y - safe_start.visual_pos.y;
                 self.stats.visual_lines += lines_after - lines_before;
             } else {
                 let end = self.cursor_move_to_logical_internal(self.cursor, Point::MAX);
