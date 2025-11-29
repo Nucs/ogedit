@@ -10,11 +10,17 @@
 # 4. Push: git push && git push --tags
 #
 # Build Outputs:
-# - ogedit-windows-x64.zip / .msi
-# - ogedit-windows-arm64.zip / .msi
-# - ogedit-linux-x64.zip
-# - ogedit-macos-x64.zip
-# - ogedit-macos-arm64.zip
+# Windows:
+#   - ogedit-windows-x64.zip / .msi
+#   - ogedit-windows-arm64.zip / .msi
+# Linux:
+#   - ogedit-linux-x64.tar.xz / .tar.gz / .zip (portable)
+#   - ogedit-linux-x64.deb (Debian/Ubuntu)
+#   - ogedit-linux-x64.rpm (Fedora/RHEL)
+#   - ogedit-linux-x64.AppImage (Universal)
+# macOS:
+#   - ogedit-macos-x64.tar.gz / .zip / .pkg
+#   - ogedit-macos-arm64.tar.gz / .zip / .pkg
 # - SHA256 checksums for each
 
 name: Release
@@ -96,6 +102,16 @@ jobs:
           cp README.md artifact/
           cp LICENSE artifact/ 2>/dev/null || echo "No LICENSE file"
 
+      - name: Get version from tag
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/release/v}
+          # Strip any prerelease suffix for package versions (e.g., 1.2.2-beta.1 -> 1.2.2)
+          VERSION_CLEAN=$(echo "$VERSION" | sed 's/-.*$//')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION_CLEAN=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+
       - name: Create zip (Unix)
         if: matrix.os != 'windows-latest'
         run: |
@@ -128,7 +144,337 @@ jobs:
           path: ${{ matrix.artifact }}.zip.sha256
           retention-days: 5
 
-      # MSI Installer (Windows only)
+      # ===========================================
+      # macOS .pkg Installer
+      # ===========================================
+      - name: Build macOS .pkg installer
+        if: matrix.os == 'macos-latest'
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION_CLEAN }}"
+
+          # Create package root structure
+          mkdir -p pkg-root/usr/local/bin
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} pkg-root/usr/local/bin/ogedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} pkg-root/usr/local/bin/ogmsedit
+          chmod 755 pkg-root/usr/local/bin/*
+
+          # Build the component package
+          pkgbuild \
+            --root pkg-root \
+            --identifier com.nucs.ogedit \
+            --version "$VERSION" \
+            --install-location / \
+            ${{ matrix.artifact }}.pkg
+
+          # Generate checksum
+          shasum -a 256 ${{ matrix.artifact }}.pkg > ${{ matrix.artifact }}.pkg.sha256
+          cat ${{ matrix.artifact }}.pkg.sha256
+
+      - name: Upload macOS .pkg artifact
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-pkg
+          path: ${{ matrix.artifact }}.pkg
+          retention-days: 5
+
+      - name: Upload macOS .pkg checksum
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.pkg.sha256
+          path: ${{ matrix.artifact }}.pkg.sha256
+          retention-days: 5
+
+      - name: Create macOS .tar.gz
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd artifact
+          tar -czvf ../${{ matrix.artifact }}.tar.gz ./*
+          cd ..
+          shasum -a 256 ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+          cat ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Upload macOS .tar.gz artifact
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-tar
+          path: ${{ matrix.artifact }}.tar.gz
+          retention-days: 5
+
+      - name: Upload macOS .tar.gz checksum
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.tar.gz.sha256
+          path: ${{ matrix.artifact }}.tar.gz.sha256
+          retention-days: 5
+
+      # ===========================================
+      # Linux Packages (.tar.gz, .tar.xz, .deb, .rpm, .AppImage)
+      # ===========================================
+      - name: Create Linux .tar.gz
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd artifact
+          tar -czvf ../${{ matrix.artifact }}.tar.gz ./*
+          cd ..
+          sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+          cat ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Upload Linux .tar.gz artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-tar
+          path: ${{ matrix.artifact }}.tar.gz
+          retention-days: 5
+
+      - name: Upload Linux .tar.gz checksum
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.tar.gz.sha256
+          path: ${{ matrix.artifact }}.tar.gz.sha256
+          retention-days: 5
+
+      - name: Create Linux .tar.xz
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd artifact
+          tar -cJvf ../${{ matrix.artifact }}.tar.xz ./*
+          cd ..
+          sha256sum ${{ matrix.artifact }}.tar.xz > ${{ matrix.artifact }}.tar.xz.sha256
+          cat ${{ matrix.artifact }}.tar.xz.sha256
+
+      - name: Upload Linux .tar.xz artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-tarxz
+          path: ${{ matrix.artifact }}.tar.xz
+          retention-days: 5
+
+      - name: Upload Linux .tar.xz checksum
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.tar.xz.sha256
+          path: ${{ matrix.artifact }}.tar.xz.sha256
+          retention-days: 5
+
+      - name: Build Linux .deb package
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION_CLEAN }}"
+          PKG_NAME="ogedit"
+
+          # Create .deb directory structure
+          mkdir -p deb-root/DEBIAN
+          mkdir -p deb-root/usr/bin
+          mkdir -p deb-root/usr/share/doc/ogedit
+
+          # Copy binaries
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} deb-root/usr/bin/ogedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} deb-root/usr/bin/ogmsedit
+          chmod 755 deb-root/usr/bin/*
+
+          # Copy docs
+          cp README.md deb-root/usr/share/doc/ogedit/
+          cp LICENSE deb-root/usr/share/doc/ogedit/ 2>/dev/null || true
+
+          # Create control file
+          cat > deb-root/DEBIAN/control << EOF
+          Package: ogedit
+          Version: ${VERSION}
+          Section: editors
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Nucs <nucs@users.noreply.github.com>
+          Homepage: https://github.com/Nucs/ogedit
+          Description: Terminal-based text editor inspired by MS-DOS Editor
+           OGEdit is a fast, lightweight terminal text editor built in Rust.
+           It features SIMD-optimized operations, handles large files efficiently,
+           and provides a nostalgic MS-DOS Editor experience.
+          EOF
+
+          # Build .deb
+          dpkg-deb --build deb-root ${{ matrix.artifact }}.deb
+
+          # Generate checksum
+          sha256sum ${{ matrix.artifact }}.deb > ${{ matrix.artifact }}.deb.sha256
+          cat ${{ matrix.artifact }}.deb.sha256
+
+      - name: Upload Linux .deb artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-deb
+          path: ${{ matrix.artifact }}.deb
+          retention-days: 5
+
+      - name: Upload Linux .deb checksum
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.deb.sha256
+          path: ${{ matrix.artifact }}.deb.sha256
+          retention-days: 5
+
+      - name: Build Linux .rpm package
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION_CLEAN }}"
+
+          # Install rpm tools
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+          # Create RPM build structure
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin
+          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit
+
+          # Copy files
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogmsedit
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/*
+          cp README.md rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit/
+          cp LICENSE rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit/ 2>/dev/null || true
+
+          # Create spec file
+          cat > rpmbuild/SPECS/ogedit.spec << EOF
+          Name:           ogedit
+          Version:        ${VERSION}
+          Release:        1
+          Summary:        Terminal-based text editor inspired by MS-DOS Editor
+          License:        MIT
+          URL:            https://github.com/Nucs/ogedit
+
+          %description
+          OGEdit is a fast, lightweight terminal text editor built in Rust.
+          It features SIMD-optimized operations, handles large files efficiently,
+          and provides a nostalgic MS-DOS Editor experience.
+
+          %files
+          /usr/bin/ogedit
+          /usr/bin/ogmsedit
+          /usr/share/doc/ogedit/README.md
+          %doc /usr/share/doc/ogedit/
+
+          %changelog
+          * $(date '+%a %b %d %Y') Nucs <nucs@users.noreply.github.com> - ${VERSION}-1
+          - Release ${VERSION}
+          EOF
+
+          # Build RPM
+          rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/ogedit.spec
+
+          # Move and rename
+          mv rpmbuild/RPMS/x86_64/ogedit-${VERSION}-1.x86_64.rpm ${{ matrix.artifact }}.rpm
+
+          # Generate checksum
+          sha256sum ${{ matrix.artifact }}.rpm > ${{ matrix.artifact }}.rpm.sha256
+          cat ${{ matrix.artifact }}.rpm.sha256
+
+      - name: Upload Linux .rpm artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-rpm
+          path: ${{ matrix.artifact }}.rpm
+          retention-days: 5
+
+      - name: Upload Linux .rpm checksum
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.rpm.sha256
+          path: ${{ matrix.artifact }}.rpm.sha256
+          retention-days: 5
+
+      - name: Build Linux .AppImage
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+
+          # Download appimagetool
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          # Copy binary
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} AppDir/usr/bin/ogedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} AppDir/usr/bin/ogmsedit
+          chmod 755 AppDir/usr/bin/*
+
+          # Create desktop file
+          cat > AppDir/ogedit.desktop << EOF
+          [Desktop Entry]
+          Type=Application
+          Name=OGEdit
+          Exec=ogedit
+          Icon=ogedit
+          Comment=Terminal-based text editor inspired by MS-DOS Editor
+          Categories=Utility;TextEditor;
+          Terminal=true
+          EOF
+          cp AppDir/ogedit.desktop AppDir/usr/share/applications/
+
+          # Create a simple icon (or copy if exists)
+          if [ -f assets/edit.ico ]; then
+            # Convert ico to png if possible, or create placeholder
+            convert assets/edit.ico -resize 256x256 AppDir/ogedit.png 2>/dev/null || \
+            convert -size 256x256 xc:navy -fill white -gravity center -pointsize 48 -annotate 0 "OG" AppDir/ogedit.png 2>/dev/null || \
+            echo "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" | base64 -d > AppDir/ogedit.png
+          else
+            # Create simple placeholder icon
+            convert -size 256x256 xc:navy -fill white -gravity center -pointsize 48 -annotate 0 "OG" AppDir/ogedit.png 2>/dev/null || \
+            echo "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAACXBIWXMAAAsTAAALEwEAmpwYAAAF8ElEQVR4nO3dW3LbOhBAUWb/m870D5lEtuXHJQGCB+ecqkylYkvkoxto0PH9fr8DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACg6HP0BwDg4GMffQAA+xkA8j4+Rt8CqPhj9BcA2M8AAPACBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4iT9GfwGA/dwBAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDAS3yM/gIA+7kDAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvMQfo78AwH7uAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8xMfoLwCwnzsAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDAS/wx+gsA7OcOAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeIn/AKbwronjFqdvAAAAAElFTkSuQmCC" | base64 -d > AppDir/ogedit.png
+          fi
+          cp AppDir/ogedit.png AppDir/usr/share/icons/hicolor/256x256/apps/
+
+          # Create AppRun
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/ogedit" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          # Build AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir ${{ matrix.artifact }}.AppImage
+
+          # Generate checksum
+          sha256sum ${{ matrix.artifact }}.AppImage > ${{ matrix.artifact }}.AppImage.sha256
+          cat ${{ matrix.artifact }}.AppImage.sha256
+
+      - name: Upload Linux .AppImage artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-appimage
+          path: ${{ matrix.artifact }}.AppImage
+          retention-days: 5
+
+      - name: Upload Linux .AppImage checksum
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.AppImage.sha256
+          path: ${{ matrix.artifact }}.AppImage.sha256
+          retention-days: 5
+
+      # ===========================================
+      # Windows MSI Installer
+      # ===========================================
       - name: Install WiX Toolset
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -136,19 +482,11 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
 
-      - name: Get version from tag
-        if: matrix.os == 'windows-latest'
-        id: get_version
-        shell: bash
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/release/v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-
       - name: Build MSI
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $version = "${{ steps.get_version.outputs.VERSION }}"
+          $version = "${{ steps.get_version.outputs.VERSION_CLEAN }}"
           $binaryPath = "target/${{ matrix.target }}/release"
           $assetPath = "assets"
 
@@ -223,20 +561,27 @@ jobs:
           echo "" >> $GITHUB_OUTPUT
           echo "### Downloads" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "#### Windows (with installer)" >> $GITHUB_OUTPUT
-          echo "| Architecture | Installer | Portable |" >> $GITHUB_OUTPUT
-          echo "|--------------|-----------|----------|" >> $GITHUB_OUTPUT
+          echo "#### Windows" >> $GITHUB_OUTPUT
+          echo "| Architecture | Installer (adds to PATH) | Portable |" >> $GITHUB_OUTPUT
+          echo "|--------------|--------------------------|----------|" >> $GITHUB_OUTPUT
           echo "| x64 | \`ogedit-windows-x64.msi\` | \`ogedit-windows-x64.zip\` |" >> $GITHUB_OUTPUT
           echo "| ARM64 | \`ogedit-windows-arm64.msi\` | \`ogedit-windows-arm64.zip\` |" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "The MSI installer adds OGEdit to your PATH automatically." >> $GITHUB_OUTPUT
+          echo "#### macOS" >> $GITHUB_OUTPUT
+          echo "| Architecture | Installer (adds to PATH) | Portable |" >> $GITHUB_OUTPUT
+          echo "|--------------|--------------------------|----------|" >> $GITHUB_OUTPUT
+          echo "| x64 (Intel) | \`ogedit-macos-x64.pkg\` | \`.tar.gz\` / \`.zip\` |" >> $GITHUB_OUTPUT
+          echo "| ARM64 (Apple Silicon) | \`ogedit-macos-arm64.pkg\` | \`.tar.gz\` / \`.zip\` |" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "#### Linux / macOS (portable)" >> $GITHUB_OUTPUT
-          echo "| Platform | Architecture | Download |" >> $GITHUB_OUTPUT
-          echo "|----------|--------------|----------|" >> $GITHUB_OUTPUT
-          echo "| Linux | x64 | \`ogedit-linux-x64.zip\` |" >> $GITHUB_OUTPUT
-          echo "| macOS | x64 (Intel) | \`ogedit-macos-x64.zip\` |" >> $GITHUB_OUTPUT
-          echo "| macOS | ARM64 (Apple Silicon) | \`ogedit-macos-arm64.zip\` |" >> $GITHUB_OUTPUT
+          echo "#### Linux" >> $GITHUB_OUTPUT
+          echo "| Format | File | Description |" >> $GITHUB_OUTPUT
+          echo "|--------|------|-------------|" >> $GITHUB_OUTPUT
+          echo "| Debian/Ubuntu | \`ogedit-linux-x64.deb\` | \`sudo dpkg -i ogedit-linux-x64.deb\` |" >> $GITHUB_OUTPUT
+          echo "| Fedora/RHEL | \`ogedit-linux-x64.rpm\` | \`sudo rpm -i ogedit-linux-x64.rpm\` |" >> $GITHUB_OUTPUT
+          echo "| AppImage | \`ogedit-linux-x64.AppImage\` | Universal, run directly |" >> $GITHUB_OUTPUT
+          echo "| Portable | \`ogedit-linux-x64.tar.xz\` | Best compression |" >> $GITHUB_OUTPUT
+          echo "| Portable | \`ogedit-linux-x64.tar.gz\` | Standard Unix archive |" >> $GITHUB_OUTPUT
+          echo "| Portable | \`ogedit-linux-x64.zip\` | Cross-platform |" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "### Verification" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
@@ -244,12 +589,27 @@ jobs:
           echo "" >> $GITHUB_OUTPUT
           echo "### Installation" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "**Windows (MSI):** Run the installer. OGEdit will be added to PATH." >> $GITHUB_OUTPUT
+          echo "**Windows:** Run the \`.msi\` installer. OGEdit will be added to PATH." >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "**Portable (all platforms):**" >> $GITHUB_OUTPUT
-          echo "1. Download the appropriate zip for your platform" >> $GITHUB_OUTPUT
-          echo "2. Extract to a directory in your PATH" >> $GITHUB_OUTPUT
-          echo "3. Run \`ogedit\` or \`ogmsedit\`" >> $GITHUB_OUTPUT
+          echo "**macOS:** Run the \`.pkg\` installer. Installs to \`/usr/local/bin\` (already on PATH)." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Linux (Debian/Ubuntu):**" >> $GITHUB_OUTPUT
+          echo "\`\`\`bash" >> $GITHUB_OUTPUT
+          echo "sudo dpkg -i ogedit-linux-x64.deb" >> $GITHUB_OUTPUT
+          echo "\`\`\`" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Linux (Fedora/RHEL):**" >> $GITHUB_OUTPUT
+          echo "\`\`\`bash" >> $GITHUB_OUTPUT
+          echo "sudo rpm -i ogedit-linux-x64.rpm" >> $GITHUB_OUTPUT
+          echo "\`\`\`" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Linux (AppImage):**" >> $GITHUB_OUTPUT
+          echo "\`\`\`bash" >> $GITHUB_OUTPUT
+          echo "chmod +x ogedit-linux-x64.AppImage" >> $GITHUB_OUTPUT
+          echo "./ogedit-linux-x64.AppImage" >> $GITHUB_OUTPUT
+          echo "\`\`\`" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Portable (all platforms):** Extract and add the directory to your PATH." >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create release
@@ -264,3 +624,15 @@ jobs:
             ogedit-*.zip.sha256
             ogedit-*.msi
             ogedit-*.msi.sha256
+            ogedit-*.pkg
+            ogedit-*.pkg.sha256
+            ogedit-*.tar.gz
+            ogedit-*.tar.gz.sha256
+            ogedit-*.tar.xz
+            ogedit-*.tar.xz.sha256
+            ogedit-*.deb
+            ogedit-*.deb.sha256
+            ogedit-*.rpm
+            ogedit-*.rpm.sha256
+            ogedit-*.AppImage
+            ogedit-*.AppImage.sha256

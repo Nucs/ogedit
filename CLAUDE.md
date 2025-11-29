@@ -868,26 +868,43 @@ Triggered by tags matching `release/v*` (e.g., `release/v1.2.1`).
 
 **Build Targets:**
 
-| Platform | Target | Portable | Installer |
-|----------|--------|----------|-----------|
+| Platform | Target | Portable | Installer (adds to PATH) |
+|----------|--------|----------|--------------------------|
 | Windows x64 | `x86_64-pc-windows-msvc` | `.zip` | `.msi` |
 | Windows ARM64 | `aarch64-pc-windows-msvc` | `.zip` | `.msi` |
-| Linux x64 | `x86_64-unknown-linux-gnu` | `.zip` | - |
-| macOS x64 | `x86_64-apple-darwin` | `.zip` | - |
-| macOS ARM64 | `aarch64-apple-darwin` | `.zip` | - |
+| Linux x64 | `x86_64-unknown-linux-gnu` | `.tar.xz`, `.tar.gz`, `.zip` | `.deb`, `.rpm`, `.AppImage` |
+| macOS x64 | `x86_64-apple-darwin` | `.tar.gz`, `.zip` | `.pkg` |
+| macOS ARM64 | `aarch64-apple-darwin` | `.tar.gz`, `.zip` | `.pkg` |
 
-**Portable zip contains:**
+**Portable archives contain:**
 - `ogedit` (or `ogedit.exe` on Windows)
 - `ogmsedit` (alternative binary name)
 - `README.md`
 - `LICENSE`
 
-**MSI Installer (Windows only):**
+**Windows MSI Installer:**
 - Installs to `Program Files\OGEdit`
 - Adds installation directory to system PATH
 - Creates Start Menu shortcuts
 - Built using WiX Toolset v5
 - Configuration: `wix/main.wxs`
+
+**macOS PKG Installer:**
+- Installs to `/usr/local/bin` (already on PATH)
+- Includes both `ogedit` and `ogmsedit` binaries
+- Built using native `pkgbuild`
+
+**Linux DEB Package (Debian/Ubuntu):**
+- Installs to `/usr/bin`
+- Install: `sudo dpkg -i ogedit-linux-x64.deb`
+
+**Linux RPM Package (Fedora/RHEL):**
+- Installs to `/usr/bin`
+- Install: `sudo rpm -i ogedit-linux-x64.rpm`
+
+**Linux AppImage:**
+- Universal portable format, runs on most Linux distributions
+- No installation required: `chmod +x ogedit-linux-x64.AppImage && ./ogedit-linux-x64.AppImage`
 
 **SHA256 checksums** are generated for each artifact (`.sha256` files).
 
