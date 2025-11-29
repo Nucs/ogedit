@@ -56,9 +56,58 @@ impl Document {
         let path = self.path.as_ref().unwrap().as_path();
         let mut file = DocumentManager::open_for_reading(path)?;
 
+        // Save cursor state before reload
+        let (saved_pos, saved_line_content) = {
+            let tb = self.buffer.borrow();
+            let pos = tb.cursor_logical_pos();
+            let line_content = tb.extract_line_content(pos.y);
+            (pos, line_content)
+        };
+
+        // Reload the file
         {
             let mut tb = self.buffer.borrow_mut();
             tb.read_file(&mut file, encoding)?;
+        }
+
+        // Restore cursor position after reload
+        {
+            let mut tb = self.buffer.borrow_mut();
+            let new_line_count = tb.logical_line_count();
+
+            // Try to find the same line content in the new file
+            let target_line = if let Some((content, _)) = saved_line_content {
+                if !content.is_empty() {
+                    let matches = tb.find_line_matches(&content);
+                    if matches.len() == 1 {
+                        // Unique match - use that line
+                        Some(matches[0].0)
+                    } else if matches.len() > 1 {
+                        // Multiple matches - find the one closest to the original line number
+                        let closest = matches
+                            .iter()
+                            .min_by_key(|(line, _)| (*line - saved_pos.y).abs())
+                            .map(|(line, _)| *line);
+                        closest
+                    } else {
+                        // No matches - fall back to clamping
+                        None
+                    }
+                } else {
+                    // Empty line content - just try to restore the line number
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Calculate the target position
+            let target_y = target_line.unwrap_or_else(|| saved_pos.y.min(new_line_count - 1).max(0));
+            let target_x = saved_pos.x; // Column will be clamped by cursor_move_to_logical
+
+            // Move cursor to the target position
+            tb.cursor_move_to_logical(Point { x: target_x, y: target_y });
+            tb.make_cursor_visible();
         }
 
         if let Ok(id) = sys::file_id(None, path) {

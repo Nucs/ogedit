@@ -3038,7 +3038,7 @@ impl TextBuffer {
             let safe_start = self.measurement_config().goto_logical(Point { x: 0, y: target.y });
 
             // From our safe position we can measure the actual visual position of the cursor.
-            self.set_cursor_internal(self.cursor_move_to_logical_internal(safe_start, target));
+            let new_cursor = self.cursor_move_to_logical_internal(safe_start, target);
 
             // If content is added at the insertion position, that's not a problem:
             // We can just remeasure the height of this one line and calculate the delta.
@@ -3047,17 +3047,24 @@ impl TextBuffer {
             // The problem is when content is deleted, because it may affect lines
             // beyond the end of the `next_line`. In that case we have to measure
             // the entire buffer contents until the end to compute `self.stats.visual_lines`.
+            //
+            // NOTE: We must update stats.visual_lines BEFORE calling set_cursor_internal,
+            // because set_cursor_internal has a debug assertion that checks
+            // cursor.visual_pos.y <= self.stats.visual_lines.
             if deleted_count < info.distance_next_line_start {
                 // Now we can measure how many more visual rows this logical line spans.
                 let next_line = self
-                    .cursor_move_to_logical_internal(self.cursor, Point { x: 0, y: target.y + 1 });
+                    .cursor_move_to_logical_internal(new_cursor, Point { x: 0, y: target.y + 1 });
                 let lines_before = info.line_height_in_rows;
                 let lines_after = next_line.visual_pos.y - safe_start.visual_pos.y;
                 self.stats.visual_lines += lines_after - lines_before;
             } else {
-                let end = self.cursor_move_to_logical_internal(self.cursor, Point::MAX);
+                let end = self.cursor_move_to_logical_internal(new_cursor, Point::MAX);
                 self.stats.visual_lines = end.visual_pos.y + 1;
             }
+
+            // Now set the cursor - stats.visual_lines has been updated so the assertion will pass.
+            self.set_cursor_internal(new_cursor);
         } else {
             // If word-wrap is disabled the visual line count always matches the logical one.
             self.stats.visual_lines = self.stats.logical_lines;
@@ -3213,6 +3220,127 @@ impl TextBuffer {
         let mut out = Vec::new();
         self.buffer.extract_raw(range, &mut out, 0);
         out
+    }
+
+    /// Extract the content of a specific line (by logical line number, 0-indexed).
+    /// Returns the line content without the trailing newline, and the byte offset of the line start.
+    /// Returns None if the line number is out of bounds.
+    pub fn extract_line_content(&self, line_number: CoordType) -> Option<(Vec<u8>, usize)> {
+        if line_number < 0 || line_number >= self.stats.logical_lines {
+            return None;
+        }
+
+        // Navigate to the start of the requested line
+        let mut offset = 0;
+        let mut current_line = 0;
+
+        // Find the start of the line
+        while current_line < line_number {
+            let chunk = self.read_forward(offset);
+            if chunk.is_empty() {
+                return None;
+            }
+
+            let (delta, line) = simd::lines_fwd(chunk, 0, current_line, line_number);
+            offset += delta;
+            current_line = line;
+        }
+
+        let line_start = offset;
+
+        // Find the end of the line (next newline or end of buffer)
+        let chunk = self.read_forward(offset);
+        let mut line_end = offset;
+
+        for (i, &b) in chunk.iter().enumerate() {
+            if b == b'\n' {
+                line_end = offset + i;
+                break;
+            }
+            line_end = offset + i + 1;
+        }
+
+        // If we didn't find a newline in this chunk, we're at the last line
+        if line_end == offset + chunk.len() && !chunk.is_empty() && chunk[chunk.len() - 1] != b'\n' {
+            line_end = offset + chunk.len();
+        }
+
+        // Extract the line content (excluding trailing \r\n or \n)
+        let mut content = self.extract_bytes(line_start..line_end);
+
+        // Remove trailing \r if present (CRLF case)
+        if content.ends_with(b"\r") {
+            content.pop();
+        }
+
+        Some((content, line_start))
+    }
+
+    /// Find all occurrences of a pattern in the buffer.
+    /// Returns a vector of (line_number, byte_offset) pairs.
+    pub fn find_line_matches(&self, pattern: &[u8]) -> Vec<(CoordType, usize)> {
+        if pattern.is_empty() {
+            return Vec::new();
+        }
+
+        let mut matches = Vec::new();
+        let text_len = self.buffer.len();
+        let pattern_len = pattern.len();
+        let mut offset = 0;
+
+        while offset + pattern_len <= text_len {
+            let chunk = self.read_forward(offset);
+            if chunk.is_empty() {
+                break;
+            }
+
+            // Search for the pattern in this chunk
+            let mut pos = 0;
+            while pos + pattern_len <= chunk.len() {
+                if &chunk[pos..pos + pattern_len] == pattern {
+                    let match_offset = offset + pos;
+                    // Count lines to this position
+                    let line = self.offset_to_line(match_offset);
+                    matches.push((line, match_offset));
+                    pos += pattern_len;
+                } else {
+                    pos += 1;
+                }
+            }
+
+            // Move to next chunk, overlapping by pattern_len - 1 to catch patterns that span chunks
+            offset += chunk.len().saturating_sub(pattern_len - 1).max(1);
+        }
+
+        matches
+    }
+
+    /// Convert a byte offset to a logical line number.
+    fn offset_to_line(&self, target_offset: usize) -> CoordType {
+        let mut offset = 0;
+        let mut line = 0;
+
+        while offset < target_offset {
+            let chunk = self.read_forward(offset);
+            if chunk.is_empty() {
+                break;
+            }
+
+            // Count newlines in this chunk up to the target offset
+            let chunk_end = (target_offset - offset).min(chunk.len());
+            for (i, &b) in chunk[..chunk_end].iter().enumerate() {
+                if b == b'\n' {
+                    line += 1;
+                }
+                if offset + i + 1 >= target_offset {
+                    break;
+                }
+            }
+
+            offset += chunk.len();
+        }
+
+        line
     }
 }
 
