@@ -9,6 +9,7 @@ OGEdit aims to deliver more features faster with less bureaucracy.
 - [Key Features](#features)
   - [Ctrl+D Duplicate Line](#ctrld-duplicate-line)
   - [Persistent Configuration](#persistent-configuration)
+  - [Configurable Hotkeys](#configurable-hotkeys)
   - [Per-Project Folder Memory](#per-project-folder-memory)
   - [Recent Files](#recent-files)
   - [File Reload Detection](#file-reload-detection)
@@ -51,10 +52,54 @@ Settings are saved to `~/.ogedit/state.json` and restored on startup:
 | `line_highlight` | Highlight the current line | `true` |
 | `insert_final_newline` | Add newline at end of file when saving | `true` on Unix, `false` on Windows |
 | `ruler_column` | Vertical ruler position (0-255, 0=disabled) | `0` |
+| `hotkeys` | Keyboard shortcuts (see [Configurable Hotkeys](#configurable-hotkeys)) | (defaults below) |
 | `project_folders` | Per-project last-used save folders (auto-managed) | `{}` |
 | `recent_files` | Recently opened files with timestamps (auto-managed, max 100) | `[]` |
 
 Changes via status bar or View menu are saved automatically. The config file supports `//` comments.
+
+### Configurable Hotkeys
+
+All keyboard shortcuts are customizable in `state.json` under the `hotkeys` object:
+
+```json
+"hotkeys": {
+  "file_new": "Ctrl+N",
+  "file_save": "Ctrl+S",
+  "edit_duplicate_line": "Ctrl+D"
+}
+```
+
+**Format:** `"action_name": "Modifier+Key"`
+
+**Available modifiers:** `Ctrl`, `Alt`, `Shift` (combine with `+`)
+
+**Available keys:** `A-Z`, `0-9`, `F1-F24`, `Space`, `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown`, `Up`, `Down`, `Left`, `Right`
+
+| Action | Description | Default |
+|--------|-------------|---------|
+| `file_new` | Create new file | `Ctrl+N` |
+| `file_open` | Open file | `Ctrl+O` |
+| `file_save` | Save file | `Ctrl+S` |
+| `file_save_as` | Save As | `Ctrl+Shift+S` |
+| `file_reload` | Reload from disk | `F5` |
+| `file_close` | Close document | `Ctrl+W` |
+| `file_exit` | Exit application | `Ctrl+Q` |
+| `edit_undo` | Undo | `Ctrl+Z` |
+| `edit_redo` | Redo | `Ctrl+Y` |
+| `edit_cut` | Cut | `Ctrl+X` |
+| `edit_copy` | Copy | `Ctrl+C` |
+| `edit_paste` | Paste | `Ctrl+V` |
+| `edit_duplicate_line` | Duplicate line | `Ctrl+D` |
+| `edit_find` | Find | `Ctrl+F` |
+| `edit_replace` | Replace | `Ctrl+R` |
+| `edit_find_next` | Find next | `F3` |
+| `edit_select_all` | Select all | `Ctrl+A` |
+| `view_go_to_file` | Go to file / Recent files | `Ctrl+P` |
+| `view_go_to_line` | Go to line | `Ctrl+G` |
+| `view_word_wrap` | Toggle word wrap | `Alt+Z` |
+
+Invalid or missing hotkeys fall back to defaults.
 
 ### Per-Project Folder Memory
 

@@ -22,6 +22,7 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - `line_highlight`: Highlight the current line (default: true)
   - `insert_final_newline`: Add newline at end of file when saving (default: true on Unix)
   - `ruler_column`: Show vertical ruler at column, 0=disabled (default: 0)
+  - `hotkeys`: Keyboard shortcuts (customizable, see below)
   - `project_folders`: Per-project last-used save folder mapping (auto-managed, do not edit manually)
   - `recent_files`: Recently opened files with timestamps (auto-managed, max 100 entries)
 - Settings are automatically saved when changed via the status bar or View menu
@@ -37,6 +38,43 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - Only files that exist and are not currently open are shown
   - Clicking a recent file opens it immediately
   - Files are sorted by most recently opened
+- **Configurable Hotkeys:**
+  - All keyboard shortcuts are customizable in `state.json` under the `hotkeys` object
+  - Format: `"action_name": "Modifier+Key"` (e.g., `"file_save": "Ctrl+S"`)
+  - Available modifiers: `Ctrl`, `Alt`, `Shift` (combine with `+`)
+  - Available keys: `A-Z`, `0-9`, `F1-F24`, `Space`, `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown`, `Up`, `Down`, `Left`, `Right`
+  - **File operations:**
+    - `file_new`: Create new file (default: `Ctrl+N`)
+    - `file_open`: Open file (default: `Ctrl+O`)
+    - `file_save`: Save file (default: `Ctrl+S`)
+    - `file_save_as`: Save As (default: `Ctrl+Shift+S`)
+    - `file_reload`: Reload from disk (default: `F5`)
+    - `file_close`: Close document (default: `Ctrl+W`)
+    - `file_exit`: Exit application (default: `Ctrl+Q`)
+  - **Edit operations:**
+    - `edit_undo`: Undo (default: `Ctrl+Z`)
+    - `edit_redo`: Redo (default: `Ctrl+Y`)
+    - `edit_cut`: Cut (default: `Ctrl+X`)
+    - `edit_copy`: Copy (default: `Ctrl+C`)
+    - `edit_paste`: Paste (default: `Ctrl+V`)
+    - `edit_duplicate_line`: Duplicate line (default: `Ctrl+D`)
+    - `edit_find`: Find (default: `Ctrl+F`)
+    - `edit_replace`: Replace (default: `Ctrl+R`)
+    - `edit_find_next`: Find next (default: `F3`)
+    - `edit_select_all`: Select all (default: `Ctrl+A`)
+  - **View operations:**
+    - `view_go_to_file`: Go to file / Recent files (default: `Ctrl+P`)
+    - `view_go_to_line`: Go to line (default: `Ctrl+G`)
+    - `view_word_wrap`: Toggle word wrap (default: `Alt+Z`)
+  - Invalid or missing hotkeys fall back to defaults
+  - Example customization:
+    ```json
+    "hotkeys": {
+      "file_save": "Ctrl+Shift+S",
+      "file_save_as": "Ctrl+Alt+S",
+      "edit_duplicate_line": "Ctrl+Shift+D"
+    }
+    ```
 - **Corruption Handling:**
   - If `state.json` is corrupted or contains invalid JSON, it will be backed up to `state.json.backup`
   - A fresh configuration file with default values will be automatically created
