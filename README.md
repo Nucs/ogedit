@@ -10,6 +10,7 @@ OGEdit aims to deliver more features faster with less bureaucracy.
   - [Ctrl+D Duplicate Line](#ctrld-duplicate-line)
   - [Persistent Configuration](#persistent-configuration)
   - [Per-Project Folder Memory](#per-project-folder-memory)
+  - [Recent Files](#recent-files)
   - [File Reload Detection](#file-reload-detection)
   - [Debug Logging](#debug-logging)
   - [Data Directory](#data-directory)
@@ -51,6 +52,7 @@ Settings are saved to `~/.ogedit/state.json` and restored on startup:
 | `insert_final_newline` | Add newline at end of file when saving | `true` on Unix, `false` on Windows |
 | `ruler_column` | Vertical ruler position (0-255, 0=disabled) | `0` |
 | `project_folders` | Per-project last-used save folders (auto-managed) | `{}` |
+| `recent_files` | Recently opened files with timestamps (auto-managed, max 100) | `[]` |
 
 Changes via status bar or View menu are saved automatically. The config file supports `//` comments.
 
@@ -64,6 +66,18 @@ OGEdit remembers the last folder you saved to, per project:
 - **Fallback**: If the saved folder no longer exists, falls back to current working directory
 
 This is useful when working on projects where you frequently save files to a specific subfolder.
+
+### Recent Files
+
+OGEdit tracks recently opened files (up to 100) for quick access:
+
+- **Access:** Press `Ctrl+P` (Go to File) or use **View → Go to File**
+- **Display:** Shows currently open documents, then a separator, then recent files
+- **Filtering:** Only shows files that exist on disk and are not currently open
+- **Opening:** Click or press Enter on a recent file to open it immediately
+- **Persistence:** Recent files are stored in `state.json` with timestamps
+
+This makes it easy to quickly reopen files you were recently working on.
 
 ### File Reload Detection
 

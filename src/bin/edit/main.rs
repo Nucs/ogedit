@@ -339,6 +339,8 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
     for p in &paths {
         logging::log_action(&format!("STARTUP_FILE: {}", p.to_string_lossy()));
         state.documents.add_file_path(p, &state.config)?;
+        // Track in recent files
+        state.config.add_recent_file(p);
     }
 
     if let Some(mut file) = sys::open_stdin_if_redirected() {

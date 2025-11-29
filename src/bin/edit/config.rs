@@ -8,8 +8,18 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ogedit::apperr;
+
+/// A recently opened file with timestamp
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecentFile {
+    /// Absolute path to the file
+    pub path: PathBuf,
+    /// Unix timestamp (seconds) when the file was last opened
+    pub opened_at: u64,
+}
 
 /// Global application configuration stored in ~/.ogedit/state.json
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +42,8 @@ pub struct Config {
     pub ruler_column: u8,
     /// Per-project last-used save folder mapping (project_cwd -> last_save_dir)
     pub project_folders: HashMap<String, String>,
+    /// Recently opened files (max 100), sorted by opened_at descending
+    pub recent_files: Vec<RecentFile>,
 }
 
 impl Default for Config {
@@ -46,6 +58,7 @@ impl Default for Config {
             insert_final_newline: !cfg!(windows), // POSIX compliance on Unix
             ruler_column: 0,          // No ruler by default (0 = disabled)
             project_folders: HashMap::new(),
+            recent_files: Vec::new(),
         }
     }
 }
@@ -216,6 +229,9 @@ impl Config {
         // Parse project_folders HashMap
         config.project_folders = Self::parse_project_folders(content);
 
+        // Parse recent_files array
+        config.recent_files = Self::parse_recent_files(content);
+
         Some(config)
     }
 
@@ -338,6 +354,135 @@ impl Config {
         (result, 0) // No closing quote found
     }
 
+    /// Parse a JSON array for recent_files: [{"path": "...", "opened_at": 123}, ...]
+    fn parse_recent_files(content: &str) -> Vec<RecentFile> {
+        let mut files = Vec::new();
+
+        // Find "recent_files" field
+        let Some(pos) = content.find("\"recent_files\"") else {
+            return files;
+        };
+
+        let rest = content[pos + 14..].trim_start();
+        if !rest.starts_with(':') {
+            return files;
+        }
+
+        let value_part = rest[1..].trim_start();
+        if !value_part.starts_with('[') {
+            return files;
+        }
+
+        // Find the matching closing bracket (accounting for strings and nested objects)
+        let mut depth = 0;
+        let mut end_pos = 0;
+        let mut in_string = false;
+        let mut escape_next = false;
+        for (i, c) in value_part.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+            match c {
+                '\\' if in_string => escape_next = true,
+                '"' => in_string = !in_string,
+                '[' | '{' if !in_string => depth += 1,
+                ']' | '}' if !in_string => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if end_pos == 0 {
+            return files;
+        }
+
+        // Extract the array content between the brackets
+        let array_content = &value_part[1..end_pos];
+
+        // Parse each object in the array
+        let mut remaining = array_content;
+        while let Some(obj_start) = remaining.find('{') {
+            remaining = &remaining[obj_start..];
+
+            // Find matching closing brace
+            let mut depth = 0;
+            let mut obj_end = 0;
+            let mut in_string = false;
+            let mut escape_next = false;
+            for (i, c) in remaining.char_indices() {
+                if escape_next {
+                    escape_next = false;
+                    continue;
+                }
+                match c {
+                    '\\' if in_string => escape_next = true,
+                    '"' => in_string = !in_string,
+                    '{' if !in_string => depth += 1,
+                    '}' if !in_string => {
+                        depth -= 1;
+                        if depth == 0 {
+                            obj_end = i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if obj_end == 0 {
+                break;
+            }
+
+            let obj_content = &remaining[1..obj_end];
+
+            // Parse "path" field
+            let path = if let Some(path_pos) = obj_content.find("\"path\"") {
+                let path_rest = obj_content[path_pos + 6..].trim_start();
+                if path_rest.starts_with(':') {
+                    let path_value = path_rest[1..].trim_start();
+                    if path_value.starts_with('"') {
+                        let (path_str, _) = Self::parse_json_string_content(&path_value[1..]);
+                        Some(PathBuf::from(path_str))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Parse "opened_at" field
+            let opened_at = if let Some(at_pos) = obj_content.find("\"opened_at\"") {
+                let at_rest = obj_content[at_pos + 11..].trim_start();
+                if at_rest.starts_with(':') {
+                    let at_value = at_rest[1..].trim_start();
+                    let end = at_value.find(|c: char| !c.is_ascii_digit()).unwrap_or(at_value.len());
+                    at_value[..end].parse::<u64>().ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let (Some(path), Some(opened_at)) = (path, opened_at) {
+                files.push(RecentFile { path, opened_at });
+            }
+
+            remaining = &remaining[obj_end + 1..];
+        }
+
+        files
+    }
+
     /// Convert configuration to JSON string with comments
     fn to_json(&self) -> String {
         // Get platform-specific defaults for the comment
@@ -346,6 +491,9 @@ impl Config {
 
         // Build project_folders JSON object
         let project_folders_json = Self::project_folders_to_json(&self.project_folders);
+
+        // Build recent_files JSON array
+        let recent_files_json = Self::recent_files_to_json(&self.recent_files);
 
         format!(
             concat!(
@@ -378,7 +526,10 @@ impl Config {
                 "  \"ruler_column\": {},\n",
                 "\n",
                 "  // Per-project last-used save folder (auto-managed, do not edit)\n",
-                "  \"project_folders\": {}\n",
+                "  \"project_folders\": {},\n",
+                "\n",
+                "  // Recently opened files (auto-managed, do not edit)\n",
+                "  \"recent_files\": {}\n",
                 "}}\n"
             ),
             self.word_wrap,
@@ -391,7 +542,8 @@ impl Config {
             default_final_newline,
             self.insert_final_newline,
             self.ruler_column,
-            project_folders_json
+            project_folders_json,
+            recent_files_json
         )
     }
 
@@ -415,6 +567,29 @@ impl Config {
             json.push('"');
         }
         json.push_str("\n  }");
+        json
+    }
+
+    /// Convert recent_files Vec to a JSON array string
+    fn recent_files_to_json(files: &[RecentFile]) -> String {
+        if files.is_empty() {
+            return "[]".to_string();
+        }
+
+        let mut json = String::from("[\n");
+        let mut first = true;
+        for file in files {
+            if !first {
+                json.push_str(",\n");
+            }
+            first = false;
+            json.push_str("    { \"path\": \"");
+            json.push_str(&Self::escape_json_string(&file.path.to_string_lossy()));
+            json.push_str("\", \"opened_at\": ");
+            json.push_str(&file.opened_at.to_string());
+            json.push_str(" }");
+        }
+        json.push_str("\n  ]");
         json
     }
 
@@ -442,6 +617,34 @@ impl Config {
     /// Set the last-used save folder for a project and save config
     pub fn set_project_folder(&mut self, project_cwd: &str, last_save_dir: &str) {
         self.project_folders.insert(project_cwd.to_string(), last_save_dir.to_string());
+        let _ = self.save();
+    }
+
+    /// Add or update a file in the recent files list.
+    /// If the file already exists, updates its timestamp.
+    /// Maintains max 100 entries, sorted by opened_at descending.
+    pub fn add_recent_file(&mut self, path: &std::path::Path) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Check if file already exists in list
+        if let Some(existing) = self.recent_files.iter_mut().find(|f| f.path == path) {
+            existing.opened_at = now;
+        } else {
+            self.recent_files.push(RecentFile {
+                path: path.to_path_buf(),
+                opened_at: now,
+            });
+        }
+
+        // Sort by opened_at descending (most recent first)
+        self.recent_files.sort_by(|a, b| b.opened_at.cmp(&a.opened_at));
+
+        // Trim to max 100 entries
+        self.recent_files.truncate(100);
+
         let _ = self.save();
     }
 }
@@ -540,6 +743,7 @@ mod tests {
             insert_final_newline: true,
             ruler_column: 120,
             project_folders: HashMap::new(),
+            recent_files: Vec::new(),
         };
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();
@@ -572,6 +776,42 @@ mod tests {
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();
         assert_eq!(parsed.project_folders, original.project_folders);
+    }
+
+    #[test]
+    fn test_recent_files_roundtrip() {
+        // Test that recent_files can be serialized and deserialized
+        let mut original = Config::default();
+        original.recent_files.push(RecentFile {
+            path: PathBuf::from("/home/user/file.txt"),
+            opened_at: 1732900000,
+        });
+        original.recent_files.push(RecentFile {
+            path: PathBuf::from("C:\\Users\\Test\\doc.rs"),
+            opened_at: 1732890000,
+        });
+
+        let json = original.to_json();
+        let parsed = Config::parse(&json).unwrap();
+        assert_eq!(parsed.recent_files, original.recent_files);
+    }
+
+    #[test]
+    fn test_recent_files_escaping() {
+        // Test that special characters in paths are properly escaped and parsed
+        let mut original = Config::default();
+        original.recent_files.push(RecentFile {
+            path: PathBuf::from("path\"with\"quotes.txt"),
+            opened_at: 1732900000,
+        });
+        original.recent_files.push(RecentFile {
+            path: PathBuf::from("path\\with\\backslashes.txt"),
+            opened_at: 1732890000,
+        });
+
+        let json = original.to_json();
+        let parsed = Config::parse(&json).unwrap();
+        assert_eq!(parsed.recent_files, original.recent_files);
     }
 
     #[test]

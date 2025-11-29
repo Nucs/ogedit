@@ -23,12 +23,20 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - `insert_final_newline`: Add newline at end of file when saving (default: true on Unix)
   - `ruler_column`: Show vertical ruler at column, 0=disabled (default: 0)
   - `project_folders`: Per-project last-used save folder mapping (auto-managed, do not edit manually)
+  - `recent_files`: Recently opened files with timestamps (auto-managed, max 100 entries)
 - Settings are automatically saved when changed via the status bar or View menu
 - **Per-project folder memory:**
   - When you save a file using Save As, the editor remembers the folder you saved to
   - This is stored per-project, where "project" is the working directory where the editor was launched
   - Next time you open the editor in the same project, the Save As dialog will default to the last-used folder
   - This helps when working on projects where you frequently save files to a specific folder
+- **Recent files:**
+  - The editor tracks recently opened files (up to 100)
+  - Access via **Ctrl+P** (Go to File) - shows open documents followed by recent files after a separator
+  - Recent files are also shown in the **File > Open** dialog
+  - Only files that exist and are not currently open are shown
+  - Clicking a recent file opens it immediately
+  - Files are sorted by most recently opened
 - **Corruption Handling:**
   - If `state.json` is corrupted or contains invalid JSON, it will be backed up to `state.json.backup`
   - A fresh configuration file with default values will be automatically created

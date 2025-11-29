@@ -22,11 +22,22 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
     ctx.attr_intrinsic_size(Size { width: COORD_TYPE_SAFE_MAX, height: 1 });
     ctx.attr_padding(Rect::two(0, 1));
 
-    // Check if file has changed on disk (before borrowing doc)
-    let file_changed_on_disk = state
-        .documents
-        .active()
-        .is_some_and(|d| d.has_file_changed_on_disk());
+    // Check if file has changed on disk every 120 frames (≈2 seconds)
+    // This populates state.file_changed_cached which the File menu uses
+    state.file_check_counter += 1;
+    if state.file_check_counter >= 120 {
+        state.file_check_counter = 0;
+        let changed = state
+            .documents
+            .active()
+            .is_some_and(|d| d.has_file_changed_on_disk());
+        state.file_changed_cached = changed;
+
+        // DEBUG: Log when we check
+        if state.documents.active().is_some() {
+            logging::log_action(&format!("RELOAD_CHECK: changed={}", changed));
+        }
+    }
 
     if let Some(doc) = state.documents.active() {
         let mut tb = doc.buffer.borrow_mut();
@@ -204,15 +215,6 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             ctx.label("dirty", "*");
         }
 
-        // Show indicator if file has changed on disk
-        if file_changed_on_disk {
-            state.wants_reload_menu |= ctx.button(
-                "file-changed",
-                "Modified",
-                ButtonStyle::default(),
-            );
-        }
-
         ctx.block_begin("filename-container");
         ctx.attr_intrinsic_size(Size { width: COORD_TYPE_SAFE_MAX, height: 1 });
         {
@@ -238,12 +240,6 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
         state.wants_statusbar_focus = false;
         state.wants_encoding_picker = false;
         state.wants_indentation_picker = false;
-        state.wants_reload_menu = false;
-    }
-
-    // Draw reload menu if needed (outside the doc borrow scope)
-    if state.wants_reload_menu && file_changed_on_disk {
-        draw_reload_menu(ctx, state);
     }
 
     ctx.table_end();
@@ -375,6 +371,7 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
             ctx.list_begin("documents");
             ctx.inherit_focus();
 
+            // Show currently open documents
             if state.documents.update_active(|doc| {
                 let tb = doc.buffer.borrow();
 
@@ -399,6 +396,41 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
                 ctx.needs_rerender();
             }
 
+            // Show recent files (closed files) after a separator
+            if !state.config.recent_files.is_empty() {
+                // Filter: must exist and not be currently open
+                // Clone paths to avoid borrow issues when opening files
+                let recent_to_show: Vec<_> = state.config.recent_files.iter()
+                    .filter(|rf| rf.path.exists() && !state.documents.is_path_open(&rf.path))
+                    .map(|rf| rf.path.clone())
+                    .collect();
+
+                if !recent_to_show.is_empty() {
+                    // Separator
+                    ctx.list_item(false, "── Recent Files ──");
+                    ctx.attr_overflow(Overflow::TruncateTail);
+
+                    for path in recent_to_show {
+                        let display = path.to_string_lossy();
+                        if ctx.list_item(false, &display) == ListSelection::Activated {
+                            logging::log_action(&format!("OPEN_RECENT_FILE: {}", display));
+                            // Open the file
+                            match state.documents.add_file_path(&path, &state.config) {
+                                Ok(_) => {
+                                    state.config.add_recent_file(&path);
+                                    state.wants_go_to_file = false;
+                                    ctx.needs_rerender();
+                                }
+                                Err(err) => {
+                                    crate::state::error_log_add(ctx, state, err);
+                                }
+                            }
+                        }
+                        ctx.attr_overflow(Overflow::TruncateMiddle);
+                    }
+                }
+            }
+
             ctx.list_end();
         }
         ctx.scrollarea_end();
@@ -409,42 +441,3 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
     }
 }
 
-fn draw_reload_menu(ctx: &mut Context, state: &mut State) {
-    ctx.block_begin("reload-menu");
-    ctx.attr_float(FloatSpec {
-        anchor: Anchor::Last,
-        gravity_x: 0.0,
-        gravity_y: 1.0,
-        offset_x: 0.0,
-        offset_y: 0.0,
-    });
-    ctx.attr_border();
-    ctx.attr_padding(Rect::two(0, 1));
-    {
-        if ctx.button("reload", "Reload", ButtonStyle::default()) {
-            logging::log_action("FILE_RELOAD: User clicked Reload");
-            // Perform the reload
-            if let Err(err) = reload_file_from_disk(state) {
-                crate::state::error_log_add(ctx, state, err);
-            }
-            state.wants_reload_menu = false;
-            ctx.needs_rerender();
-        }
-        ctx.focus_on_first_present();
-    }
-    ctx.block_end();
-
-    if !ctx.contains_focus() {
-        state.wants_reload_menu = false;
-        ctx.needs_rerender();
-    }
-}
-
-fn reload_file_from_disk(state: &mut State) -> ogedit::apperr::Result<()> {
-    if let Some(doc) = state.documents.active_mut() {
-        // Reload the file with current encoding
-        doc.reread(None)?;
-        logging::log_action(&format!("FILE_RELOADED: {}", doc.filename));
-    }
-    Ok(())
-}

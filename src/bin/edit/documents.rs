@@ -97,7 +97,15 @@ impl Document {
         if let (Some(path), Some(last_modified)) = (&self.path, self.last_modified) {
             if let Ok(metadata) = std::fs::metadata(path) {
                 if let Ok(current_modified) = metadata.modified() {
-                    return current_modified != last_modified;
+                    let changed = current_modified != last_modified;
+                    // DEBUG: Log the check result
+                    if changed {
+                        crate::logging::log_action(&format!(
+                            "FILE_CHANGED_DETECTED: {} (last: {:?}, current: {:?})",
+                            path.display(), last_modified, current_modified
+                        ));
+                    }
+                    return changed;
                 }
             }
         }
@@ -142,6 +150,11 @@ impl DocumentManager {
 
     pub fn remove_active(&mut self) {
         self.list.pop_front();
+    }
+
+    /// Check if a file path is currently open in any document
+    pub fn is_path_open(&self, path: &Path) -> bool {
+        self.list.iter().any(|doc| doc.path.as_deref() == Some(path))
     }
 
     pub fn add_untitled(&mut self, config: &Config) -> apperr::Result<&mut Document> {
@@ -211,6 +224,12 @@ impl DocumentManager {
         let last_modified = std::fs::metadata(&path)
             .ok()
             .and_then(|m| m.modified().ok());
+
+        // DEBUG: Log timestamp capture
+        crate::logging::log_action(&format!(
+            "FILE_LOAD_TIMESTAMP: {} = {:?}",
+            path.display(), last_modified
+        ));
 
         let mut doc = Document {
             buffer,

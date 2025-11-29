@@ -172,6 +172,37 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                 }
             }
 
+            // Show recent files section (only in Open dialog)
+            if state.wants_file_picker == StateFilePicker::Open && !state.config.recent_files.is_empty() {
+                // Filter recent files: must exist and not be currently open
+                let recent_to_show: Vec<_> = state.config.recent_files.iter()
+                    .filter(|rf| rf.path.exists() && !state.documents.is_path_open(&rf.path))
+                    .collect();
+
+                if !recent_to_show.is_empty() {
+                    // Separator
+                    ctx.list_item(false, "── Recent Files ──");
+                    ctx.attr_overflow(Overflow::TruncateTail);
+
+                    for recent in recent_to_show {
+                        let display = recent.path.to_string_lossy();
+                        match ctx.list_item(false, &display) {
+                            ListSelection::Unchanged => {}
+                            ListSelection::Selected => {
+                                logging::log_action(&format!("RECENT_FILE_SELECT: {}", display));
+                                state.file_picker_pending_name = recent.path.clone();
+                            }
+                            ListSelection::Activated => {
+                                logging::log_action(&format!("RECENT_FILE_ACTIVATE: {}", display));
+                                state.file_picker_pending_name = recent.path.clone();
+                                activated = true;
+                            }
+                        }
+                        ctx.attr_overflow(Overflow::TruncateMiddle);
+                    }
+                }
+            }
+
             ctx.list_end();
         }
         ctx.scrollarea_end();
@@ -265,6 +296,8 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
             Ok(..) => {
                 if is_open {
                     logging::log_file_open(&path_str);
+                    // Track in recent files
+                    state.config.add_recent_file(&path);
                 } else {
                     logging::log_file_save(&path_str);
                     // Save the parent directory as the last-used save folder for this project

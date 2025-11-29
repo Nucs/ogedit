@@ -201,7 +201,7 @@ pub fn draw_dialog_about(ctx: &mut Context, state: &mut State) {
             ctx.attr_overflow(Overflow::TruncateHead);
             ctx.attr_position(Position::Center);
 
-            ctx.label("maintainer", "Maintained by EliBelash");
+            ctx.label("maintainer", "Maintained by Nucs / Eli Belash");
             ctx.attr_overflow(Overflow::TruncateTail);
             ctx.attr_position(Position::Center);
 
