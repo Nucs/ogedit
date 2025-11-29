@@ -386,7 +386,7 @@ mod platform {
 
     impl Drop for NativeWatcher {
         fn drop(&mut self) {
-            for (_, watch) in &self.directories {
+            for watch in self.directories.values() {
                 unsafe {
                     CloseHandle(watch.event);
                     CloseHandle(watch.handle);
@@ -565,8 +565,7 @@ mod platform {
 
             let count = unsafe { libc::kevent(self.kq, std::ptr::null(), 0, event_list.as_mut_ptr(), 16, &timeout) };
 
-            for i in 0..count.max(0) as usize {
-                let event = &event_list[i];
+            for event in event_list.iter().take(count.max(0) as usize) {
                 if let Some(path) = self.watched_fds.get(&(event.ident as RawFd)) {
                     if event.fflags & libc::NOTE_WRITE != 0 {
                         events.push(WatchEvent::Modified(path.clone()));
@@ -582,7 +581,7 @@ mod platform {
 
     impl Drop for NativeWatcher {
         fn drop(&mut self) {
-            for (fd, _) in &self.watched_fds { unsafe { libc::close(*fd) }; }
+            for fd in self.watched_fds.keys() { unsafe { libc::close(*fd) }; }
             unsafe { libc::close(self.kq) };
         }
     }

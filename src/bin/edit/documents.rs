@@ -84,11 +84,10 @@ impl Document {
                         Some(matches[0].0)
                     } else if matches.len() > 1 {
                         // Multiple matches - find the one closest to the original line number
-                        let closest = matches
+                        matches
                             .iter()
                             .min_by_key(|(line, _)| (*line - saved_pos.y).abs())
-                            .map(|(line, _)| *line);
-                        closest
+                            .map(|(line, _)| *line)
                     } else {
                         // No matches - fall back to clamping
                         None

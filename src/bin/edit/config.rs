@@ -451,10 +451,10 @@ impl Config {
     fn parse_hotkey_field(content: &str, field: &str, default: InputKey) -> InputKey {
         if let Some(pos) = content.find(&format!("\"{}\"", field)) {
             let rest = content[pos + field.len() + 2..].trim_start();
-            if rest.starts_with(':') {
-                let value_part = rest[1..].trim_start();
-                if value_part.starts_with('"') {
-                    let (value, _) = Self::parse_json_string_content(&value_part[1..]);
+            if let Some(after_colon) = rest.strip_prefix(':') {
+                let value_part = after_colon.trim_start();
+                if let Some(after_quote) = value_part.strip_prefix('"') {
+                    let (value, _) = Self::parse_json_string_content(after_quote);
                     if let Some(key) = Hotkeys::parse_hotkey(&value) {
                         return key;
                     }
@@ -603,10 +603,10 @@ impl Config {
 
             // Skip to colon
             remaining = remaining.trim_start();
-            if !remaining.starts_with(':') {
+            let Some(after_colon) = remaining.strip_prefix(':') else {
                 break;
-            }
-            remaining = &remaining[1..].trim_start();
+            };
+            remaining = after_colon.trim_start();
 
             // Parse value
             if !remaining.starts_with('"') {
@@ -747,10 +747,10 @@ impl Config {
             // Parse "path" field
             let path = if let Some(path_pos) = obj_content.find("\"path\"") {
                 let path_rest = obj_content[path_pos + 6..].trim_start();
-                if path_rest.starts_with(':') {
-                    let path_value = path_rest[1..].trim_start();
-                    if path_value.starts_with('"') {
-                        let (path_str, _) = Self::parse_json_string_content(&path_value[1..]);
+                if let Some(after_colon) = path_rest.strip_prefix(':') {
+                    let path_value = after_colon.trim_start();
+                    if let Some(after_quote) = path_value.strip_prefix('"') {
+                        let (path_str, _) = Self::parse_json_string_content(after_quote);
                         Some(PathBuf::from(path_str))
                     } else {
                         None
@@ -765,8 +765,8 @@ impl Config {
             // Parse "opened_at" field
             let opened_at = if let Some(at_pos) = obj_content.find("\"opened_at\"") {
                 let at_rest = obj_content[at_pos + 11..].trim_start();
-                if at_rest.starts_with(':') {
-                    let at_value = at_rest[1..].trim_start();
+                if let Some(after_colon) = at_rest.strip_prefix(':') {
+                    let at_value = after_colon.trim_start();
                     let end = at_value.find(|c: char| !c.is_ascii_digit()).unwrap_or(at_value.len());
                     at_value[..end].parse::<u64>().ok()
                 } else {
