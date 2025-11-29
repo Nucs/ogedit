@@ -11,6 +11,212 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ogedit::apperr;
+use ogedit::input::{InputKey, kbmod, vk};
+
+/// Keyboard shortcut configuration.
+/// All shortcuts are stored as human-readable strings like "Ctrl+S", "Alt+Shift+F5", "F3".
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hotkeys {
+    /// File operations
+    pub file_new: InputKey,
+    pub file_open: InputKey,
+    pub file_save: InputKey,
+    pub file_save_as: InputKey,
+    pub file_reload: InputKey,
+    pub file_close: InputKey,
+    pub file_exit: InputKey,
+
+    /// Edit operations
+    pub edit_undo: InputKey,
+    pub edit_redo: InputKey,
+    pub edit_cut: InputKey,
+    pub edit_copy: InputKey,
+    pub edit_paste: InputKey,
+    pub edit_duplicate_line: InputKey,
+    pub edit_find: InputKey,
+    pub edit_replace: InputKey,
+    pub edit_find_next: InputKey,
+    pub edit_select_all: InputKey,
+
+    /// View operations
+    pub view_go_to_file: InputKey,
+    pub view_go_to_line: InputKey,
+    pub view_word_wrap: InputKey,
+}
+
+impl Default for Hotkeys {
+    fn default() -> Self {
+        Self {
+            // File operations
+            file_new: kbmod::CTRL | vk::N,
+            file_open: kbmod::CTRL | vk::O,
+            file_save: kbmod::CTRL | vk::S,
+            file_save_as: kbmod::CTRL_SHIFT | vk::S,
+            file_reload: vk::F5,
+            file_close: kbmod::CTRL | vk::W,
+            file_exit: kbmod::CTRL | vk::Q,
+
+            // Edit operations
+            edit_undo: kbmod::CTRL | vk::Z,
+            edit_redo: kbmod::CTRL | vk::Y,
+            edit_cut: kbmod::CTRL | vk::X,
+            edit_copy: kbmod::CTRL | vk::C,
+            edit_paste: kbmod::CTRL | vk::V,
+            edit_duplicate_line: kbmod::CTRL | vk::D,
+            edit_find: kbmod::CTRL | vk::F,
+            edit_replace: kbmod::CTRL | vk::R,
+            edit_find_next: vk::F3,
+            edit_select_all: kbmod::CTRL | vk::A,
+
+            // View operations
+            view_go_to_file: kbmod::CTRL | vk::P,
+            view_go_to_line: kbmod::CTRL | vk::G,
+            view_word_wrap: kbmod::ALT | vk::Z,
+        }
+    }
+}
+
+impl Hotkeys {
+    /// Parse a hotkey string like "Ctrl+S", "Alt+Shift+F5", "F3" into an InputKey
+    pub fn parse_hotkey(s: &str) -> Option<InputKey> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+
+        let mut modifiers = kbmod::NONE;
+        let mut key_part = s;
+
+        // Parse modifiers (case-insensitive)
+        loop {
+            let lower = key_part.to_lowercase();
+            if lower.starts_with("ctrl+") {
+                modifiers |= kbmod::CTRL;
+                key_part = &key_part[5..];
+            } else if lower.starts_with("alt+") {
+                modifiers |= kbmod::ALT;
+                key_part = &key_part[4..];
+            } else if lower.starts_with("shift+") {
+                modifiers |= kbmod::SHIFT;
+                key_part = &key_part[6..];
+            } else {
+                break;
+            }
+        }
+
+        // Parse the key
+        let key = Self::parse_key(key_part.trim())?;
+        Some(key.with_modifiers(modifiers))
+    }
+
+    /// Parse a key name like "S", "F5", "Space", "Enter" into an InputKey
+    fn parse_key(s: &str) -> Option<InputKey> {
+        let lower = s.to_lowercase();
+        let lower = lower.as_str();
+
+        // Single letters A-Z
+        if s.len() == 1 {
+            let ch = s.chars().next()?;
+            if ch.is_ascii_alphabetic() {
+                let upper = ch.to_ascii_uppercase();
+                return Some(InputKey::new(upper as u32));
+            }
+            // Single digits 0-9
+            if ch.is_ascii_digit() {
+                return Some(InputKey::new(ch as u32));
+            }
+        }
+
+        // Function keys F1-F24
+        if lower.starts_with('f') && lower.len() >= 2 {
+            if let Ok(n) = lower[1..].parse::<u32>() {
+                if (1..=24).contains(&n) {
+                    return Some(InputKey::new(0x70 + n - 1)); // VK_F1 = 0x70
+                }
+            }
+        }
+
+        // Special keys
+        match lower {
+            "space" => Some(vk::SPACE),
+            "enter" | "return" => Some(vk::RETURN),
+            "tab" => Some(vk::TAB),
+            "escape" | "esc" => Some(vk::ESCAPE),
+            "backspace" | "back" => Some(vk::BACK),
+            "delete" | "del" => Some(vk::DELETE),
+            "insert" | "ins" => Some(vk::INSERT),
+            "home" => Some(vk::HOME),
+            "end" => Some(vk::END),
+            "pageup" | "pgup" => Some(vk::PRIOR),
+            "pagedown" | "pgdn" => Some(vk::NEXT),
+            "up" => Some(vk::UP),
+            "down" => Some(vk::DOWN),
+            "left" => Some(vk::LEFT),
+            "right" => Some(vk::RIGHT),
+            _ => None,
+        }
+    }
+
+    /// Convert an InputKey to a human-readable string like "Ctrl+S"
+    pub fn hotkey_to_string(key: InputKey) -> String {
+        let mut result = String::new();
+
+        let modifiers = key.modifiers();
+        if modifiers.contains(kbmod::CTRL) {
+            result.push_str("Ctrl+");
+        }
+        if modifiers.contains(kbmod::ALT) {
+            result.push_str("Alt+");
+        }
+        if modifiers.contains(kbmod::SHIFT) {
+            result.push_str("Shift+");
+        }
+
+        let base_key = key.key();
+        result.push_str(&Self::key_to_string(base_key));
+        result
+    }
+
+    /// Convert a base key (without modifiers) to a string
+    fn key_to_string(key: InputKey) -> String {
+        let value = key.value();
+
+        // Letters A-Z
+        if (0x41..=0x5A).contains(&value) {
+            return ((value as u8) as char).to_string();
+        }
+
+        // Digits 0-9
+        if (0x30..=0x39).contains(&value) {
+            return ((value as u8) as char).to_string();
+        }
+
+        // Function keys F1-F24
+        if (0x70..=0x87).contains(&value) {
+            return format!("F{}", value - 0x70 + 1);
+        }
+
+        // Special keys
+        match value {
+            0x20 => "Space".to_string(),
+            0x0D => "Enter".to_string(),
+            0x09 => "Tab".to_string(),
+            0x1B => "Escape".to_string(),
+            0x08 => "Backspace".to_string(),
+            0x2E => "Delete".to_string(),
+            0x2D => "Insert".to_string(),
+            0x24 => "Home".to_string(),
+            0x23 => "End".to_string(),
+            0x21 => "PageUp".to_string(),
+            0x22 => "PageDown".to_string(),
+            0x26 => "Up".to_string(),
+            0x28 => "Down".to_string(),
+            0x25 => "Left".to_string(),
+            0x27 => "Right".to_string(),
+            _ => format!("0x{:02X}", value),
+        }
+    }
+}
 
 /// A recently opened file with timestamp
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +250,8 @@ pub struct Config {
     pub project_folders: HashMap<String, String>,
     /// Recently opened files (max 100), sorted by opened_at descending
     pub recent_files: Vec<RecentFile>,
+    /// Keyboard shortcuts (customizable)
+    pub hotkeys: Hotkeys,
 }
 
 impl Default for Config {
@@ -59,6 +267,7 @@ impl Default for Config {
             ruler_column: 0,          // No ruler by default (0 = disabled)
             project_folders: HashMap::new(),
             recent_files: Vec::new(),
+            hotkeys: Hotkeys::default(),
         }
     }
 }
@@ -232,7 +441,101 @@ impl Config {
         // Parse recent_files array
         config.recent_files = Self::parse_recent_files(content);
 
+        // Parse hotkeys
+        config.hotkeys = Self::parse_hotkeys(content, &defaults.hotkeys);
+
         Some(config)
+    }
+
+    /// Parse a hotkey string field, returning the default if not found or invalid
+    fn parse_hotkey_field(content: &str, field: &str, default: InputKey) -> InputKey {
+        if let Some(pos) = content.find(&format!("\"{}\"", field)) {
+            let rest = content[pos + field.len() + 2..].trim_start();
+            if rest.starts_with(':') {
+                let value_part = rest[1..].trim_start();
+                if value_part.starts_with('"') {
+                    let (value, _) = Self::parse_json_string_content(&value_part[1..]);
+                    if let Some(key) = Hotkeys::parse_hotkey(&value) {
+                        return key;
+                    }
+                }
+            }
+        }
+        default
+    }
+
+    /// Parse the hotkeys object from JSON
+    fn parse_hotkeys(content: &str, defaults: &Hotkeys) -> Hotkeys {
+        // Find "hotkeys" field
+        let Some(pos) = content.find("\"hotkeys\"") else {
+            return defaults.clone();
+        };
+
+        let rest = content[pos + 9..].trim_start();
+        if !rest.starts_with(':') {
+            return defaults.clone();
+        }
+
+        let value_part = rest[1..].trim_start();
+        if !value_part.starts_with('{') {
+            return defaults.clone();
+        }
+
+        // Find the matching closing brace
+        let mut depth = 0;
+        let mut end_pos = 0;
+        let mut in_string = false;
+        let mut escape_next = false;
+        for (i, c) in value_part.char_indices() {
+            if escape_next {
+                escape_next = false;
+                continue;
+            }
+            match c {
+                '\\' if in_string => escape_next = true,
+                '"' => in_string = !in_string,
+                '{' if !in_string => depth += 1,
+                '}' if !in_string => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if end_pos == 0 {
+            return defaults.clone();
+        }
+
+        let hotkeys_content = &value_part[1..end_pos];
+
+        Hotkeys {
+            file_new: Self::parse_hotkey_field(hotkeys_content, "file_new", defaults.file_new),
+            file_open: Self::parse_hotkey_field(hotkeys_content, "file_open", defaults.file_open),
+            file_save: Self::parse_hotkey_field(hotkeys_content, "file_save", defaults.file_save),
+            file_save_as: Self::parse_hotkey_field(hotkeys_content, "file_save_as", defaults.file_save_as),
+            file_reload: Self::parse_hotkey_field(hotkeys_content, "file_reload", defaults.file_reload),
+            file_close: Self::parse_hotkey_field(hotkeys_content, "file_close", defaults.file_close),
+            file_exit: Self::parse_hotkey_field(hotkeys_content, "file_exit", defaults.file_exit),
+
+            edit_undo: Self::parse_hotkey_field(hotkeys_content, "edit_undo", defaults.edit_undo),
+            edit_redo: Self::parse_hotkey_field(hotkeys_content, "edit_redo", defaults.edit_redo),
+            edit_cut: Self::parse_hotkey_field(hotkeys_content, "edit_cut", defaults.edit_cut),
+            edit_copy: Self::parse_hotkey_field(hotkeys_content, "edit_copy", defaults.edit_copy),
+            edit_paste: Self::parse_hotkey_field(hotkeys_content, "edit_paste", defaults.edit_paste),
+            edit_duplicate_line: Self::parse_hotkey_field(hotkeys_content, "edit_duplicate_line", defaults.edit_duplicate_line),
+            edit_find: Self::parse_hotkey_field(hotkeys_content, "edit_find", defaults.edit_find),
+            edit_replace: Self::parse_hotkey_field(hotkeys_content, "edit_replace", defaults.edit_replace),
+            edit_find_next: Self::parse_hotkey_field(hotkeys_content, "edit_find_next", defaults.edit_find_next),
+            edit_select_all: Self::parse_hotkey_field(hotkeys_content, "edit_select_all", defaults.edit_select_all),
+
+            view_go_to_file: Self::parse_hotkey_field(hotkeys_content, "view_go_to_file", defaults.view_go_to_file),
+            view_go_to_line: Self::parse_hotkey_field(hotkeys_content, "view_go_to_line", defaults.view_go_to_line),
+            view_word_wrap: Self::parse_hotkey_field(hotkeys_content, "view_word_wrap", defaults.view_word_wrap),
+        }
     }
 
     /// Parse a JSON object for project_folders: {"key": "value", ...}
@@ -495,6 +798,9 @@ impl Config {
         // Build recent_files JSON array
         let recent_files_json = Self::recent_files_to_json(&self.recent_files);
 
+        // Build hotkeys JSON object
+        let hotkeys_json = Self::hotkeys_to_json(&self.hotkeys);
+
         format!(
             concat!(
                 "// OGEdit Configuration\n",
@@ -525,6 +831,12 @@ impl Config {
                 "  // Show vertical ruler at column, 0 to disable (0-255, default: 0)\n",
                 "  \"ruler_column\": {},\n",
                 "\n",
+                "  // Keyboard shortcuts - customize using format like \"Ctrl+S\", \"Alt+Shift+F5\", \"F3\"\n",
+                "  // Available modifiers: Ctrl, Alt, Shift (combine with +)\n",
+                "  // Available keys: A-Z, 0-9, F1-F24, Space, Enter, Tab, Escape, Backspace, Delete,\n",
+                "  //                 Insert, Home, End, PageUp, PageDown, Up, Down, Left, Right\n",
+                "  \"hotkeys\": {},\n",
+                "\n",
                 "  // Per-project last-used save folder (auto-managed, do not edit)\n",
                 "  \"project_folders\": {},\n",
                 "\n",
@@ -542,9 +854,47 @@ impl Config {
             default_final_newline,
             self.insert_final_newline,
             self.ruler_column,
+            hotkeys_json,
             project_folders_json,
             recent_files_json
         )
+    }
+
+    /// Convert Hotkeys to a JSON object string
+    fn hotkeys_to_json(hotkeys: &Hotkeys) -> String {
+        let mut json = String::from("{\n");
+
+        // File operations
+        json.push_str("    // File operations\n");
+        json.push_str(&format!("    \"file_new\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_new)));
+        json.push_str(&format!("    \"file_open\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_open)));
+        json.push_str(&format!("    \"file_save\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_save)));
+        json.push_str(&format!("    \"file_save_as\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_save_as)));
+        json.push_str(&format!("    \"file_reload\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_reload)));
+        json.push_str(&format!("    \"file_close\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_close)));
+        json.push_str(&format!("    \"file_exit\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_exit)));
+
+        // Edit operations
+        json.push_str("\n    // Edit operations\n");
+        json.push_str(&format!("    \"edit_undo\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_undo)));
+        json.push_str(&format!("    \"edit_redo\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_redo)));
+        json.push_str(&format!("    \"edit_cut\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_cut)));
+        json.push_str(&format!("    \"edit_copy\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_copy)));
+        json.push_str(&format!("    \"edit_paste\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_paste)));
+        json.push_str(&format!("    \"edit_duplicate_line\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_duplicate_line)));
+        json.push_str(&format!("    \"edit_find\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_find)));
+        json.push_str(&format!("    \"edit_replace\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_replace)));
+        json.push_str(&format!("    \"edit_find_next\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_find_next)));
+        json.push_str(&format!("    \"edit_select_all\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_select_all)));
+
+        // View operations
+        json.push_str("\n    // View operations\n");
+        json.push_str(&format!("    \"view_go_to_file\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.view_go_to_file)));
+        json.push_str(&format!("    \"view_go_to_line\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.view_go_to_line)));
+        json.push_str(&format!("    \"view_word_wrap\": \"{}\"\n", Hotkeys::hotkey_to_string(hotkeys.view_word_wrap)));
+
+        json.push_str("  }");
+        json
     }
 
     /// Convert project_folders HashMap to a JSON object string
@@ -744,6 +1094,7 @@ mod tests {
             ruler_column: 120,
             project_folders: HashMap::new(),
             recent_files: Vec::new(),
+            hotkeys: Hotkeys::default(),
         };
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();

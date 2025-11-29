@@ -29,7 +29,7 @@ use draw_statusbar::*;
 use ogedit::arena::{self, Arena, ArenaString, scratch_arena};
 use ogedit::framebuffer::{self, IndexedColor};
 use ogedit::helpers::{CoordType, KIBI, MEBI, MetricFormatter, Rect, Size};
-use ogedit::input::{self, kbmod, vk};
+use ogedit::input;
 use ogedit::oklab::StraightRgba;
 use ogedit::tui::*;
 use ogedit::vt::{self, Token};
@@ -454,51 +454,53 @@ fn draw(ctx: &mut Context, state: &mut State) {
 
     if let Some(key) = ctx.keyboard_input() {
         // Shortcuts that are not handled as part of the textarea, etc.
+        // All shortcuts are configurable via state.config.hotkeys
+        let hk = &state.config.hotkeys;
 
-        if key == kbmod::CTRL | vk::N {
+        if key == hk.file_new {
             logging::log_shortcut(key, "New file");
             draw_add_untitled_document(ctx, state);
-        } else if key == kbmod::CTRL | vk::O {
+        } else if key == hk.file_open {
             logging::log_shortcut(key, "Open file");
             state.wants_file_picker = StateFilePicker::Open;
-        } else if key == kbmod::CTRL | vk::S {
+        } else if key == hk.file_save {
             logging::log_shortcut(key, "Save");
             state.wants_save = true;
-        } else if key == kbmod::CTRL_SHIFT | vk::S {
+        } else if key == hk.file_save_as {
             logging::log_shortcut(key, "Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
-        } else if key == vk::F5
+        } else if key == hk.file_reload
             && state.documents.active().is_some_and(|d| d.path.is_some())
         {
             logging::log_shortcut(key, "Reload from disk");
             state.wants_reload = true;
-        } else if key == kbmod::CTRL | vk::W {
+        } else if key == hk.file_close {
             logging::log_shortcut(key, "Close");
             state.wants_close = true;
-        } else if key == kbmod::CTRL | vk::P {
+        } else if key == hk.view_go_to_file {
             logging::log_shortcut(key, "Go to file");
             state.wants_go_to_file = true;
-        } else if key == kbmod::CTRL | vk::Q {
+        } else if key == hk.file_exit {
             logging::log_shortcut(key, "Exit");
             state.wants_exit = true;
-        } else if key == kbmod::CTRL | vk::G {
+        } else if key == hk.view_go_to_line {
             logging::log_shortcut(key, "Go to line");
             state.wants_goto = true;
-        } else if key == kbmod::CTRL | vk::D {
+        } else if key == hk.edit_duplicate_line {
             logging::log_shortcut(key, "Duplicate line");
             logging::log_duplicate_line();
             draw_duplicate_line(state);
-        } else if key == kbmod::CTRL | vk::F && state.wants_search.kind != StateSearchKind::Disabled
+        } else if key == hk.edit_find && state.wants_search.kind != StateSearchKind::Disabled
         {
             logging::log_shortcut(key, "Find");
             state.wants_search.kind = StateSearchKind::Search;
             state.wants_search.focus = true;
-        } else if key == kbmod::CTRL | vk::R && state.wants_search.kind != StateSearchKind::Disabled
+        } else if key == hk.edit_replace && state.wants_search.kind != StateSearchKind::Disabled
         {
             logging::log_shortcut(key, "Replace");
             state.wants_search.kind = StateSearchKind::Replace;
             state.wants_search.focus = true;
-        } else if key == vk::F3 {
+        } else if key == hk.edit_find_next {
             logging::log_shortcut(key, "Find next");
             search_execute(ctx, state, SearchAction::Search);
         } else {

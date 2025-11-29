@@ -18,11 +18,12 @@ use crate::vt;
 /// Of course you could just translate on the ABI boundary, but my hope is that this
 /// design lets me realize some restrictions early on that I can't foresee yet.
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InputKey(u32);
 
 impl InputKey {
-    pub(crate) const fn new(v: u32) -> Self {
+    /// Create a new InputKey from a raw value.
+    pub const fn new(v: u32) -> Self {
         Self(v)
     }
 
@@ -38,15 +39,18 @@ impl InputKey {
         }
     }
 
-    pub(crate) const fn value(&self) -> u32 {
+    /// Get the raw value of the key.
+    pub const fn value(&self) -> u32 {
         self.0
     }
 
-    pub(crate) const fn key(&self) -> Self {
+    /// Get the key without modifiers.
+    pub const fn key(&self) -> Self {
         Self(self.0 & 0x00FFFFFF)
     }
 
-    pub(crate) const fn modifiers(&self) -> InputKeyMod {
+    /// Get the modifiers of the key.
+    pub const fn modifiers(&self) -> InputKeyMod {
         InputKeyMod(self.0 & 0xFF000000)
     }
 
@@ -54,7 +58,8 @@ impl InputKey {
         (self.0 & modifier.0) != 0
     }
 
-    pub(crate) const fn with_modifiers(&self, modifiers: InputKeyMod) -> Self {
+    /// Combine this key with additional modifiers.
+    pub const fn with_modifiers(&self, modifiers: InputKeyMod) -> Self {
         Self(self.0 | modifiers.0)
     }
 }
@@ -69,7 +74,8 @@ impl InputKeyMod {
         Self(v)
     }
 
-    pub(crate) const fn contains(&self, modifier: Self) -> bool {
+    /// Check if this modifier combination contains the given modifier.
+    pub const fn contains(&self, modifier: Self) -> bool {
         (self.0 & modifier.0) != 0
     }
 }

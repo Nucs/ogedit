@@ -3,7 +3,7 @@
 
 use ogedit::arena_format;
 use ogedit::helpers::*;
-use ogedit::input::{kbmod, vk};
+use ogedit::input::vk;
 use ogedit::tui::*;
 
 use crate::draw_editor::draw_duplicate_line;
@@ -47,20 +47,23 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
         }
     }
 
-    if ctx.menubar_menu_button(loc(LocId::FileNew), 'N', kbmod::CTRL | vk::N) {
+    // Copy hotkeys to avoid borrow issues (InputKey is Copy)
+    let hk = state.config.hotkeys.clone();
+
+    if ctx.menubar_menu_button(loc(LocId::FileNew), 'N', hk.file_new) {
         logging::log_menu_click("File->New");
         draw_add_untitled_document(ctx, state);
     }
-    if ctx.menubar_menu_button(loc(LocId::FileOpen), 'O', kbmod::CTRL | vk::O) {
+    if ctx.menubar_menu_button(loc(LocId::FileOpen), 'O', hk.file_open) {
         logging::log_menu_click("File->Open");
         state.wants_file_picker = StateFilePicker::Open;
     }
     if state.documents.active().is_some() {
-        if ctx.menubar_menu_button(loc(LocId::FileSave), 'S', kbmod::CTRL | vk::S) {
+        if ctx.menubar_menu_button(loc(LocId::FileSave), 'S', hk.file_save) {
             logging::log_menu_click("File->Save");
             state.wants_save = true;
         }
-        if ctx.menubar_menu_button(loc(LocId::FileSaveAs), 'A', vk::NULL) {
+        if ctx.menubar_menu_button(loc(LocId::FileSaveAs), 'A', hk.file_save_as) {
             logging::log_menu_click("File->Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
         }
@@ -71,21 +74,21 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
             // Show "[!]" prefix when file has changed on disk (menus don't support per-item colors)
             if changed {
                 let label = arena_format!(ctx.arena(), "[!] {}", loc(LocId::FileReloadFromDisk));
-                if ctx.menubar_menu_button(&label, 'R', vk::F5) {
+                if ctx.menubar_menu_button(&label, 'R', hk.file_reload) {
                     logging::log_menu_click("File->Reload From Disk");
                     state.wants_reload = true;
                 }
-            } else if ctx.menubar_menu_button(loc(LocId::FileReloadFromDisk), 'R', vk::F5) {
+            } else if ctx.menubar_menu_button(loc(LocId::FileReloadFromDisk), 'R', hk.file_reload) {
                 logging::log_menu_click("File->Reload From Disk");
                 state.wants_reload = true;
             }
         }
-        if ctx.menubar_menu_button(loc(LocId::FileClose), 'C', kbmod::CTRL | vk::W) {
+        if ctx.menubar_menu_button(loc(LocId::FileClose), 'C', hk.file_close) {
             logging::log_menu_click("File->Close");
             state.wants_close = true;
         }
     }
-    if ctx.menubar_menu_button(loc(LocId::FileExit), 'X', kbmod::CTRL | vk::Q) {
+    if ctx.menubar_menu_button(loc(LocId::FileExit), 'X', hk.file_exit) {
         logging::log_menu_click("File->Exit");
         state.wants_exit = true;
     }
@@ -93,40 +96,43 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
+    // Copy hotkeys to avoid borrow issues (InputKey is Copy)
+    let hk = state.config.hotkeys.clone();
+
     {
         let doc = state.documents.active().unwrap();
         let mut tb = doc.buffer.borrow_mut();
 
-        if ctx.menubar_menu_button(loc(LocId::EditUndo), 'U', kbmod::CTRL | vk::Z) {
+        if ctx.menubar_menu_button(loc(LocId::EditUndo), 'U', hk.edit_undo) {
             logging::log_menu_click("Edit->Undo");
             logging::log_undo();
             tb.undo();
             ctx.needs_rerender();
         }
-        if ctx.menubar_menu_button(loc(LocId::EditRedo), 'R', kbmod::CTRL | vk::Y) {
+        if ctx.menubar_menu_button(loc(LocId::EditRedo), 'R', hk.edit_redo) {
             logging::log_menu_click("Edit->Redo");
             logging::log_redo();
             tb.redo();
             ctx.needs_rerender();
         }
-        if ctx.menubar_menu_button(loc(LocId::EditCut), 'T', kbmod::CTRL | vk::X) {
+        if ctx.menubar_menu_button(loc(LocId::EditCut), 'T', hk.edit_cut) {
             logging::log_menu_click("Edit->Cut");
             tb.cut(ctx.clipboard_mut());
             ctx.needs_rerender();
         }
-        if ctx.menubar_menu_button(loc(LocId::EditCopy), 'C', kbmod::CTRL | vk::C) {
+        if ctx.menubar_menu_button(loc(LocId::EditCopy), 'C', hk.edit_copy) {
             logging::log_menu_click("Edit->Copy");
             tb.copy(ctx.clipboard_mut());
             ctx.needs_rerender();
         }
-        if ctx.menubar_menu_button(loc(LocId::EditPaste), 'P', kbmod::CTRL | vk::V) {
+        if ctx.menubar_menu_button(loc(LocId::EditPaste), 'P', hk.edit_paste) {
             logging::log_menu_click("Edit->Paste");
             tb.paste(ctx.clipboard_ref());
             ctx.needs_rerender();
         }
     }
 
-    if ctx.menubar_menu_button(loc(LocId::EditDuplicate), 'D', kbmod::CTRL | vk::D) {
+    if ctx.menubar_menu_button(loc(LocId::EditDuplicate), 'D', hk.edit_duplicate_line) {
         logging::log_menu_click("Edit->Duplicate");
         logging::log_duplicate_line();
         draw_duplicate_line(state);
@@ -134,12 +140,12 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
     }
 
     if state.wants_search.kind != StateSearchKind::Disabled {
-        if ctx.menubar_menu_button(loc(LocId::EditFind), 'F', kbmod::CTRL | vk::F) {
+        if ctx.menubar_menu_button(loc(LocId::EditFind), 'F', hk.edit_find) {
             logging::log_menu_click("Edit->Find");
             state.wants_search.kind = StateSearchKind::Search;
             state.wants_search.focus = true;
         }
-        if ctx.menubar_menu_button(loc(LocId::EditReplace), 'L', kbmod::CTRL | vk::R) {
+        if ctx.menubar_menu_button(loc(LocId::EditReplace), 'L', hk.edit_replace) {
             logging::log_menu_click("Edit->Replace");
             state.wants_search.kind = StateSearchKind::Replace;
             state.wants_search.focus = true;
@@ -149,7 +155,7 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
     {
         let doc = state.documents.active().unwrap();
         let mut tb = doc.buffer.borrow_mut();
-        if ctx.menubar_menu_button(loc(LocId::EditSelectAll), 'A', kbmod::CTRL | vk::A) {
+        if ctx.menubar_menu_button(loc(LocId::EditSelectAll), 'A', hk.edit_select_all) {
             logging::log_menu_click("Edit->Select All");
             logging::log_select_all();
             tb.select_all();
@@ -161,6 +167,9 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_view(ctx: &mut Context, state: &mut State) {
+    // Copy hotkeys to avoid borrow issues (InputKey is Copy)
+    let hk = state.config.hotkeys.clone();
+
     if let Some(doc) = state.documents.active() {
         let mut tb = doc.buffer.borrow_mut();
         let word_wrap = tb.is_word_wrap_enabled();
@@ -170,15 +179,15 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
             logging::log_menu_click("View->Focus Statusbar");
             state.wants_statusbar_focus = true;
         }
-        if ctx.menubar_menu_button(loc(LocId::ViewGoToFile), 'F', kbmod::CTRL | vk::P) {
+        if ctx.menubar_menu_button(loc(LocId::ViewGoToFile), 'F', hk.view_go_to_file) {
             logging::log_menu_click("View->Go To File");
             state.wants_go_to_file = true;
         }
-        if ctx.menubar_menu_button(loc(LocId::FileGoto), 'G', kbmod::CTRL | vk::G) {
+        if ctx.menubar_menu_button(loc(LocId::FileGoto), 'G', hk.view_go_to_line) {
             logging::log_menu_click("View->Go To Line");
             state.wants_goto = true;
         }
-        if ctx.menubar_menu_checkbox(loc(LocId::ViewWordWrap), 'W', kbmod::ALT | vk::Z, word_wrap) {
+        if ctx.menubar_menu_checkbox(loc(LocId::ViewWordWrap), 'W', hk.view_word_wrap, word_wrap) {
             let new_state = !word_wrap;
             logging::log_menu_checkbox("View->Word Wrap", new_state);
             logging::log_word_wrap_toggle(new_state);
