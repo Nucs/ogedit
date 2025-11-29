@@ -235,11 +235,6 @@ fn run() -> apperr::Result<()> {
         let elapsed_ms = start_time.elapsed().as_millis() as u64;
         log_periodic_content_snapshot(&mut state, elapsed_ms);
 
-        // Trigger file change check every 2 seconds by forcing counter
-        if elapsed_ms % 2000 < 16 { // Check roughly every 2 seconds
-            state.file_check_counter = 120; // Force check on next statusbar draw
-        }
-
         // Render the UI and write it to the terminal.
         {
             let scratch = scratch_arena(None);
@@ -426,6 +421,9 @@ fn draw(ctx: &mut Context, state: &mut State) {
     if state.wants_about {
         draw_dialog_about(ctx, state);
     }
+    if state.wants_reload {
+        draw_handle_wants_reload(ctx, state);
+    }
     if ctx.clipboard_ref().wants_host_sync() {
         draw_handle_clipboard_change(ctx, state);
     }
@@ -448,6 +446,11 @@ fn draw(ctx: &mut Context, state: &mut State) {
         } else if key == kbmod::CTRL_SHIFT | vk::S {
             logging::log_shortcut(key, "Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
+        } else if key == vk::F5
+            && state.documents.active().is_some_and(|d| d.path.is_some())
+        {
+            logging::log_shortcut(key, "Reload from disk");
+            state.wants_reload = true;
         } else if key == kbmod::CTRL | vk::W {
             logging::log_shortcut(key, "Close");
             state.wants_close = true;

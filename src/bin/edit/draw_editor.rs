@@ -235,6 +235,9 @@ pub fn draw_handle_save(ctx: &mut Context, state: &mut State) {
                 error_log_add(ctx, state, err);
             } else {
                 logging::log_file_save(&path_str);
+                // Clear file changed indicator since we just saved
+                state.file_changed_cached = false;
+                state.file_check_counter = 0;
             }
         } else {
             // No path? Show the file picker.
@@ -339,6 +342,117 @@ pub fn draw_handle_wants_close(ctx: &mut Context, state: &mut State) {
             logging::log_dialog_close("Unsaved Changes", "Cancel");
             state.wants_exit = false;
             state.wants_close = false;
+        }
+    }
+
+    ctx.needs_rerender();
+}
+
+pub fn draw_handle_wants_reload(ctx: &mut Context, state: &mut State) {
+    let Some(doc) = state.documents.active() else {
+        state.wants_reload = false;
+        return;
+    };
+
+    let is_dirty = doc.buffer.borrow().is_dirty();
+    let file_changed = state.file_changed_cached;
+
+    logging::log_action(&format!(
+        "RELOAD_HANDLER: is_dirty={}, file_changed={}",
+        is_dirty, file_changed
+    ));
+
+    // If no unsaved changes AND no external changes, just reload silently
+    if !is_dirty && !file_changed {
+        logging::log_action("RELOAD_HANDLER: No changes, reloading directly");
+        if let Err(err) = crate::state::reload_file_from_disk(state) {
+            error_log_add(ctx, state, err);
+        }
+        state.wants_reload = false;
+        ctx.needs_rerender();
+        return;
+    }
+
+    logging::log_action("RELOAD_HANDLER: Showing confirmation dialog");
+
+    // Determine which scenario we're in
+    let (title, description) = match (is_dirty, file_changed) {
+        (true, true) => (loc(LocId::ReloadConfirmTitle), loc(LocId::ReloadBothDescription)),
+        (true, false) => (loc(LocId::ReloadConfirmTitle), loc(LocId::ReloadConfirmDescription)),
+        (false, true) => (loc(LocId::ReloadExternalTitle), loc(LocId::ReloadExternalDescription)),
+        (false, false) => unreachable!(), // Handled above
+    };
+
+    // Button labels depend on whether we have local changes to discard
+    let reload_button_label = if is_dirty {
+        loc(LocId::ReloadConfirmDiscard)
+    } else {
+        loc(LocId::ReloadButton)
+    };
+
+    enum Action {
+        None,
+        Reload,
+        Cancel,
+    }
+    let mut action = Action::None;
+
+    ctx.modal_begin("reload-confirm", title);
+    if is_dirty {
+        // Red background for destructive action (discarding local changes)
+        ctx.attr_background_rgba(ctx.indexed(IndexedColor::Red));
+        ctx.attr_foreground_rgba(ctx.indexed(IndexedColor::BrightWhite));
+    }
+    {
+        let contains_focus = ctx.contains_focus();
+
+        ctx.label("description", description);
+        ctx.attr_padding(Rect::three(1, 2, 1));
+
+        ctx.table_begin("choices");
+        ctx.inherit_focus();
+        ctx.attr_padding(Rect::three(0, 2, 1));
+        ctx.attr_position(Position::Center);
+        ctx.table_set_cell_gap(Size { width: 2, height: 0 });
+        {
+            ctx.table_next_row();
+            ctx.inherit_focus();
+
+            if ctx.button(
+                "reload",
+                reload_button_label,
+                ButtonStyle::default().accelerator('R'),
+            ) {
+                action = Action::Reload;
+            }
+            ctx.inherit_focus();
+            if ctx.button("cancel", loc(LocId::Cancel), ButtonStyle::default()) {
+                action = Action::Cancel;
+            }
+
+            // Handle accelerator shortcuts
+            if contains_focus && ctx.consume_shortcut(vk::R) {
+                action = Action::Reload;
+            }
+        }
+        ctx.table_end();
+    }
+    if ctx.modal_end() {
+        action = Action::Cancel;
+    }
+
+    match action {
+        Action::None => return,
+        Action::Reload => {
+            logging::log_dialog_close("Reload Confirm", "Reload");
+            if let Err(err) = crate::state::reload_file_from_disk(state) {
+                error_log_add(ctx, state, err);
+            }
+            state.wants_reload = false;
+        }
+        Action::Cancel => {
+            logging::log_dialog_close("Reload Confirm", "Cancel");
+            state.wants_reload = false;
         }
     }
 

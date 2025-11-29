@@ -224,6 +224,7 @@ pub struct State {
     pub wants_about: bool,
     pub wants_close: bool,
     pub wants_exit: bool,
+    pub wants_reload: bool,
     pub wants_goto: bool,
     pub goto_target: String,
     pub goto_invalid: bool,
@@ -235,7 +236,7 @@ pub struct State {
 
     pub logging_tracker: LoggingTracker,
 
-    // File reload check counter (debounce to every 120 frames)
+    // File reload check counter (debounce to every 60 frames)
     pub file_check_counter: u32,
     pub file_changed_cached: bool,
 }
@@ -285,6 +286,7 @@ impl State {
             wants_about: false,
             wants_close: false,
             wants_exit: false,
+            wants_reload: false,
             wants_goto: false,
             goto_target: Default::default(),
             goto_invalid: false,
@@ -296,7 +298,7 @@ impl State {
 
             logging_tracker: Default::default(),
 
-            file_check_counter: 120, // Start at 120 to trigger immediate check
+            file_check_counter: 60, // Start at 60 to trigger immediate check
             file_changed_cached: false,
         })
     }
@@ -467,9 +469,24 @@ pub fn log_periodic_content_snapshot(state: &mut State, now_ms: u64) {
     {
         // Time to log a snapshot
         let mut content = String::new();
-        doc.buffer.borrow_mut().save_as_string(&mut content);
+        doc.buffer.borrow().copy_content(&mut content);
 
         logging::log_content_snapshot(&content, &doc.filename);
         tracker.last_snapshot_time_ms = now_ms;
     }
+}
+
+/// Reload the current document from disk
+/// Used when file has been modified externally
+pub fn reload_file_from_disk(state: &mut State) -> apperr::Result<()> {
+    if let Some(doc) = state.documents.active_mut() {
+        // Reload the file with current encoding
+        doc.reread(None)?;
+        logging::log_action(&format!("FILE_RELOADED: {}", doc.filename));
+
+        // Clear the cache so indicator disappears after reload
+        state.file_changed_cached = false;
+        state.file_check_counter = 0; // Force recheck on next cycle
+    }
+    Ok(())
 }

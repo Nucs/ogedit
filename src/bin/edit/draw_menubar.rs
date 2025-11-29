@@ -40,6 +40,13 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_file(ctx: &mut Context, state: &mut State) {
+    // Check for file changes immediately when File menu is opened
+    if let Some(doc) = state.documents.active() {
+        if doc.has_file_changed_on_disk() {
+            state.file_changed_cached = true;
+        }
+    }
+
     if ctx.menubar_menu_button(loc(LocId::FileNew), 'N', kbmod::CTRL | vk::N) {
         logging::log_menu_click("File->New");
         draw_add_untitled_document(ctx, state);
@@ -56,6 +63,22 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
         if ctx.menubar_menu_button(loc(LocId::FileSaveAs), 'A', vk::NULL) {
             logging::log_menu_click("File->Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
+        }
+        // Reload from disk - only show if document has a file path
+        if state.documents.active().is_some_and(|d| d.path.is_some()) {
+            let changed = state.file_changed_cached;
+
+            // Show "[!]" prefix when file has changed on disk (menus don't support per-item colors)
+            if changed {
+                let label = arena_format!(ctx.arena(), "[!] {}", loc(LocId::FileReloadFromDisk));
+                if ctx.menubar_menu_button(&label, 'R', vk::F5) {
+                    logging::log_menu_click("File->Reload From Disk");
+                    state.wants_reload = true;
+                }
+            } else if ctx.menubar_menu_button(loc(LocId::FileReloadFromDisk), 'R', vk::F5) {
+                logging::log_menu_click("File->Reload From Disk");
+                state.wants_reload = true;
+            }
         }
         if ctx.menubar_menu_button(loc(LocId::FileClose), 'C', kbmod::CTRL | vk::W) {
             logging::log_menu_click("File->Close");

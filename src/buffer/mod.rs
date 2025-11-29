@@ -663,10 +663,17 @@ impl TextBuffer {
         self.reflow();
     }
 
-    /// Copies the contents of the buffer into a string.
+    /// Copies the contents of the buffer into a string and marks the buffer as clean.
+    /// Use this when saving to a file or when the content should be considered "saved".
     pub fn save_as_string(&mut self, dst: &mut dyn WriteableDocument) {
         self.buffer.copy_into(dst);
         self.mark_as_clean();
+    }
+
+    /// Copies the contents of the buffer into a string without modifying state.
+    /// Use this for read-only operations like logging or previewing.
+    pub fn copy_content(&self, dst: &mut dyn WriteableDocument) {
+        self.buffer.copy_into(dst);
     }
 
     /// Reads a file from disk into the text buffer, detecting encoding and BOM.
