@@ -362,7 +362,8 @@ pub fn draw_handle_wants_reload(ctx: &mut Context, state: &mut State) {
     };
 
     let is_dirty = doc.buffer.borrow().is_dirty();
-    let file_changed = state.file_changed_cached;
+    // Actively check if file changed on disk (don't rely solely on watcher events)
+    let file_changed = state.file_changed_cached || doc.has_file_changed_on_disk();
 
     logging::log_action(&format!(
         "RELOAD_HANDLER: is_dirty={}, file_changed={}",
