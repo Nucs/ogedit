@@ -441,7 +441,7 @@ mod platform {
 
             let wd = unsafe {
                 libc::inotify_add_watch(self.fd, c_path.as_ptr(),
-                    (libc::IN_MODIFY | libc::IN_DELETE_SELF | libc::IN_MOVE_SELF) as u32)
+                    libc::IN_MODIFY | libc::IN_DELETE_SELF | libc::IN_MOVE_SELF)
             };
             if wd < 0 { return false; }
 
@@ -474,11 +474,11 @@ mod platform {
                     if let Some(path) = self.watch_descriptors.get(&event.wd) {
                         let dominated = self.last_event.get(path).map(|t| t.elapsed().as_millis() < 100).unwrap_or(false);
                         if !dominated {
-                            if event.mask & libc::IN_MODIFY as u32 != 0 {
+                            if event.mask & libc::IN_MODIFY != 0 {
                                 events.push(WatchEvent::Modified(path.clone()));
                                 self.last_event.insert(path.clone(), now);
                             }
-                            if event.mask & (libc::IN_DELETE_SELF | libc::IN_MOVE_SELF) as u32 != 0 {
+                            if event.mask & (libc::IN_DELETE_SELF | libc::IN_MOVE_SELF) != 0 {
                                 events.push(WatchEvent::Deleted(path.clone()));
                             }
                         }
