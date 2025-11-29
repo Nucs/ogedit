@@ -160,6 +160,125 @@ struct ActiveEditLineInfo {
     distance_next_line_start: usize,
 }
 
+/// Maximum number of auto-highlight matches to find (performance limit).
+const SELECTION_HIGHLIGHT_MAX_MATCHES: usize = 1000;
+
+/// Caches auto-highlight matches for the current selection.
+/// When text is selected, all identical occurrences are highlighted.
+struct SelectionHighlights {
+    /// The pattern to match (selected text as bytes).
+    pattern: Vec<u8>,
+    /// Cached match positions (byte offset ranges).
+    matches: Vec<Range<usize>>,
+    /// [`TextBuffer::selection_generation`] when matches were computed.
+    cached_selection_generation: u32,
+    /// [`GapBuffer::generation`] when matches were computed.
+    cached_buffer_generation: u32,
+}
+
+impl SelectionHighlights {
+    fn new() -> Self {
+        Self {
+            pattern: Vec::new(),
+            matches: Vec::new(),
+            cached_selection_generation: 0,
+            cached_buffer_generation: 0,
+        }
+    }
+
+    /// Check if the selection text should trigger auto-highlight.
+    /// - 1 character: only if NOT an ASCII letter (a-z, A-Z)
+    /// - 2+ characters: always highlight
+    /// - Whitespace-only: no highlight
+    fn should_highlight(text: &[u8]) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+        // Check if all whitespace
+        if text.iter().all(|&b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r') {
+            return false;
+        }
+        if text.len() == 1 {
+            let ch = text[0];
+            // Single char: only highlight if NOT a letter
+            !ch.is_ascii_alphabetic()
+        } else {
+            true
+        }
+    }
+
+    /// Update the cache if the selection or buffer has changed.
+    fn update(
+        &mut self,
+        selection_range: Option<Range<usize>>,
+        selection_generation: u32,
+        buffer: &GapBuffer,
+    ) {
+        let buffer_generation = buffer.generation();
+
+        // Check if cache is still valid
+        if self.cached_selection_generation == selection_generation
+            && self.cached_buffer_generation == buffer_generation
+        {
+            return;
+        }
+
+        // Cache is stale, update it
+        self.cached_selection_generation = selection_generation;
+        self.cached_buffer_generation = buffer_generation;
+        self.matches.clear();
+        self.pattern.clear();
+
+        let Some(range) = selection_range else {
+            return;
+        };
+
+        if range.is_empty() {
+            return;
+        }
+
+        // Extract the selected text
+        buffer.extract_raw(range.clone(), &mut self.pattern, 0);
+
+        if !Self::should_highlight(&self.pattern) {
+            self.pattern.clear();
+            return;
+        }
+
+        // Find all matches in the buffer
+        let text_len = buffer.len();
+        let pattern_len = self.pattern.len();
+        let mut offset = 0;
+
+        while offset + pattern_len <= text_len && self.matches.len() < SELECTION_HIGHLIGHT_MAX_MATCHES {
+            // Read a chunk from the buffer
+            let chunk = buffer.read_forward(offset);
+            if chunk.is_empty() {
+                break;
+            }
+
+            // Search for the pattern in this chunk
+            let mut pos = 0;
+            while pos + pattern_len <= chunk.len() {
+                if &chunk[pos..pos + pattern_len] == self.pattern.as_slice() {
+                    let match_start = offset + pos;
+                    let match_end = match_start + pattern_len;
+                    // Don't highlight the current selection itself
+                    if match_start != range.start || match_end != range.end {
+                        self.matches.push(match_start..match_end);
+                    }
+                    pos += pattern_len; // Skip past this match
+                } else {
+                    pos += 1;
+                }
+            }
+
+            offset += chunk.len().saturating_sub(pattern_len - 1).max(1);
+        }
+    }
+
+}
+
 /// Undo/redo grouping works by recording a set of "overrides",
 /// which are then applied in [`TextBuffer::edit_begin()`].
 /// This allows us to create a group of edits that all share a
@@ -229,6 +348,7 @@ pub struct TextBuffer {
     selection: Option<TextBufferSelection>,
     selection_generation: u32,
     search: Option<UnsafeCell<ActiveSearch>>,
+    selection_highlights: SelectionHighlights,
 
     width: CoordType,
     margin_width: CoordType,
@@ -277,6 +397,7 @@ impl TextBuffer {
             selection: None,
             selection_generation: 0,
             search: None,
+            selection_highlights: SelectionHighlights::new(),
 
             width: 0,
             margin_width: 0,
@@ -1749,6 +1870,20 @@ impl TextBuffer {
             Some(TextBufferSelection { beg, end }) => minmax(beg, end),
         };
 
+        // Compute selection byte range for auto-highlight
+        let selection_byte_range = if let Some((beg_cursor, end_cursor)) = self.selection_range() {
+            beg_cursor.offset..end_cursor.offset
+        } else {
+            0..0
+        };
+
+        // Update auto-highlight matches
+        self.selection_highlights.update(
+            if selection_byte_range.is_empty() { None } else { Some(selection_byte_range.clone()) },
+            self.selection_generation,
+            &self.buffer,
+        );
+
         line.reserve(width as usize * 2);
 
         for y in 0..height {
@@ -1857,6 +1992,47 @@ impl TextBuffer {
                 let fg = fb.contrasted(bg);
                 fb.blend_bg(rect, bg);
                 fb.blend_fg(rect, fg);
+            }
+
+            // Highlight auto-highlight matches on this line
+            if cursor_beg.visual_pos.y == visual_line && !self.selection_highlights.matches.is_empty() {
+                for match_range in &self.selection_highlights.matches {
+                    // Check if this match overlaps with the visible line range
+                    if match_range.end <= cursor_beg.offset || match_range.start >= cursor_end.offset {
+                        continue;
+                    }
+
+                    let mut cursor = cursor_beg;
+
+                    // Find start position of this match on screen
+                    let match_start_offset = match_range.start.max(cursor_beg.offset);
+                    let match_end_offset = match_range.end.min(cursor_end.offset);
+
+                    // Navigate to match start
+                    if match_start_offset > cursor.offset {
+                        cursor = self.cursor_move_to_offset_internal(cursor, match_start_offset);
+                    }
+                    let match_pos_beg = cursor.visual_pos.x;
+
+                    // Navigate to match end
+                    cursor = self.cursor_move_to_offset_internal(cursor, match_end_offset);
+                    let match_pos_end = cursor.visual_pos.x;
+
+                    let left = destination.left + self.margin_width - origin.x;
+                    let top = destination.top + y;
+                    let rect = Rect {
+                        left: left + match_pos_beg.max(origin.x),
+                        top,
+                        right: left + match_pos_end.min(origin.x + text_width),
+                        bottom: top + 1,
+                    };
+
+                    // Use a subtle yellow/orange background for auto-highlights
+                    let bg = fb.indexed(IndexedColor::Yellow).oklab_blend(
+                        fb.indexed_alpha(IndexedColor::Background, 1, 2)
+                    );
+                    fb.blend_bg(rect, bg);
+                }
             }
 
             // Nothing to do if the entire line is empty.
