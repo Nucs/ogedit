@@ -151,6 +151,7 @@ enum RegexReplacement<'a> {
 /// This helps us avoid having to remeasure the buffer after an edit.
 struct ActiveEditLineInfo {
     /// Points to the start of the currently being edited line.
+    #[allow(dead_code)]
     safe_start: Cursor,
     /// Number of visual rows of the line that starts
     /// at [`ActiveEditLineInfo::safe_start`].
