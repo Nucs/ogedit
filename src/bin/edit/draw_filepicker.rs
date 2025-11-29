@@ -223,6 +223,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                 && let Some(path) = doit.as_deref()
                 && path.exists()
             {
+                logging::log_dialog_open("Overwrite Warning");
                 state.file_picker_overwrite_warning = doit.take();
             }
         }
@@ -258,6 +259,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                 ctx.inherit_focus();
 
                 if ctx.button("no", loc(LocId::No), ButtonStyle::default()) {
+                    logging::log_dialog_close("Overwrite Warning", "No");
                     state.file_picker_overwrite_warning = None;
                 }
             }
@@ -296,12 +298,14 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
             Ok(..) => {
                 if is_open {
                     logging::log_file_open(&path_str);
+                    logging::log_dialog_close("File Picker", "file opened");
                     // Track in recent files
                     state.config.add_recent_file(&path);
                     // Start watching for external modifications
                     state.file_watcher.watch(&path);
                 } else {
                     logging::log_file_save(&path_str);
+                    logging::log_dialog_close("File Picker", "file saved");
                     // Save the parent directory as the last-used save folder for this project
                     if let Some(parent) = path.parent() {
                         let parent_str = parent.to_string_lossy().to_string();

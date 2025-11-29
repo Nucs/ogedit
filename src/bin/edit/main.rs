@@ -619,16 +619,19 @@ fn draw_handle_clipboard_change(ctx: &mut Context, state: &mut State) {
 
             if over_limit {
                 if ctx.button("ok", loc(LocId::Ok), ButtonStyle::default()) {
+                    logging::log_dialog_close("Large Clipboard Warning", "Ok");
                     done = Some(true);
                 }
                 ctx.inherit_focus();
             } else {
                 if ctx.button("always", loc(LocId::Always), ButtonStyle::default()) {
+                    logging::log_dialog_close("Large Clipboard Warning", "Always");
                     state.osc_clipboard_always_send = true;
                     done = Some(true);
                 }
 
                 if ctx.button("yes", loc(LocId::Yes), ButtonStyle::default()) {
+                    logging::log_dialog_close("Large Clipboard Warning", "Yes");
                     done = Some(true);
                 }
                 if data_len < 10 * LARGE_CLIPBOARD_THRESHOLD {
@@ -636,6 +639,7 @@ fn draw_handle_clipboard_change(ctx: &mut Context, state: &mut State) {
                 }
 
                 if ctx.button("no", loc(LocId::No), ButtonStyle::default()) {
+                    logging::log_dialog_close("Large Clipboard Warning", "No");
                     done = Some(false);
                 }
                 if data_len >= 10 * LARGE_CLIPBOARD_THRESHOLD {
@@ -646,6 +650,7 @@ fn draw_handle_clipboard_change(ctx: &mut Context, state: &mut State) {
         ctx.table_end();
     }
     if ctx.modal_end() {
+        logging::log_dialog_close("Large Clipboard Warning", "Escape");
         done = Some(false);
     }
 

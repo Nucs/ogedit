@@ -488,6 +488,7 @@ pub fn draw_goto_menu(ctx: &mut Context, state: &mut State) {
                 match validate_goto_point(&state.goto_target) {
                     Ok(point) => {
                         logging::log_goto(point);
+                        logging::log_dialog_close("Go to Line", &format!("Ln {}", point.y + 1));
                         let mut buf = doc.buffer.borrow_mut();
                         buf.cursor_move_to_logical(point);
                         buf.make_cursor_visible();

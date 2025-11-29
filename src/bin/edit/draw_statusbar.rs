@@ -63,17 +63,23 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                 {
                     if ctx.button("reopen", loc(LocId::EncodingReopen), ButtonStyle::default()) {
                         logging::log_action("ENCODING_METHOD: Reopen");
+                        logging::log_dialog_close("Encoding Picker", "Reopen");
+                        logging::log_dialog_open("Encoding Change");
                         state.wants_encoding_change = StateEncodingChange::Reopen;
                     }
                     ctx.focus_on_first_present();
                     if ctx.button("convert", loc(LocId::EncodingConvert), ButtonStyle::default()) {
                         logging::log_action("ENCODING_METHOD: Convert");
+                        logging::log_dialog_close("Encoding Picker", "Convert");
+                        logging::log_dialog_open("Encoding Change");
                         state.wants_encoding_change = StateEncodingChange::Convert;
                     }
                 }
                 ctx.block_end();
             } else {
                 // Can't reopen a file that doesn't exist.
+                logging::log_dialog_close("Encoding Picker", "Convert (no file)");
+                logging::log_dialog_open("Encoding Change");
                 state.wants_encoding_change = StateEncodingChange::Convert;
             }
 
@@ -306,6 +312,7 @@ pub fn draw_dialog_encoding_change(ctx: &mut Context, state: &mut State) {
     if let Some(encoding) = change
         && let Some(doc) = state.documents.active_mut()
     {
+        logging::log_dialog_close("Encoding Change", encoding);
         let old_encoding = doc.buffer.borrow().encoding();
         logging::log_encoding_change(old_encoding, encoding);
 
@@ -390,6 +397,7 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
                 let activated = ctx.styled_list_item_end(false) == ListSelection::Activated;
                 if activated {
                     logging::log_action(&format!("SWITCH_DOCUMENT: {}", doc.filename));
+                    logging::log_dialog_close("Go to File", "document selected");
                 }
                 activated
             }) {
@@ -421,6 +429,7 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
                                     state.config.add_recent_file(&path);
                                     // Start watching for external modifications
                                     state.file_watcher.watch(&path);
+                                    logging::log_dialog_close("Go to File", "recent file opened");
                                     state.wants_go_to_file = false;
                                     ctx.needs_rerender();
                                 }

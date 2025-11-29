@@ -8,6 +8,7 @@ OGEdit aims to deliver more features faster with less bureaucracy.
 
 - [Key Features](#features)
   - [Selection Auto-Highlight](#selection-auto-highlight)
+  - [Line Number Click Selection](#line-number-click-selection)
   - [Ctrl+D Duplicate Line](#ctrld-duplicate-line)
   - [File Watcher](#file-watcher)
   - [F5 Reload from Disk](#f5-reload-from-disk)
@@ -42,6 +43,18 @@ When you select text, all identical occurrences in the document are highlighted 
 - **Whitespace-only**: No highlighting
 
 **Performance:** Limited to 1000 matches to maintain responsiveness in large files.
+
+### Line Number Click Selection
+
+Click on line numbers in the left margin to quickly select entire lines:
+
+- **Single click**: Selects the entire line
+- **Shift+click**: Extends selection from current position to the clicked line
+- **Click and drag**: Select multiple lines by dragging across line numbers
+
+This feature only works when line numbers are visible (enabled by default, configurable via `line_numbers` setting).
+
+*Based on [PR #622](https://github.com/microsoft/edit/pull/622) by [jenia90](https://github.com/jenia90).*
 
 ### Ctrl+D Duplicate Line
 

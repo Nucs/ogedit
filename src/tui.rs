@@ -2230,7 +2230,40 @@ impl<'a> Context<'a, '_> {
                 y: mouse.y - inner.top + tc.scroll_offset.y,
             };
 
-            if text_rect.contains(self.tui.mouse_down_position) {
+            // Margin/gutter area for line number clicks
+            // Credit: jenia90 (https://github.com/microsoft/edit/pull/622)
+            let margin_rect = Rect {
+                left: inner.left,
+                top: inner.top,
+                right: inner.left + tb.margin_width(),
+                bottom: inner.bottom,
+            };
+
+            if margin_rect.contains(self.tui.mouse_down_position) && tb.margin_width() > 0 {
+                // Clicking in the margin (line numbers) selects entire lines
+                if self.tui.mouse_is_drag {
+                    // Dragging across line numbers extends selection
+                    if !tb.has_selection() {
+                        tb.start_selection();
+                    }
+                    tb.selection_update_visual(Point { x: CoordType::MAX, y: pos.y });
+                    tc.preferred_column = tb.cursor_visual_pos().x;
+                } else if self.tui.mouse_state == InputMouseState::Left {
+                    // Single click on line number
+                    if self.input_mouse_modifiers.contains(kbmod::SHIFT) {
+                        // Shift+click extends selection to this line
+                        tb.selection_update_visual(Point { x: CoordType::MAX, y: pos.y });
+                    } else {
+                        // Regular click selects the entire line
+                        tb.cursor_move_to_visual(Point { x: 0, y: pos.y });
+                        tb.select_line();
+                    }
+                    tc.preferred_column = tb.cursor_visual_pos().x;
+                }
+                make_cursor_visible = true;
+                self.set_input_consumed();
+                return make_cursor_visible;
+            } else if text_rect.contains(self.tui.mouse_down_position) {
                 if self.tui.mouse_is_drag {
                     tb.selection_update_visual(pos);
                     tc.preferred_column = tb.cursor_visual_pos().x;

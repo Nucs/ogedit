@@ -322,6 +322,8 @@ pub fn draw_add_untitled_document(ctx: &mut Context, state: &mut State) {
 pub fn error_log_add(ctx: &mut Context, state: &mut State, err: apperr::Error) {
     let msg = format!("{}", FormatApperr::from(err));
     if !msg.is_empty() {
+        logging::log_error(&msg);
+        logging::log_dialog_open("Error");
         state.error_log[state.error_log_index] = msg;
         state.error_log_index = (state.error_log_index + 1) % state.error_log.len();
         state.error_log_count = state.error_log.len().min(state.error_log_count + 1);
@@ -353,12 +355,14 @@ pub fn draw_error_log(ctx: &mut Context, state: &mut State) {
         ctx.block_end();
 
         if ctx.button("ok", loc(LocId::Ok), ButtonStyle::default()) {
+            logging::log_dialog_close("Error", "Ok");
             state.error_log_count = 0;
         }
         ctx.attr_position(Position::Center);
         ctx.inherit_focus();
     }
     if ctx.modal_end() {
+        logging::log_dialog_close("Error", "Escape");
         state.error_log_count = 0;
     }
 }

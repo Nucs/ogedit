@@ -23,6 +23,7 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
             draw_menu_file(ctx, state);
         }
         if !contains_focus && ctx.consume_shortcut(vk::F10) {
+            logging::log_action("SHORTCUT: F10 -> Activate menubar");
             ctx.steal_focus();
         }
         if state.documents.active().is_some() {
