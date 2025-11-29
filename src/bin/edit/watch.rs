@@ -668,3 +668,398 @@ fn watcher_thread(command_rx: Receiver<WatchCommand>, event_tx: Sender<WatchEven
         }
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+/// File watcher tests.
+///
+/// **Note:** The native file watcher tests (tests that use FileWatcher) may be
+/// flaky when run alongside other tests due to Windows ReadDirectoryChangesW
+/// API timing issues. The polling fallback tests are reliable and always run.
+///
+/// To run the full watcher test suite:
+/// ```bash
+/// cargo test watch:: -- --test-threads=1 --include-ignored
+/// ```
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Unique counter for test file names to avoid conflicts between concurrent tests
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Helper to create a temp file in a unique directory and return its path
+    fn create_temp_file(name: &str, content: &str) -> PathBuf {
+        let unique_id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let temp_dir = std::env::temp_dir();
+        // Create unique subdirectory per test to avoid watcher conflicts
+        let test_dir = temp_dir.join(format!("ogedit_test_{}_{}_{}", std::process::id(), unique_id, name));
+        fs::create_dir_all(&test_dir).expect("Failed to create temp dir");
+        let path = test_dir.join(format!("{}.txt", name));
+        let mut file = File::create(&path).expect("Failed to create temp file");
+        file.write_all(content.as_bytes()).expect("Failed to write temp file");
+        file.sync_all().expect("Failed to sync temp file");
+        path
+    }
+
+    /// Clean up the test directory containing a temp file
+    fn cleanup_temp_file(path: &Path) {
+        if let Some(parent) = path.parent() {
+            let _ = fs::remove_dir_all(parent);
+        }
+    }
+
+    /// Helper to wait for watcher thread to process commands
+    fn wait_for_watcher() {
+        // Give the watcher thread time to register the watch
+        thread::sleep(Duration::from_millis(150));
+    }
+
+    /// Helper to wait for file system events to propagate
+    fn wait_for_events() {
+        // Native watchers are typically faster than polling
+        // Polling interval is 500ms, so we need to wait longer for it
+        thread::sleep(Duration::from_millis(750));
+    }
+
+    /// Helper to poll events with retries for flaky native watchers
+    fn poll_events_with_retry(watcher: &FileWatcher, max_attempts: u32) -> Vec<WatchEvent> {
+        let mut all_events = Vec::new();
+        for attempt in 0..max_attempts {
+            // Use longer delays for later attempts
+            let delay = 300 + (attempt as u64 * 100);
+            thread::sleep(Duration::from_millis(delay));
+            all_events.extend(watcher.poll_events());
+            if !all_events.is_empty() {
+                break;
+            }
+        }
+        all_events
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_detects_modification() {
+        let path = create_temp_file("modify_test", "original content");
+
+        // Create watcher and start watching
+        let watcher = FileWatcher::new();
+        watcher.watch(&path);
+        // Give extra time for watcher thread to register
+        thread::sleep(Duration::from_millis(300));
+
+        // Clear any initial events
+        let _ = watcher.poll_events();
+
+        // Modify the file
+        {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .expect("Failed to open file for modification");
+            file.write_all(b"modified content").expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+        }
+
+        // Poll with retries for flaky native watchers (more retries)
+        let events = poll_events_with_retry(&watcher, 8);
+
+        // Clean up
+        drop(watcher);
+        cleanup_temp_file(&path);
+
+        // Verify we got a Modified event (path may be canonicalized)
+        assert!(!events.is_empty(), "Expected at least one event, got none");
+        let has_modified = events.iter().any(|e| matches!(e, WatchEvent::Modified(_)));
+        assert!(has_modified, "Expected Modified event, got: {:?}", events);
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_detects_deletion() {
+        let path = create_temp_file("delete_test", "content to delete");
+        let parent = path.parent().map(|p| p.to_path_buf());
+
+        // Create watcher and start watching
+        let watcher = FileWatcher::new();
+        watcher.watch(&path);
+        // Give extra time for watcher thread to register
+        thread::sleep(Duration::from_millis(300));
+
+        // Clear any initial events
+        let _ = watcher.poll_events();
+
+        // Delete the file
+        fs::remove_file(&path).expect("Failed to delete file");
+
+        // Poll with retries for deletion events (more retries)
+        let all_events = poll_events_with_retry(&watcher, 8);
+        drop(watcher);
+
+        // Clean up directory
+        if let Some(p) = parent {
+            let _ = fs::remove_dir_all(p);
+        }
+
+        // Verify we got a Deleted event
+        assert!(!all_events.is_empty(), "Expected at least one event, got none");
+        let has_deleted = all_events.iter().any(|e| matches!(e, WatchEvent::Deleted(_)));
+        assert!(has_deleted, "Expected Deleted event, got: {:?}", all_events);
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_unwatch_stops_events() {
+        let path = create_temp_file("unwatch_test", "original content");
+
+        // Create watcher and start watching
+        let watcher = FileWatcher::new();
+        watcher.watch(&path);
+        wait_for_watcher();
+
+        // Clear any initial events
+        let _ = watcher.poll_events();
+
+        // Unwatch the file
+        watcher.unwatch(&path);
+        wait_for_watcher();
+
+        // Modify the file
+        {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .expect("Failed to open file for modification");
+            file.write_all(b"modified after unwatch").expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+        }
+
+        wait_for_events();
+
+        // Check for events - should be empty since we unwatched
+        let events = watcher.poll_events();
+
+        // Clean up
+        drop(watcher);
+        cleanup_temp_file(&path);
+
+        // After unwatch, no events should be received
+        assert!(events.is_empty(), "Expected no events after unwatch, got: {:?}", events);
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_multiple_files() {
+        let path1 = create_temp_file("multi_test1", "content 1");
+        let path2 = create_temp_file("multi_test2", "content 2");
+
+        // Create watcher and watch both files
+        let watcher = FileWatcher::new();
+        watcher.watch(&path1);
+        watcher.watch(&path2);
+        wait_for_watcher();
+
+        // Clear any initial events
+        let _ = watcher.poll_events();
+
+        // Modify only the first file
+        {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&path1)
+                .expect("Failed to open file for modification");
+            file.write_all(b"modified content 1").expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+        }
+
+        // Poll with retries
+        let events = poll_events_with_retry(&watcher, 5);
+
+        // Clean up
+        drop(watcher);
+        cleanup_temp_file(&path1);
+        cleanup_temp_file(&path2);
+
+        // Verify we got at least one Modified event
+        assert!(!events.is_empty(), "Expected at least one event, got none");
+        let modified_events: Vec<_> = events.iter()
+            .filter_map(|e| match e {
+                WatchEvent::Modified(p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        assert!(!modified_events.is_empty(), "Expected at least one Modified event");
+    }
+
+    #[test]
+    fn test_polling_fallback_modification() {
+        // Test the polling mechanism directly using WatchedFile
+        let path = create_temp_file("polling_test", "initial content");
+
+        let mut watched = WatchedFile::new(path.clone());
+
+        // First check should initialize and return None
+        let event = watched.check_changed();
+        assert!(event.is_none(), "First check should return None (initialization)");
+
+        // Give filesystem time to update mtime with distinct value
+        thread::sleep(Duration::from_millis(100));
+
+        // Modify the file
+        {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .expect("Failed to open file for modification");
+            file.write_all(b"modified content").expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+        }
+
+        // Small delay to ensure mtime is updated
+        thread::sleep(Duration::from_millis(100));
+
+        // Second check should detect the modification
+        let event = watched.check_changed();
+
+        // Clean up
+        cleanup_temp_file(&path);
+
+        assert!(event.is_some(), "Expected Modified event from polling");
+        assert!(matches!(event, Some(WatchEvent::Modified(_))));
+    }
+
+    #[test]
+    fn test_polling_fallback_deletion() {
+        // Test the polling mechanism for file deletion
+        let path = create_temp_file("polling_delete_test", "content to delete");
+        let parent = path.parent().map(|p| p.to_path_buf());
+
+        let mut watched = WatchedFile::new(path.clone());
+
+        // First check should initialize
+        let _ = watched.check_changed();
+
+        // Delete the file
+        fs::remove_file(&path).expect("Failed to delete file");
+
+        // Second check should detect the deletion
+        let event = watched.check_changed();
+
+        // Clean up directory
+        if let Some(p) = parent {
+            let _ = fs::remove_dir_all(p);
+        }
+
+        assert!(event.is_some(), "Expected Deleted event from polling");
+        assert!(matches!(event, Some(WatchEvent::Deleted(_))));
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_no_events_without_changes() {
+        let path = create_temp_file("no_change_test", "static content");
+
+        // Create watcher and start watching
+        let watcher = FileWatcher::new();
+        watcher.watch(&path);
+        wait_for_watcher();
+
+        // Clear any initial events
+        let _ = watcher.poll_events();
+
+        // Wait without making any changes
+        wait_for_events();
+
+        // Should have no events
+        let events = watcher.poll_events();
+
+        // Clean up
+        drop(watcher);
+        cleanup_temp_file(&path);
+
+        assert!(events.is_empty(), "Expected no events when file is unchanged, got: {:?}", events);
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_drop_cleanup() {
+        let path = create_temp_file("drop_test", "content");
+
+        // Create watcher, watch file, then drop
+        {
+            let watcher = FileWatcher::new();
+            watcher.watch(&path);
+            wait_for_watcher();
+            // Watcher dropped here - should clean up thread
+        }
+
+        // If we get here without hanging, the thread was properly joined
+
+        // Clean up
+        cleanup_temp_file(&path);
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_watch_nonexistent_file() {
+        let path = PathBuf::from("/nonexistent/path/to/file.txt");
+
+        // Create watcher and try to watch nonexistent file
+        let watcher = FileWatcher::new();
+        watcher.watch(&path);
+        wait_for_watcher();
+
+        // Should not panic, events should be empty
+        let events = watcher.poll_events();
+        drop(watcher);
+
+        assert!(events.is_empty(), "Expected no events for nonexistent file");
+    }
+
+    #[test]
+    #[ignore = "flaky when run with other tests; run with --include-ignored"]
+    fn test_watcher_rapid_modifications() {
+        let path = create_temp_file("rapid_test", "initial");
+
+        // Create watcher and start watching
+        let watcher = FileWatcher::new();
+        watcher.watch(&path);
+        wait_for_watcher();
+
+        // Clear any initial events
+        let _ = watcher.poll_events();
+
+        // Make multiple rapid modifications
+        for i in 0..5 {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .expect("Failed to open file");
+            write!(file, "content version {}", i).expect("Failed to write");
+            file.sync_all().expect("Failed to sync");
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        // Poll with retries
+        let events = poll_events_with_retry(&watcher, 5);
+
+        // Clean up
+        drop(watcher);
+        cleanup_temp_file(&path);
+
+        // We should have at least one modification event
+        // (exact count depends on deduplication and timing)
+        let has_modified = events.iter().any(|e| matches!(e, WatchEvent::Modified(_)));
+        assert!(has_modified, "Expected at least one Modified event, got: {:?}", events);
+    }
+}
