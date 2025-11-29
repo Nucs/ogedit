@@ -551,7 +551,15 @@ mod platform {
         pub fn unwatch(&mut self, path: &Path) {
             if let Some(fd) = self.path_to_fd.remove(path) {
                 self.watched_fds.remove(&fd);
-                unsafe { libc::close(fd) };
+                // Remove the kevent filter before closing the fd to prevent lingering events
+                let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+                event.ident = fd as usize;
+                event.filter = libc::EVFILT_VNODE;
+                event.flags = libc::EV_DELETE;
+                unsafe {
+                    libc::kevent(self.kq, &event, 1, std::ptr::null_mut(), 0, std::ptr::null());
+                    libc::close(fd);
+                }
             }
         }
 
@@ -715,8 +723,9 @@ mod tests {
 
     /// Helper to wait for watcher thread to process commands
     fn wait_for_watcher() {
-        // Give the watcher thread time to register the watch
-        thread::sleep(Duration::from_millis(150));
+        // Give the watcher thread time to register the watch.
+        // Must be longer than the poll timeout (200ms) to ensure commands are processed.
+        thread::sleep(Duration::from_millis(300));
     }
 
     /// Helper to wait for file system events to propagate
