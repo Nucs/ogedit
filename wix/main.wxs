@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OGEdit MSI Installer
+  Built with WiX Toolset v5
+
+  Features:
+  - Installs ogedit.exe and ogmsedit.exe to Program Files\OGEdit
+  - Adds installation directory to system PATH
+  - Creates Start Menu shortcuts
+  - Optional desktop shortcut
+  - License agreement dialog
+  - Install directory selection
+
+  Build:
+    wix build wix/main.wxs -arch x64 -d Version=1.2.2 -d BinaryPath=target/release -d AssetPath=assets -ext WixToolset.UI.wixext -o ogedit.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package
+    Name="OGEdit"
+    Manufacturer="EliBelash"
+    Version="$(var.Version)"
+    UpgradeCode="E8F7C6D5-4B3A-2918-0F1E-D2C3B4A59687"
+    Compressed="yes"
+    InstallerVersion="500"
+    Scope="perMachine">
+
+    <SummaryInformation
+      Description="OGEdit $(var.Version) - A fast terminal-based text editor"
+      Manufacturer="EliBelash"
+      Keywords="editor,terminal,text,tui,console" />
+
+    <!-- Upgrade handling -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of OGEdit is already installed. Please uninstall it first."
+      AllowSameVersionUpgrades="yes"
+      Schedule="afterInstallInitialize" />
+
+    <!-- Embed cabinet for single-file MSI -->
+    <Media Id="1" Cabinet="ogedit.cab" EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Properties for Add/Remove Programs -->
+    <Icon Id="OGEditIcon" SourceFile="$(var.AssetPath)\edit.ico" />
+    <Property Id="ARPPRODUCTICON" Value="OGEditIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Nucs/ogedit" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Nucs/ogedit" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/Nucs/ogedit/releases" />
+
+    <!-- Default install directory -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- License file for UI -->
+    <WixVariable Id="WixUILicenseRtf" Value="wix\License.rtf" />
+
+    <!-- Directory structure -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="OGEdit" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="OGEditStartMenuFolder" Name="OGEdit" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- Component: Main executable -->
+    <ComponentGroup Id="MainComponents" Directory="INSTALLFOLDER">
+      <Component Id="OGEditExe" Guid="7A8B9C0D-1E2F-3A4B-5C6D-7E8F9A0B1C2D">
+        <File Id="OGEditExeFile"
+              Name="ogedit.exe"
+              Source="$(var.BinaryPath)\ogedit.exe"
+              KeyPath="yes">
+          <Shortcut Id="StartMenuOGEdit"
+                    Name="OGEdit"
+                    Directory="OGEditStartMenuFolder"
+                    Description="Terminal-based text editor"
+                    Icon="OGEditIcon"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Advertise="yes" />
+        </File>
+      </Component>
+
+      <Component Id="OGMSEditExe" Guid="8B9C0D1E-2F3A-4B5C-6D7E-8F9A0B1C2D3E">
+        <File Id="OGMSEditExeFile"
+              Name="ogmsedit.exe"
+              Source="$(var.BinaryPath)\ogedit.exe"
+              KeyPath="yes" />
+      </Component>
+
+      <Component Id="LicenseFile" Guid="9C0D1E2F-3A4B-5C6D-7E8F-9A0B1C2D3E4F">
+        <File Id="LicenseFileFile"
+              Name="LICENSE"
+              Source="LICENSE"
+              KeyPath="yes" />
+      </Component>
+
+      <Component Id="ReadmeFile" Guid="0D1E2F3A-4B5C-6D7E-8F9A-0B1C2D3E4F5A">
+        <File Id="ReadmeFileFile"
+              Name="README.md"
+              Source="README.md"
+              KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Component: PATH environment variable -->
+    <ComponentGroup Id="EnvironmentComponents" Directory="INSTALLFOLDER">
+      <Component Id="PathEnvVar" Guid="1E2F3A4B-5C6D-7E8F-9A0B-1C2D3E4F5A6B">
+        <Environment
+          Id="OGEditPath"
+          Name="PATH"
+          Value="[INSTALLFOLDER]"
+          Permanent="no"
+          Part="last"
+          Action="set"
+          System="yes" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\OGEdit"
+          Name="InstallPath"
+          Type="string"
+          Value="[INSTALLFOLDER]"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Component: Start Menu folder cleanup -->
+    <ComponentGroup Id="StartMenuComponents" Directory="OGEditStartMenuFolder">
+      <Component Id="StartMenuFolderCleanup" Guid="2F3A4B5C-6D7E-8F9A-0B1C-2D3E4F5A6B7C">
+        <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\OGEdit"
+          Name="StartMenuInstalled"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Component: Desktop shortcut (optional) -->
+    <ComponentGroup Id="DesktopShortcutComponents" Directory="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="3A4B5C6D-7E8F-9A0B-1C2D-3E4F5A6B7C8D">
+        <Shortcut
+          Id="DesktopOGEdit"
+          Name="OGEdit"
+          Description="Terminal-based text editor"
+          Target="[INSTALLFOLDER]ogedit.exe"
+          WorkingDirectory="INSTALLFOLDER"
+          Icon="OGEditIcon" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\OGEdit"
+          Name="DesktopShortcut"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Features -->
+    <Feature Id="MainFeature" Title="OGEdit" Description="Terminal-based text editor" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="MainComponents" />
+      <ComponentGroupRef Id="EnvironmentComponents" />
+      <ComponentGroupRef Id="StartMenuComponents" />
+    </Feature>
+
+    <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut" Description="Create a desktop shortcut" Level="1" AllowAbsent="yes">
+      <ComponentGroupRef Id="DesktopShortcutComponents" />
+    </Feature>
+
+    <!-- UI: Install directory dialog with license -->
+    <ui:WixUI Id="WixUI_InstallDir" />
+
+  </Package>
+</Wix>

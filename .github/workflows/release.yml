@@ -10,8 +10,8 @@
 # 4. Push: git push && git push --tags
 #
 # Build Outputs:
-# - ogedit-windows-x64.zip
-# - ogedit-windows-arm64.zip
+# - ogedit-windows-x64.zip / .msi
+# - ogedit-windows-arm64.zip / .msi
 # - ogedit-linux-x64.zip
 # - ogedit-macos-x64.zip
 # - ogedit-macos-arm64.zip
@@ -41,22 +41,27 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: ogedit-windows-x64
             binary: ogedit.exe
+            arch: x64
           - os: windows-latest
             target: aarch64-pc-windows-msvc
             artifact: ogedit-windows-arm64
             binary: ogedit.exe
+            arch: arm64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: ogedit-linux-x64
             binary: ogedit
+            arch: x64
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: ogedit-macos-x64
             binary: ogedit
+            arch: x64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: ogedit-macos-arm64
             binary: ogedit
+            arch: arm64
 
     steps:
       - name: Disable git autocrlf
@@ -109,18 +114,71 @@ jobs:
           "$hash  ${{ matrix.artifact }}.zip" | Out-File -Encoding utf8 ${{ matrix.artifact }}.zip.sha256
           Get-Content ${{ matrix.artifact }}.zip.sha256
 
-      - name: Upload artifact
+      - name: Upload zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.zip
           retention-days: 5
 
-      - name: Upload checksum
+      - name: Upload zip checksum
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}.sha256
           path: ${{ matrix.artifact }}.zip.sha256
+          retention-days: 5
+
+      # MSI Installer (Windows only)
+      - name: Install WiX Toolset
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+
+      - name: Get version from tag
+        if: matrix.os == 'windows-latest'
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/release/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build MSI
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.get_version.outputs.VERSION }}"
+          $binaryPath = "target/${{ matrix.target }}/release"
+          $assetPath = "assets"
+
+          wix build wix/main.wxs `
+            -arch ${{ matrix.arch }} `
+            -d Version=$version `
+            -d BinaryPath=$binaryPath `
+            -d AssetPath=$assetPath `
+            -ext WixToolset.UI.wixext `
+            -o ${{ matrix.artifact }}.msi
+
+          # Generate checksum
+          $hash = (Get-FileHash -Algorithm SHA256 ${{ matrix.artifact }}.msi).Hash.ToLower()
+          "$hash  ${{ matrix.artifact }}.msi" | Out-File -Encoding utf8 ${{ matrix.artifact }}.msi.sha256
+          Get-Content ${{ matrix.artifact }}.msi.sha256
+
+      - name: Upload MSI artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-msi
+          path: ${{ matrix.artifact }}.msi
+          retention-days: 5
+
+      - name: Upload MSI checksum
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}.msi.sha256
+          path: ${{ matrix.artifact }}.msi.sha256
           retention-days: 5
 
   create-release:
@@ -165,10 +223,17 @@ jobs:
           echo "" >> $GITHUB_OUTPUT
           echo "### Downloads" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
+          echo "#### Windows (with installer)" >> $GITHUB_OUTPUT
+          echo "| Architecture | Installer | Portable |" >> $GITHUB_OUTPUT
+          echo "|--------------|-----------|----------|" >> $GITHUB_OUTPUT
+          echo "| x64 | \`ogedit-windows-x64.msi\` | \`ogedit-windows-x64.zip\` |" >> $GITHUB_OUTPUT
+          echo "| ARM64 | \`ogedit-windows-arm64.msi\` | \`ogedit-windows-arm64.zip\` |" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "The MSI installer adds OGEdit to your PATH automatically." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "#### Linux / macOS (portable)" >> $GITHUB_OUTPUT
           echo "| Platform | Architecture | Download |" >> $GITHUB_OUTPUT
           echo "|----------|--------------|----------|" >> $GITHUB_OUTPUT
-          echo "| Windows | x64 | \`ogedit-windows-x64.zip\` |" >> $GITHUB_OUTPUT
-          echo "| Windows | ARM64 | \`ogedit-windows-arm64.zip\` |" >> $GITHUB_OUTPUT
           echo "| Linux | x64 | \`ogedit-linux-x64.zip\` |" >> $GITHUB_OUTPUT
           echo "| macOS | x64 (Intel) | \`ogedit-macos-x64.zip\` |" >> $GITHUB_OUTPUT
           echo "| macOS | ARM64 (Apple Silicon) | \`ogedit-macos-arm64.zip\` |" >> $GITHUB_OUTPUT
@@ -179,6 +244,9 @@ jobs:
           echo "" >> $GITHUB_OUTPUT
           echo "### Installation" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
+          echo "**Windows (MSI):** Run the installer. OGEdit will be added to PATH." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Portable (all platforms):**" >> $GITHUB_OUTPUT
           echo "1. Download the appropriate zip for your platform" >> $GITHUB_OUTPUT
           echo "2. Extract to a directory in your PATH" >> $GITHUB_OUTPUT
           echo "3. Run \`ogedit\` or \`ogmsedit\`" >> $GITHUB_OUTPUT
@@ -194,3 +262,5 @@ jobs:
           files: |
             ogedit-*.zip
             ogedit-*.zip.sha256
+            ogedit-*.msi
+            ogedit-*.msi.sha256
