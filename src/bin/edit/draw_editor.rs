@@ -237,7 +237,6 @@ pub fn draw_handle_save(ctx: &mut Context, state: &mut State) {
                 logging::log_file_save(&path_str);
                 // Clear file changed indicator since we just saved
                 state.file_changed_cached = false;
-                state.file_check_counter = 0;
             }
         } else {
             // No path? Show the file picker.

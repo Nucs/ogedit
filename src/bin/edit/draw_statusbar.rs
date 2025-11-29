@@ -22,23 +22,6 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
     ctx.attr_intrinsic_size(Size { width: COORD_TYPE_SAFE_MAX, height: 1 });
     ctx.attr_padding(Rect::two(0, 1));
 
-    // Check if file has changed on disk every 60 frames (≈1 second)
-    // This populates state.file_changed_cached which the File menu uses
-    state.file_check_counter += 1;
-    if state.file_check_counter >= 60 {
-        state.file_check_counter = 0;
-        let changed = state
-            .documents
-            .active()
-            .is_some_and(|d| d.has_file_changed_on_disk());
-        state.file_changed_cached = changed;
-
-        // DEBUG: Log when we check
-        if state.documents.active().is_some() {
-            logging::log_action(&format!("RELOAD_CHECK: changed={}", changed));
-        }
-    }
-
     if let Some(doc) = state.documents.active() {
         let mut tb = doc.buffer.borrow_mut();
 

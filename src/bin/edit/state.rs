@@ -237,8 +237,7 @@ pub struct State {
 
     pub logging_tracker: LoggingTracker,
 
-    // File reload check counter (debounce to every 60 frames)
-    pub file_check_counter: u32,
+    /// Cached flag for file changed on disk (set by file watcher)
     pub file_changed_cached: bool,
 
     /// File watcher for detecting external modifications
@@ -302,7 +301,6 @@ impl State {
 
             logging_tracker: Default::default(),
 
-            file_check_counter: 60, // Start at 60 to trigger immediate check
             file_changed_cached: false,
 
             file_watcher: FileWatcher::new(),
@@ -498,7 +496,6 @@ pub fn reload_file_from_disk(state: &mut State) -> apperr::Result<()> {
 
         // Clear the cache so indicator disappears after reload
         state.file_changed_cached = false;
-        state.file_check_counter = 0; // Force recheck on next cycle
     }
     Ok(())
 }

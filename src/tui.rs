@@ -3311,8 +3311,14 @@ impl<'a> Context<'a, '_> {
     }
 
     fn menubar_shortcut(&mut self, shortcut: InputKey) {
-        let shortcut_letter = shortcut.value() as u8 as char;
-        if shortcut_letter.is_ascii_uppercase() {
+        let shortcut_value = shortcut.value();
+        let shortcut_letter = shortcut_value as u8 as char;
+
+        // Check if it's an uppercase letter (A-Z) or a function key (F1-F19: 0x70-0x82)
+        let is_letter = shortcut_letter.is_ascii_uppercase();
+        let is_function_key = (0x70..=0x82).contains(&shortcut_value);
+
+        if is_letter || is_function_key {
             let mut shortcut_text = ArenaString::new_in(self.arena());
             if shortcut.modifiers_contains(kbmod::CTRL) {
                 shortcut_text.push_str(self.tui.modifier_translations.ctrl);
@@ -3326,7 +3332,18 @@ impl<'a> Context<'a, '_> {
                 shortcut_text.push_str(self.tui.modifier_translations.shift);
                 shortcut_text.push('+');
             }
-            shortcut_text.push(shortcut_letter);
+
+            if is_letter {
+                shortcut_text.push(shortcut_letter);
+            } else {
+                // Function key: F1-F19 (0x70-0x82)
+                shortcut_text.push('F');
+                let fn_num = shortcut_value - 0x70 + 1; // F1=1, F2=2, ..., F19=19
+                if fn_num >= 10 {
+                    shortcut_text.push((b'0' + (fn_num / 10) as u8) as char);
+                }
+                shortcut_text.push((b'0' + (fn_num % 10) as u8) as char);
+            }
 
             self.label("shortcut", &shortcut_text);
         } else {
