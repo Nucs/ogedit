@@ -758,11 +758,13 @@ mod tests {
         // Create watcher and start watching
         let watcher = FileWatcher::new();
         watcher.watch(&path);
-        // Give extra time for watcher thread to register
-        thread::sleep(Duration::from_millis(300));
+        wait_for_watcher();
 
         // Clear any initial events
         let _ = watcher.poll_events();
+
+        // Wait to ensure mtime will be different (Windows has ~15ms resolution)
+        thread::sleep(Duration::from_millis(100));
 
         // Modify the file
         {
@@ -775,8 +777,8 @@ mod tests {
             file.sync_all().expect("Failed to sync");
         }
 
-        // Poll with retries for flaky native watchers (more retries)
-        let events = poll_events_with_retry(&watcher, 8);
+        // Poll with retries for CI environments
+        let events = poll_events_with_retry(&watcher, 10);
 
         // Clean up
         drop(watcher);
@@ -797,8 +799,7 @@ mod tests {
         // Create watcher and start watching
         let watcher = FileWatcher::new();
         watcher.watch(&path);
-        // Give extra time for watcher thread to register
-        thread::sleep(Duration::from_millis(300));
+        wait_for_watcher();
 
         // Clear any initial events
         let _ = watcher.poll_events();
@@ -806,8 +807,8 @@ mod tests {
         // Delete the file
         fs::remove_file(&path).expect("Failed to delete file");
 
-        // Poll with retries for deletion events (more retries)
-        let all_events = poll_events_with_retry(&watcher, 8);
+        // Poll with retries for CI environments
+        let all_events = poll_events_with_retry(&watcher, 10);
         drop(watcher);
 
         // Clean up directory
@@ -877,6 +878,9 @@ mod tests {
         // Clear any initial events
         let _ = watcher.poll_events();
 
+        // Wait to ensure mtime will be different (Windows has ~15ms resolution)
+        thread::sleep(Duration::from_millis(100));
+
         // Modify only the first file
         {
             let mut file = fs::OpenOptions::new()
@@ -888,8 +892,8 @@ mod tests {
             file.sync_all().expect("Failed to sync");
         }
 
-        // Poll with retries
-        let events = poll_events_with_retry(&watcher, 5);
+        // Poll with more retries for CI environments
+        let events = poll_events_with_retry(&watcher, 10);
 
         // Clean up
         drop(watcher);
@@ -897,14 +901,22 @@ mod tests {
         cleanup_temp_file(&path2);
 
         // Verify we got at least one Modified event
-        assert!(!events.is_empty(), "Expected at least one event, got none");
+        assert!(
+            !events.is_empty(),
+            "Expected at least one event, got none. Watched path1={:?}, path2={:?}",
+            path1, path2
+        );
         let modified_events: Vec<_> = events.iter()
             .filter_map(|e| match e {
                 WatchEvent::Modified(p) => Some(p),
                 _ => None,
             })
             .collect();
-        assert!(!modified_events.is_empty(), "Expected at least one Modified event");
+        assert!(
+            !modified_events.is_empty(),
+            "Expected at least one Modified event, got: {:?}",
+            events
+        );
     }
 
     #[test]
