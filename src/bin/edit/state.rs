@@ -16,6 +16,7 @@ use crate::config::Config;
 use crate::documents::DocumentManager;
 use crate::localization::*;
 use crate::logging;
+use crate::watch::FileWatcher;
 
 #[repr(transparent)]
 pub struct FormatApperr(apperr::Error);
@@ -239,6 +240,9 @@ pub struct State {
     // File reload check counter (debounce to every 60 frames)
     pub file_check_counter: u32,
     pub file_changed_cached: bool,
+
+    /// File watcher for detecting external modifications
+    pub file_watcher: FileWatcher,
 }
 
 impl State {
@@ -300,6 +304,8 @@ impl State {
 
             file_check_counter: 60, // Start at 60 to trigger immediate check
             file_changed_cached: false,
+
+            file_watcher: FileWatcher::new(),
         })
     }
 }
@@ -483,6 +489,12 @@ pub fn reload_file_from_disk(state: &mut State) -> apperr::Result<()> {
         // Reload the file with current encoding
         doc.reread(None)?;
         logging::log_action(&format!("FILE_RELOADED: {}", doc.filename));
+
+        // Re-watch the file to update the watcher's baseline timestamp
+        if let Some(path) = &doc.path {
+            state.file_watcher.unwatch(path);
+            state.file_watcher.watch(path);
+        }
 
         // Clear the cache so indicator disappears after reload
         state.file_changed_cached = false;

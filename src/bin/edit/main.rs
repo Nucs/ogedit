@@ -13,6 +13,7 @@ mod localization;
 #[allow(dead_code)]
 mod logging;
 mod state;
+mod watch;
 
 use std::borrow::Cow;
 #[cfg(feature = "debug-latency")]
@@ -235,6 +236,24 @@ fn run() -> apperr::Result<()> {
         let elapsed_ms = start_time.elapsed().as_millis() as u64;
         log_periodic_content_snapshot(&mut state, elapsed_ms);
 
+        // Poll file watcher for external modifications
+        for event in state.file_watcher.poll_events() {
+            match event {
+                watch::WatchEvent::Modified(path) => {
+                    // Check if this path matches the active document
+                    if let Some(doc) = state.documents.active() {
+                        if doc.path.as_ref() == Some(&path) {
+                            state.file_changed_cached = true;
+                            logging::log_action(&format!("FILE_WATCH_EVENT: Modified {}", path.display()));
+                        }
+                    }
+                }
+                watch::WatchEvent::Deleted(path) => {
+                    logging::log_action(&format!("FILE_WATCH_EVENT: Deleted {}", path.display()));
+                }
+            }
+        }
+
         // Render the UI and write it to the terminal.
         {
             let scratch = scratch_arena(None);
@@ -336,6 +355,8 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
         state.documents.add_file_path(p, &state.config)?;
         // Track in recent files
         state.config.add_recent_file(p);
+        // Start watching for external modifications
+        state.file_watcher.watch(p);
     }
 
     if let Some(mut file) = sys::open_stdin_if_redirected() {
@@ -495,6 +516,10 @@ fn draw_handle_wants_exit(_ctx: &mut Context, state: &mut State) {
         if doc.buffer.borrow().is_dirty() {
             state.wants_close = true;
             return;
+        }
+        // Stop watching this file before closing
+        if let Some(path) = &doc.path {
+            state.file_watcher.unwatch(path);
         }
         state.documents.remove_active();
     }

@@ -298,6 +298,8 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                     logging::log_file_open(&path_str);
                     // Track in recent files
                     state.config.add_recent_file(&path);
+                    // Start watching for external modifications
+                    state.file_watcher.watch(&path);
                 } else {
                     logging::log_file_save(&path_str);
                     // Save the parent directory as the last-used save folder for this project
@@ -305,6 +307,8 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                         let parent_str = parent.to_string_lossy().to_string();
                         state.config.set_project_folder(&state.startup_cwd, &parent_str);
                     }
+                    // Start watching the new file path for external modifications
+                    state.file_watcher.watch(&path);
                 }
                 ctx.needs_rerender();
                 done = true;

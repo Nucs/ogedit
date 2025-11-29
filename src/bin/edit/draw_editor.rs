@@ -258,6 +258,10 @@ pub fn draw_handle_wants_close(ctx: &mut Context, state: &mut State) {
 
     if !doc.buffer.borrow().is_dirty() {
         logging::log_file_close(&doc.filename, false);
+        // Stop watching this file
+        if let Some(path) = &doc.path {
+            state.file_watcher.unwatch(path);
+        }
         state.documents.remove_active();
         state.wants_close = false;
         ctx.needs_rerender();
@@ -334,6 +338,10 @@ pub fn draw_handle_wants_close(ctx: &mut Context, state: &mut State) {
             logging::log_dialog_close("Unsaved Changes", "Discard");
             if let Some(doc) = state.documents.active() {
                 logging::log_file_close(&doc.filename, true);
+                // Stop watching this file
+                if let Some(path) = &doc.path {
+                    state.file_watcher.unwatch(path);
+                }
             }
             state.documents.remove_active();
             state.wants_close = false;

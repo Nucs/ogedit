@@ -22,10 +22,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
     ctx.attr_intrinsic_size(Size { width: COORD_TYPE_SAFE_MAX, height: 1 });
     ctx.attr_padding(Rect::two(0, 1));
 
-    // Check if file has changed on disk every 120 frames (≈2 seconds)
+    // Check if file has changed on disk every 60 frames (≈1 second)
     // This populates state.file_changed_cached which the File menu uses
     state.file_check_counter += 1;
-    if state.file_check_counter >= 120 {
+    if state.file_check_counter >= 60 {
         state.file_check_counter = 0;
         let changed = state
             .documents
@@ -418,6 +418,8 @@ pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
                             match state.documents.add_file_path(&path, &state.config) {
                                 Ok(_) => {
                                     state.config.add_recent_file(&path);
+                                    // Start watching for external modifications
+                                    state.file_watcher.watch(&path);
                                     state.wants_go_to_file = false;
                                     ctx.needs_rerender();
                                 }
