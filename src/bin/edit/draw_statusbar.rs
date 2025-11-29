@@ -42,8 +42,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             ctx.steal_focus();
         }
 
-        state.wants_encoding_picker |=
-            ctx.button("encoding", tb.encoding(), ButtonStyle::default());
+        if ctx.button("encoding", tb.encoding(), ButtonStyle::default()) {
+            if !state.wants_encoding_picker {
+                logging::log_dialog_open("Encoding Picker");
+            }
+            state.wants_encoding_picker = true;
+        }
         if state.wants_encoding_picker {
             if doc.path.is_some() {
                 ctx.block_begin("frame");
@@ -74,12 +78,13 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             }
 
             if !ctx.contains_focus() {
+                logging::log_dialog_close("Encoding Picker", "lost focus");
                 state.wants_encoding_picker = false;
                 ctx.needs_rerender();
             }
         }
 
-        state.wants_indentation_picker |= ctx.button(
+        if ctx.button(
             "indentation",
             &arena_format!(
                 ctx.arena(),
@@ -92,7 +97,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                 tb.tab_size(),
             ),
             ButtonStyle::default(),
-        );
+        ) {
+            if !state.wants_indentation_picker {
+                logging::log_dialog_open("Indentation Picker");
+            }
+            state.wants_indentation_picker = true;
+        }
         if state.wants_indentation_picker {
             ctx.table_begin("indentation-picker");
             ctx.attr_float(FloatSpec {
@@ -167,6 +177,7 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             ctx.table_end();
 
             if !ctx.contains_focus() {
+                logging::log_dialog_close("Indentation Picker", "lost focus");
                 state.wants_indentation_picker = false;
                 ctx.needs_rerender();
             }
@@ -212,6 +223,7 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
 
             if ctx.button("filename", filename, ButtonStyle::default()) {
                 logging::log_action("BUTTON_CLICK: Go to file (filename)");
+                logging::log_dialog_open("Go to File");
                 state.wants_go_to_file = true;
             }
             ctx.inherit_focus();
@@ -221,8 +233,14 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
         ctx.block_end();
     } else {
         state.wants_statusbar_focus = false;
-        state.wants_encoding_picker = false;
-        state.wants_indentation_picker = false;
+        if state.wants_encoding_picker {
+            logging::log_dialog_close("Encoding Picker", "no active document");
+            state.wants_encoding_picker = false;
+        }
+        if state.wants_indentation_picker {
+            logging::log_dialog_close("Indentation Picker", "no active document");
+            state.wants_indentation_picker = false;
+        }
     }
 
     ctx.table_end();

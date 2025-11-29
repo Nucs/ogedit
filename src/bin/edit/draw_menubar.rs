@@ -19,6 +19,7 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
         let contains_focus = ctx.contains_focus();
 
         if ctx.menubar_menu_begin(loc(LocId::File), 'F') {
+            logging::log_menu_open("File");
             draw_menu_file(ctx, state);
         }
         if !contains_focus && ctx.consume_shortcut(vk::F10) {
@@ -26,13 +27,16 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
         }
         if state.documents.active().is_some() {
             if ctx.menubar_menu_begin(loc(LocId::Edit), 'E') {
+                logging::log_menu_open("Edit");
                 draw_menu_edit(ctx, state);
             }
             if ctx.menubar_menu_begin(loc(LocId::View), 'V') {
+                logging::log_menu_open("View");
                 draw_menu_view(ctx, state);
             }
         }
         if ctx.menubar_menu_begin(loc(LocId::Help), 'H') {
+            logging::log_menu_open("Help");
             draw_menu_help(ctx, state);
         }
     }
@@ -56,6 +60,7 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
     }
     if ctx.menubar_menu_button(loc(LocId::FileOpen), 'O', hk.file_open) {
         logging::log_menu_click("File->Open");
+        logging::log_dialog_open("File Open");
         state.wants_file_picker = StateFilePicker::Open;
     }
     if state.documents.active().is_some() {
@@ -65,6 +70,7 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
         }
         if ctx.menubar_menu_button(loc(LocId::FileSaveAs), 'A', hk.file_save_as) {
             logging::log_menu_click("File->Save As");
+            logging::log_dialog_open("Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
         }
         // Reload from disk - only show if document has a file path
@@ -118,11 +124,13 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
         if ctx.menubar_menu_button(loc(LocId::EditCut), 'T', hk.edit_cut) {
             logging::log_menu_click("Edit->Cut");
             tb.cut(ctx.clipboard_mut());
+            logging::log_cut(ctx.clipboard_ref().read());
             ctx.needs_rerender();
         }
         if ctx.menubar_menu_button(loc(LocId::EditCopy), 'C', hk.edit_copy) {
             logging::log_menu_click("Edit->Copy");
             tb.copy(ctx.clipboard_mut());
+            logging::log_copy(ctx.clipboard_ref().read());
             ctx.needs_rerender();
         }
         if ctx.menubar_menu_button(loc(LocId::EditPaste), 'P', hk.edit_paste) {
@@ -142,11 +150,13 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
     if state.wants_search.kind != StateSearchKind::Disabled {
         if ctx.menubar_menu_button(loc(LocId::EditFind), 'F', hk.edit_find) {
             logging::log_menu_click("Edit->Find");
+            logging::log_dialog_open("Find");
             state.wants_search.kind = StateSearchKind::Search;
             state.wants_search.focus = true;
         }
         if ctx.menubar_menu_button(loc(LocId::EditReplace), 'L', hk.edit_replace) {
             logging::log_menu_click("Edit->Replace");
+            logging::log_dialog_open("Replace");
             state.wants_search.kind = StateSearchKind::Replace;
             state.wants_search.focus = true;
         }
@@ -181,10 +191,12 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
         }
         if ctx.menubar_menu_button(loc(LocId::ViewGoToFile), 'F', hk.view_go_to_file) {
             logging::log_menu_click("View->Go To File");
+            logging::log_dialog_open("Go to File");
             state.wants_go_to_file = true;
         }
         if ctx.menubar_menu_button(loc(LocId::FileGoto), 'G', hk.view_go_to_line) {
             logging::log_menu_click("View->Go To Line");
+            logging::log_dialog_open("Go to Line");
             state.wants_goto = true;
         }
         if ctx.menubar_menu_checkbox(loc(LocId::ViewWordWrap), 'W', hk.view_word_wrap, word_wrap) {
@@ -205,6 +217,7 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
 fn draw_menu_help(ctx: &mut Context, state: &mut State) {
     if ctx.menubar_menu_button(loc(LocId::HelpAbout), 'A', vk::NULL) {
         logging::log_menu_click("Help->About");
+        logging::log_dialog_open("About");
         state.wants_about = true;
     }
     ctx.menubar_menu_end();

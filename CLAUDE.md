@@ -41,7 +41,7 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
 - **Configurable Hotkeys:**
   - All keyboard shortcuts are customizable in `state.json` under the `hotkeys` object
   - Format: `"action_name": "Modifier+Key"` (e.g., `"file_save": "Ctrl+S"`)
-  - Available modifiers: `Ctrl`, `Alt`, `Shift` (combine with `+`)
+  - Available modifiers: `Ctrl`, `Alt`, `Shift` (can combine multiple, e.g., `Ctrl+Alt+S`, `Ctrl+Shift+S`, `Ctrl+Alt+Shift+F1`)
   - Available keys: `A-Z`, `0-9`, `F1-F24`, `Space`, `Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown`, `Up`, `Down`, `Left`, `Right`
   - **File operations:**
     - `file_new`: Create new file (default: `Ctrl+N`)
@@ -81,6 +81,40 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - Unknown fields in the JSON are ignored (forward compatibility)
   - Invalid values for known fields trigger corruption recovery
 
+**Selection Auto-Highlight:**
+- When text is selected, all identical occurrences are highlighted with a subtle yellow background
+- **Highlighting rules:**
+  - 2+ characters: always highlight
+  - 1 character: only highlight if NOT a letter (symbols, numbers OK)
+  - Whitespace-only: no highlight
+- Performance capped at 1000 matches to maintain responsiveness
+- Implementation: `find_all_matches()` in `src/buffer/mod.rs`
+
+**File Watcher:**
+- Cross-platform file watching using native OS APIs:
+  - Windows: `ReadDirectoryChangesW`
+  - Linux: `inotify`
+  - macOS/BSD: `kqueue`
+- Falls back to timestamp polling if native watching is unavailable
+- Files are watched on open/save and unwatched on close
+- Poll interval: ~1 second (60 frames)
+- Implementation: `src/bin/edit/watch.rs`
+
+**F5 Reload from Disk:**
+- Press F5 (or use `file_reload` hotkey) to reload file from disk
+- Shows confirmation dialog for:
+  - External changes only: "File has been modified on disk"
+  - Unsaved local changes: "You have unsaved changes"
+  - Both: Combined warning with implications
+- Cursor position is automatically restored after reload using smart line matching:
+  1. Saves current line content before reload
+  2. Searches for that line in the new content
+  3. If unique match found, moves cursor there
+  4. If multiple matches, picks closest to original line number
+  5. Falls back to clamping if line not found
+- Also performs direct disk check (catches changes watcher might miss)
+- Implementation: `restore_cursor_after_reload()` in `src/buffer/mod.rs`
+
 **Debug Logging:**
 - Logs are written to `~/.ogedit/logs/` for debugging and tracing user interactions
 - **Log file naming:** `{sanitized_cwd}_{YYYYMMDD}_{pid}.log`
@@ -93,9 +127,10 @@ OGEdit is a terminal-based text editor that pays homage to MS-DOS Editor, built 
   - Startup sequence (terminal mode switch, files loaded from command line)
   - Terminal resize events
   - Text input and paste operations
-  - Keyboard shortcuts (Ctrl+S, Ctrl+N, Ctrl+D, etc.)
+  - Keyboard shortcuts (Ctrl+S, Ctrl+N, Ctrl+D, F5, etc.)
   - Menu clicks and checkbox toggles
-  - File operations (new, open, save, close)
+  - File operations (new, open, save, close, reload)
+  - File watcher events (external modifications detected)
   - Search/replace operations and option toggles
   - Settings changes (word wrap, encoding, newline type, indentation)
   - Dialog open/close with results
@@ -483,6 +518,7 @@ src/
 │   ├── state.rs             # Application state
 │   ├── config.rs            # Global configuration (~/.ogedit/state.json)
 │   ├── logging.rs           # Debug logging system (~/.ogedit/logs/)
+│   ├── watch.rs             # Cross-platform file watcher
 │   ├── documents.rs         # Document management
 │   ├── draw_*.rs            # UI rendering modules
 │   └── localization.rs      # i18n wrapper
@@ -555,6 +591,26 @@ cargo test -- --ignored
 # - ICU library loading and symbol resolution
 # - String comparison with locale support
 ```
+
+### File Watcher Tests
+
+The native file watcher tests are **ignored by default** because they can be flaky when run in parallel with other tests. This is due to Windows `ReadDirectoryChangesW` API timing issues - the OS doesn't guarantee immediate delivery of file change notifications.
+
+```bash
+# Run file watcher tests reliably (single-threaded)
+cargo test watch:: -- --test-threads=1 --include-ignored
+
+# Expected: 10 tests pass
+# - 2 polling fallback tests (always reliable)
+# - 8 native watcher tests (require single-threaded execution)
+```
+
+**Why flaky in parallel:**
+- Race conditions with OS file notification APIs
+- Event delivery timing is non-deterministic
+- Multiple tests creating/modifying temp files can cause notification delays
+
+**Polling fallback tests** (`test_polling_fallback_*`) always run and are reliable because they use timestamp-based detection.
 
 ### Continuous Integration Notes
 

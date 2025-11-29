@@ -462,12 +462,14 @@ fn draw(ctx: &mut Context, state: &mut State) {
             draw_add_untitled_document(ctx, state);
         } else if key == hk.file_open {
             logging::log_shortcut(key, "Open file");
+            logging::log_dialog_open("File Open");
             state.wants_file_picker = StateFilePicker::Open;
         } else if key == hk.file_save {
             logging::log_shortcut(key, "Save");
             state.wants_save = true;
         } else if key == hk.file_save_as {
             logging::log_shortcut(key, "Save As");
+            logging::log_dialog_open("Save As");
             state.wants_file_picker = StateFilePicker::SaveAs;
         } else if key == hk.file_reload
             && state.documents.active().is_some_and(|d| d.path.is_some())
@@ -479,12 +481,14 @@ fn draw(ctx: &mut Context, state: &mut State) {
             state.wants_close = true;
         } else if key == hk.view_go_to_file {
             logging::log_shortcut(key, "Go to file");
+            logging::log_dialog_open("Go to File");
             state.wants_go_to_file = true;
         } else if key == hk.file_exit {
             logging::log_shortcut(key, "Exit");
             state.wants_exit = true;
         } else if key == hk.view_go_to_line {
             logging::log_shortcut(key, "Go to line");
+            logging::log_dialog_open("Go to Line");
             state.wants_goto = true;
         } else if key == hk.edit_duplicate_line {
             logging::log_shortcut(key, "Duplicate line");
@@ -493,11 +497,13 @@ fn draw(ctx: &mut Context, state: &mut State) {
         } else if key == hk.edit_find && state.wants_search.kind != StateSearchKind::Disabled
         {
             logging::log_shortcut(key, "Find");
+            logging::log_dialog_open("Find");
             state.wants_search.kind = StateSearchKind::Search;
             state.wants_search.focus = true;
         } else if key == hk.edit_replace && state.wants_search.kind != StateSearchKind::Disabled
         {
             logging::log_shortcut(key, "Replace");
+            logging::log_dialog_open("Replace");
             state.wants_search.kind = StateSearchKind::Replace;
             state.wants_search.focus = true;
         } else if key == hk.edit_find_next {

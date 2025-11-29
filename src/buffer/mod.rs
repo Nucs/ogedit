@@ -3382,3 +3382,216 @@ fn detect_bom(bytes: &[u8]) -> Option<&'static str> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== SelectionHighlights::should_highlight Tests =====
+
+    #[test]
+    fn test_should_highlight_empty() {
+        assert!(!SelectionHighlights::should_highlight(b""));
+    }
+
+    #[test]
+    fn test_should_highlight_whitespace_only() {
+        assert!(!SelectionHighlights::should_highlight(b" "));
+        assert!(!SelectionHighlights::should_highlight(b"  "));
+        assert!(!SelectionHighlights::should_highlight(b"\t"));
+        assert!(!SelectionHighlights::should_highlight(b"\n"));
+        assert!(!SelectionHighlights::should_highlight(b"\r\n"));
+        assert!(!SelectionHighlights::should_highlight(b"   \t\n  "));
+    }
+
+    #[test]
+    fn test_should_highlight_single_letter() {
+        // Single ASCII letters should NOT be highlighted
+        assert!(!SelectionHighlights::should_highlight(b"a"));
+        assert!(!SelectionHighlights::should_highlight(b"z"));
+        assert!(!SelectionHighlights::should_highlight(b"A"));
+        assert!(!SelectionHighlights::should_highlight(b"Z"));
+        assert!(!SelectionHighlights::should_highlight(b"m"));
+    }
+
+    #[test]
+    fn test_should_highlight_single_non_letter() {
+        // Single non-letter characters SHOULD be highlighted
+        assert!(SelectionHighlights::should_highlight(b"0"));
+        assert!(SelectionHighlights::should_highlight(b"9"));
+        assert!(SelectionHighlights::should_highlight(b"="));
+        assert!(SelectionHighlights::should_highlight(b"+"));
+        assert!(SelectionHighlights::should_highlight(b"-"));
+        assert!(SelectionHighlights::should_highlight(b"!"));
+        assert!(SelectionHighlights::should_highlight(b"@"));
+        assert!(SelectionHighlights::should_highlight(b"["));
+        assert!(SelectionHighlights::should_highlight(b"{"));
+    }
+
+    #[test]
+    fn test_should_highlight_multiple_chars() {
+        // 2+ characters should always be highlighted
+        assert!(SelectionHighlights::should_highlight(b"ab"));
+        assert!(SelectionHighlights::should_highlight(b"foo"));
+        assert!(SelectionHighlights::should_highlight(b"test"));
+        assert!(SelectionHighlights::should_highlight(b"12"));
+        assert!(SelectionHighlights::should_highlight(b"=="));
+        assert!(SelectionHighlights::should_highlight(b"fn"));
+        assert!(SelectionHighlights::should_highlight(b"hello world"));
+    }
+
+    #[test]
+    fn test_should_highlight_mixed_content() {
+        // Mixed content with whitespace and non-whitespace
+        assert!(SelectionHighlights::should_highlight(b"a "));
+        assert!(SelectionHighlights::should_highlight(b" b"));
+        assert!(SelectionHighlights::should_highlight(b" x "));
+    }
+
+    // ===== extract_line_content Tests =====
+
+    #[test]
+    fn test_extract_line_content_simple() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false); // Force LF mode for consistent offsets
+        buf.write_raw(b"line1\nline2\nline3");
+
+        let (content, offset) = buf.extract_line_content(0).unwrap();
+        assert_eq!(content, b"line1");
+        assert_eq!(offset, 0);
+
+        let (content, offset) = buf.extract_line_content(1).unwrap();
+        assert_eq!(content, b"line2");
+        assert_eq!(offset, 6);
+
+        let (content, offset) = buf.extract_line_content(2).unwrap();
+        assert_eq!(content, b"line3");
+        assert_eq!(offset, 12);
+    }
+
+    #[test]
+    fn test_extract_line_content_crlf() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(true);
+        buf.write_raw(b"line1\r\nline2\r\n");
+
+        let (content, _) = buf.extract_line_content(0).unwrap();
+        assert_eq!(content, b"line1"); // Should strip \r
+
+        let (content, _) = buf.extract_line_content(1).unwrap();
+        assert_eq!(content, b"line2");
+    }
+
+    #[test]
+    fn test_extract_line_content_out_of_bounds() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"line1\nline2");
+
+        assert!(buf.extract_line_content(-1).is_none());
+        assert!(buf.extract_line_content(2).is_none());
+        assert!(buf.extract_line_content(100).is_none());
+    }
+
+    #[test]
+    fn test_extract_line_content_empty_lines() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"\n\nline3\n");
+
+        let (content, _) = buf.extract_line_content(0).unwrap();
+        assert!(content.is_empty());
+
+        let (content, _) = buf.extract_line_content(1).unwrap();
+        assert!(content.is_empty());
+
+        let (content, _) = buf.extract_line_content(2).unwrap();
+        assert_eq!(content, b"line3");
+    }
+
+    #[test]
+    fn test_extract_line_content_single_line() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"only one line");
+
+        let (content, offset) = buf.extract_line_content(0).unwrap();
+        assert_eq!(content, b"only one line");
+        assert_eq!(offset, 0);
+
+        assert!(buf.extract_line_content(1).is_none());
+    }
+
+    // ===== find_line_matches Tests =====
+
+    #[test]
+    fn test_find_line_matches_simple() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"foo bar foo\nbaz foo\nfoo");
+
+        let matches = buf.find_line_matches(b"foo");
+        assert_eq!(matches.len(), 4);
+
+        // First "foo" on line 0
+        assert_eq!(matches[0].0, 0); // line number
+
+        // Second "foo" on line 0
+        assert_eq!(matches[1].0, 0);
+
+        // "foo" on line 1
+        assert_eq!(matches[2].0, 1);
+
+        // "foo" on line 2
+        assert_eq!(matches[3].0, 2);
+    }
+
+    #[test]
+    fn test_find_line_matches_no_matches() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"hello world");
+
+        let matches = buf.find_line_matches(b"xyz");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_find_line_matches_empty_pattern() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"hello world");
+
+        let matches = buf.find_line_matches(b"");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_find_line_matches_single_char() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"a b a\na");
+
+        let matches = buf.find_line_matches(b"a");
+        // "a b a\na" has 3 occurrences of 'a': positions 0, 4, 6
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0].0, 0); // First 'a' on line 0
+        assert_eq!(matches[1].0, 0); // Second 'a' on line 0
+        assert_eq!(matches[2].0, 1); // Third 'a' on line 1
+    }
+
+    // ===== offset_to_line Tests =====
+
+    #[test]
+    fn test_offset_to_line_simple() {
+        let mut buf = TextBuffer::new(false).unwrap();
+        buf.set_crlf(false);
+        buf.write_raw(b"line1\nline2\nline3");
+
+        assert_eq!(buf.offset_to_line(0), 0); // Start of line 0
+        assert_eq!(buf.offset_to_line(3), 0); // Middle of line 0
+        assert_eq!(buf.offset_to_line(5), 0); // End of "line1"
+        assert_eq!(buf.offset_to_line(6), 1); // Start of line 1 (after \n)
+        assert_eq!(buf.offset_to_line(12), 2); // Start of line 2
+    }
+}

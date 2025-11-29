@@ -7,12 +7,14 @@ OGEdit aims to deliver more features faster with less bureaucracy.
 ## Table of Contents
 
 - [Key Features](#features)
+  - [Selection Auto-Highlight](#selection-auto-highlight)
   - [Ctrl+D Duplicate Line](#ctrld-duplicate-line)
+  - [File Watcher](#file-watcher)
+  - [F5 Reload from Disk](#f5-reload-from-disk)
   - [Persistent Configuration](#persistent-configuration)
   - [Configurable Hotkeys](#configurable-hotkeys)
   - [Per-Project Folder Memory](#per-project-folder-memory)
   - [Recent Files](#recent-files)
-  - [File Reload Detection](#file-reload-detection)
   - [Debug Logging](#debug-logging)
   - [Data Directory](#data-directory)
 - [Installation](#installation)
@@ -30,6 +32,17 @@ OGEdit aims to deliver more features faster with less bureaucracy.
 
 ## Features
 
+### Selection Auto-Highlight
+
+When you select text, all identical occurrences in the document are highlighted with a subtle yellow background. This makes it easy to see where a variable, function name, or text pattern appears throughout the file.
+
+**Rules:**
+- **2+ characters**: Always highlights all matches
+- **1 character**: Only highlights if it's NOT a letter (symbols like `=`, numbers like `5` are highlighted; letters like `a` are not)
+- **Whitespace-only**: No highlighting
+
+**Performance:** Limited to 1000 matches to maintain responsiveness in large files.
+
 ### Ctrl+D Duplicate Line
 
 Duplicate the current line or selection with `Ctrl+D`. Also available via **Edit → Duplicate** menu (accelerator key: `D`).
@@ -37,6 +50,38 @@ Duplicate the current line or selection with `Ctrl+D`. Also available via **Edit
 - **No selection**: Duplicates entire current line below cursor
 - **Full line selection**: Duplicates all selected lines below
 - **Partial selection**: Duplicates selected text inline
+
+### File Watcher
+
+OGEdit monitors open files for external modifications using native OS APIs for instant detection:
+
+| Platform | API |
+|----------|-----|
+| Windows | `ReadDirectoryChangesW` |
+| Linux | `inotify` |
+| macOS/BSD | `kqueue` |
+
+When a file changes on disk:
+- Status bar shows **[Modified]** indicator
+- Press `F5` or use **File → Reload** to update
+- Falls back to timestamp polling if native watching is unavailable
+
+### F5 Reload from Disk
+
+Press `F5` to reload the current file from disk. A confirmation dialog appears showing:
+
+- **File changed externally**: Shows what will happen if you reload (lose local changes or just refresh)
+- **Unsaved local changes**: Warns before discarding your edits
+- **Cursor position**: Automatically restored after reload using smart line matching
+
+The reload check also verifies disk state directly, catching changes that the file watcher might miss.
+
+**Cursor Restore Algorithm:**
+1. Saves the content of the current line before reload
+2. Searches for that exact line in the reloaded content
+3. If found uniquely, moves cursor to that line
+4. If multiple matches exist, picks the one closest to the original line number
+5. Falls back to clamping cursor position to valid bounds if line not found
 
 ### Persistent Configuration
 
@@ -123,14 +168,6 @@ OGEdit tracks recently opened files (up to 100) for quick access:
 - **Persistence:** Recent files are stored in `state.json` with timestamps
 
 This makes it easy to quickly reopen files you were recently working on.
-
-### File Reload Detection
-
-Detects when files are modified externally:
-
-- Status bar shows **[File On Disk Changed]** button when modification detected
-- Click to open reload menu with **Reload** option
-- Uses timestamp-based detection with baseline content tracking for potential 3-way merge
 
 ### Debug Logging
 

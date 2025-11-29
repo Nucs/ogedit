@@ -1184,4 +1184,262 @@ mod tests {
             assert_eq!(config.ruler_column, col);
         }
     }
+
+    // ===== Hotkeys Tests =====
+
+    #[test]
+    fn test_parse_hotkey_simple() {
+        // Simple letter keys
+        assert_eq!(Hotkeys::parse_hotkey("S"), Some(InputKey::new(0x53)));
+        assert_eq!(Hotkeys::parse_hotkey("A"), Some(InputKey::new(0x41)));
+        assert_eq!(Hotkeys::parse_hotkey("Z"), Some(InputKey::new(0x5A)));
+
+        // Digits
+        assert_eq!(Hotkeys::parse_hotkey("0"), Some(InputKey::new(0x30)));
+        assert_eq!(Hotkeys::parse_hotkey("9"), Some(InputKey::new(0x39)));
+    }
+
+    #[test]
+    fn test_parse_hotkey_function_keys() {
+        assert_eq!(Hotkeys::parse_hotkey("F1"), Some(InputKey::new(0x70)));
+        assert_eq!(Hotkeys::parse_hotkey("F3"), Some(InputKey::new(0x72)));
+        assert_eq!(Hotkeys::parse_hotkey("F5"), Some(InputKey::new(0x74)));
+        assert_eq!(Hotkeys::parse_hotkey("F12"), Some(InputKey::new(0x7B)));
+        assert_eq!(Hotkeys::parse_hotkey("F24"), Some(InputKey::new(0x87)));
+
+        // Invalid function keys
+        assert_eq!(Hotkeys::parse_hotkey("F0"), None);
+        assert_eq!(Hotkeys::parse_hotkey("F25"), None);
+    }
+
+    #[test]
+    fn test_parse_hotkey_special_keys() {
+        assert!(Hotkeys::parse_hotkey("Space").is_some());
+        assert!(Hotkeys::parse_hotkey("Enter").is_some());
+        assert!(Hotkeys::parse_hotkey("Return").is_some());
+        assert!(Hotkeys::parse_hotkey("Tab").is_some());
+        assert!(Hotkeys::parse_hotkey("Escape").is_some());
+        assert!(Hotkeys::parse_hotkey("Esc").is_some());
+        assert!(Hotkeys::parse_hotkey("Backspace").is_some());
+        assert!(Hotkeys::parse_hotkey("Delete").is_some());
+        assert!(Hotkeys::parse_hotkey("Insert").is_some());
+        assert!(Hotkeys::parse_hotkey("Home").is_some());
+        assert!(Hotkeys::parse_hotkey("End").is_some());
+        assert!(Hotkeys::parse_hotkey("PageUp").is_some());
+        assert!(Hotkeys::parse_hotkey("PageDown").is_some());
+        assert!(Hotkeys::parse_hotkey("Up").is_some());
+        assert!(Hotkeys::parse_hotkey("Down").is_some());
+        assert!(Hotkeys::parse_hotkey("Left").is_some());
+        assert!(Hotkeys::parse_hotkey("Right").is_some());
+    }
+
+    #[test]
+    fn test_parse_hotkey_with_modifiers() {
+        // Ctrl+Key
+        let key = Hotkeys::parse_hotkey("Ctrl+S").unwrap();
+        assert!(key.modifiers().contains(kbmod::CTRL));
+        assert_eq!(key.key().value(), 0x53); // 'S'
+
+        // Alt+Key
+        let key = Hotkeys::parse_hotkey("Alt+Z").unwrap();
+        assert!(key.modifiers().contains(kbmod::ALT));
+        assert_eq!(key.key().value(), 0x5A); // 'Z'
+
+        // Shift+Key
+        let key = Hotkeys::parse_hotkey("Shift+A").unwrap();
+        assert!(key.modifiers().contains(kbmod::SHIFT));
+        assert_eq!(key.key().value(), 0x41); // 'A'
+
+        // Ctrl+Shift+Key
+        let key = Hotkeys::parse_hotkey("Ctrl+Shift+S").unwrap();
+        assert!(key.modifiers().contains(kbmod::CTRL));
+        assert!(key.modifiers().contains(kbmod::SHIFT));
+        assert_eq!(key.key().value(), 0x53); // 'S'
+
+        // Alt+Shift+Key
+        let key = Hotkeys::parse_hotkey("Alt+Shift+F5").unwrap();
+        assert!(key.modifiers().contains(kbmod::ALT));
+        assert!(key.modifiers().contains(kbmod::SHIFT));
+        assert_eq!(key.key().value(), 0x74); // F5
+    }
+
+    #[test]
+    fn test_parse_hotkey_case_insensitive() {
+        // Modifiers should be case-insensitive
+        let key1 = Hotkeys::parse_hotkey("ctrl+s").unwrap();
+        let key2 = Hotkeys::parse_hotkey("CTRL+S").unwrap();
+        let key3 = Hotkeys::parse_hotkey("Ctrl+S").unwrap();
+        assert_eq!(key1, key2);
+        assert_eq!(key2, key3);
+
+        // Function keys too
+        let key1 = Hotkeys::parse_hotkey("f5").unwrap();
+        let key2 = Hotkeys::parse_hotkey("F5").unwrap();
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_parse_hotkey_invalid() {
+        assert_eq!(Hotkeys::parse_hotkey(""), None);
+        assert_eq!(Hotkeys::parse_hotkey("   "), None);
+        assert_eq!(Hotkeys::parse_hotkey("Invalid"), None);
+        assert_eq!(Hotkeys::parse_hotkey("Ctrl+"), None);
+        assert_eq!(Hotkeys::parse_hotkey("Ctrl+Invalid"), None);
+    }
+
+    #[test]
+    fn test_hotkey_to_string() {
+        // Simple keys
+        assert_eq!(Hotkeys::hotkey_to_string(InputKey::new(0x53)), "S");
+        assert_eq!(Hotkeys::hotkey_to_string(InputKey::new(0x30)), "0");
+        assert_eq!(Hotkeys::hotkey_to_string(InputKey::new(0x74)), "F5");
+
+        // With modifiers
+        assert_eq!(Hotkeys::hotkey_to_string(kbmod::CTRL | vk::S), "Ctrl+S");
+        assert_eq!(Hotkeys::hotkey_to_string(kbmod::ALT | vk::Z), "Alt+Z");
+        assert_eq!(Hotkeys::hotkey_to_string(kbmod::CTRL_SHIFT | vk::S), "Ctrl+Shift+S");
+    }
+
+    #[test]
+    fn test_hotkey_roundtrip() {
+        // Test that parsing and serializing produces the same result
+        let test_cases = [
+            "Ctrl+S",
+            "Ctrl+Shift+S",
+            "Alt+Z",
+            "F5",
+            "F3",
+            "Ctrl+N",
+            "Ctrl+W",
+            "Ctrl+P",
+            "Ctrl+G",
+        ];
+
+        for original in test_cases {
+            let parsed = Hotkeys::parse_hotkey(original).unwrap();
+            let serialized = Hotkeys::hotkey_to_string(parsed);
+            assert_eq!(serialized, original, "Roundtrip failed for: {}", original);
+        }
+    }
+
+    #[test]
+    fn test_hotkeys_config_roundtrip() {
+        // Test that hotkeys survive config serialization/deserialization
+        let mut config = Config::default();
+        config.hotkeys.file_save = kbmod::CTRL_SHIFT | vk::S; // Custom hotkey
+        config.hotkeys.edit_duplicate_line = kbmod::CTRL_SHIFT | vk::D;
+
+        let json = config.to_json();
+        let parsed = Config::parse(&json).unwrap();
+
+        assert_eq!(parsed.hotkeys.file_save, config.hotkeys.file_save);
+        assert_eq!(parsed.hotkeys.edit_duplicate_line, config.hotkeys.edit_duplicate_line);
+    }
+
+    #[test]
+    fn test_hotkeys_partial_config() {
+        // Test that missing hotkeys use defaults
+        let json = r#"{"hotkeys": {"file_save": "Ctrl+Alt+S"}}"#;
+        let config = Config::parse(json).unwrap();
+
+        // Custom value
+        let expected = kbmod::CTRL_ALT | vk::S;
+        assert_eq!(config.hotkeys.file_save, expected);
+
+        // Default values
+        assert_eq!(config.hotkeys.file_new, Hotkeys::default().file_new);
+        assert_eq!(config.hotkeys.edit_undo, Hotkeys::default().edit_undo);
+    }
+
+    #[test]
+    fn test_hotkeys_invalid_value_uses_default() {
+        // Invalid hotkey values should fall back to default
+        let json = r#"{"hotkeys": {"file_save": "InvalidKey"}}"#;
+        let config = Config::parse(json).unwrap();
+        assert_eq!(config.hotkeys.file_save, Hotkeys::default().file_save);
+    }
+
+    // ===== Recent Files Tests =====
+
+    #[test]
+    fn test_add_recent_file_new() {
+        let mut config = Config::default();
+        assert!(config.recent_files.is_empty());
+
+        config.recent_files.push(RecentFile {
+            path: PathBuf::from("/test/file.txt"),
+            opened_at: 1000,
+        });
+
+        assert_eq!(config.recent_files.len(), 1);
+        assert_eq!(config.recent_files[0].path, PathBuf::from("/test/file.txt"));
+    }
+
+    #[test]
+    fn test_recent_files_sorting() {
+        let mut config = Config::default();
+
+        config.recent_files.push(RecentFile {
+            path: PathBuf::from("/old.txt"),
+            opened_at: 1000,
+        });
+        config.recent_files.push(RecentFile {
+            path: PathBuf::from("/new.txt"),
+            opened_at: 2000,
+        });
+        config.recent_files.push(RecentFile {
+            path: PathBuf::from("/middle.txt"),
+            opened_at: 1500,
+        });
+
+        // Sort by opened_at descending
+        config.recent_files.sort_by(|a, b| b.opened_at.cmp(&a.opened_at));
+
+        assert_eq!(config.recent_files[0].path, PathBuf::from("/new.txt"));
+        assert_eq!(config.recent_files[1].path, PathBuf::from("/middle.txt"));
+        assert_eq!(config.recent_files[2].path, PathBuf::from("/old.txt"));
+    }
+
+    #[test]
+    fn test_recent_files_max_limit() {
+        let mut config = Config::default();
+
+        // Add 105 files
+        for i in 0..105 {
+            config.recent_files.push(RecentFile {
+                path: PathBuf::from(format!("/file{}.txt", i)),
+                opened_at: i as u64,
+            });
+        }
+
+        // Truncate to 100
+        config.recent_files.truncate(100);
+
+        assert_eq!(config.recent_files.len(), 100);
+    }
+
+    // ===== Project Folders Tests =====
+
+    #[test]
+    fn test_project_folder_get_set() {
+        let mut config = Config::default();
+
+        assert!(config.get_project_folder("/project1").is_none());
+
+        config.project_folders.insert("/project1".to_string(), "/project1/src".to_string());
+
+        assert_eq!(config.get_project_folder("/project1"), Some("/project1/src"));
+        assert!(config.get_project_folder("/project2").is_none());
+    }
+
+    #[test]
+    fn test_project_folder_multiple_projects() {
+        let mut config = Config::default();
+
+        config.project_folders.insert("/project1".to_string(), "/project1/src".to_string());
+        config.project_folders.insert("/project2".to_string(), "/project2/docs".to_string());
+
+        assert_eq!(config.get_project_folder("/project1"), Some("/project1/src"));
+        assert_eq!(config.get_project_folder("/project2"), Some("/project2/docs"));
+    }
 }
