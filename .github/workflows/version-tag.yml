@@ -20,6 +20,11 @@ on:
     paths:
       - 'Cargo.toml'
 
+# Prevent duplicate runs if someone pushes commit + tag together
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
   create-tag:
     runs-on: ubuntu-latest
@@ -58,5 +63,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "$TAG" -m "Release v${{ steps.version.outputs.VERSION }}"
-          git push origin "$TAG"
-          echo "✅ Created and pushed tag: $TAG"
+
+          # Push tag (may fail if someone manually pushed it in a race condition - that's OK)
+          if git push origin "$TAG" 2>&1; then
+            echo "✅ Created and pushed tag: $TAG"
+          else
+            echo "⚠️ Tag $TAG already exists on remote (likely manual push) - skipping"
+          fi
