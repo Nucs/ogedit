@@ -1,0 +1,62 @@
+# Auto-create release tag when Cargo.toml version changes
+#
+# Workflow:
+# 1. Developer updates version in Cargo.toml
+# 2. Developer pushes to main
+# 3. This workflow detects the change and creates release/vX.Y.Z tag
+# 4. The tag triggers release.yml which builds all platforms
+#
+# Manual tagging still works - this just automates it
+#
+# Examples:
+#   Cargo.toml: version = "1.2.5"     -> creates tag: release/v1.2.5
+#   Cargo.toml: version = "1.3.0-beta.1" -> creates tag: release/v1.3.0-beta.1
+
+name: Auto-tag Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for tag operations
+
+      - name: Extract version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          TAG="release/v${{ steps.version.outputs.VERSION }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "EXISTS=true" >> $GITHUB_OUTPUT
+            echo "Tag $TAG already exists"
+          else
+            echo "EXISTS=false" >> $GITHUB_OUTPUT
+            echo "Tag $TAG does not exist"
+          fi
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.EXISTS == 'false'
+        run: |
+          TAG="release/v${{ steps.version.outputs.VERSION }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG" -m "Release v${{ steps.version.outputs.VERSION }}"
+          git push origin "$TAG"
+          echo "✅ Created and pushed tag: $TAG"
