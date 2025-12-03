@@ -152,25 +152,59 @@ jobs:
           retention-days: 5
 
       # ===========================================
-      # macOS .pkg Installer
+      # macOS .pkg Installer (with optional EDITOR env var)
       # ===========================================
       - name: Build macOS .pkg installer
         if: matrix.os == 'macos-latest'
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION_CLEAN }}"
+          ARCH="${{ matrix.arch }}"
 
-          # Create package root structure
-          mkdir -p pkg-root/usr/local/bin
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} pkg-root/usr/local/bin/ogedit
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} pkg-root/usr/local/bin/ogmsedit
-          chmod 755 pkg-root/usr/local/bin/*
+          # Create package root structure for core component
+          mkdir -p pkg-root-core/usr/local/bin
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} pkg-root-core/usr/local/bin/ogedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} pkg-root-core/usr/local/bin/ogmsedit
+          chmod 755 pkg-root-core/usr/local/bin/*
 
-          # Build the component package
+          # Build the core component package
           pkgbuild \
-            --root pkg-root \
-            --identifier com.nucs.ogedit \
+            --root pkg-root-core \
+            --identifier com.nucs.ogedit.core \
             --version "$VERSION" \
             --install-location / \
+            ogedit-core-${ARCH}.pkg
+
+          # Create package structure for EDITOR env var component
+          mkdir -p pkg-root-editor-env/tmp
+          mkdir -p pkg-scripts
+          cp pkg/postinstall-editor-env pkg-scripts/postinstall
+          chmod 755 pkg-scripts/postinstall
+
+          # Build the EDITOR env var component package
+          pkgbuild \
+            --root pkg-root-editor-env \
+            --identifier com.nucs.ogedit.editor-env \
+            --version "$VERSION" \
+            --install-location / \
+            --scripts pkg-scripts \
+            ogedit-editor-env.pkg
+
+          # Prepare resources directory
+          mkdir -p pkg-resources
+          cp pkg/welcome.html pkg-resources/
+          cp pkg/license.html pkg-resources/
+          cp pkg/conclusion.html pkg-resources/
+
+          # Generate Distribution.xml from template
+          sed -e "s/__VERSION__/${VERSION}/g" \
+              -e "s/__ARCH__/${ARCH}/g" \
+              pkg/Distribution.xml.template > Distribution.xml
+
+          # Build the final product package with productbuild
+          productbuild \
+            --distribution Distribution.xml \
+            --resources pkg-resources \
+            --package-path . \
             ${{ matrix.artifact }}.pkg
 
           # Generate checksum
@@ -291,20 +325,31 @@ jobs:
           cp README.md deb-root/usr/share/doc/ogedit/
           cp LICENSE deb-root/usr/share/doc/ogedit/ 2>/dev/null || true
 
-          # Create control file
+          # Create control file with debconf dependency
           cat > deb-root/DEBIAN/control << EOF
           Package: ogedit
           Version: ${VERSION}
           Section: editors
           Priority: optional
           Architecture: amd64
+          Depends: debconf (>= 0.5) | debconf-2.0
           Maintainer: Nucs <nucs@users.noreply.github.com>
           Homepage: https://github.com/Nucs/ogedit
           Description: Terminal-based text editor inspired by MS-DOS Editor
            OGEdit is a fast, lightweight terminal text editor built in Rust.
            It features SIMD-optimized operations, handles large files efficiently,
            and provides a nostalgic MS-DOS Editor experience.
+           .
+           During installation, you can optionally set the EDITOR environment
+           variable to ogedit for all users.
           EOF
+
+          # Copy debconf templates and scripts
+          cp deb/templates deb-root/DEBIAN/
+          cp deb/config deb-root/DEBIAN/
+          cp deb/postinst deb-root/DEBIAN/
+          cp deb/postrm deb-root/DEBIAN/
+          chmod 755 deb-root/DEBIAN/config deb-root/DEBIAN/postinst deb-root/DEBIAN/postrm
 
           # Build .deb
           dpkg-deb --build deb-root ${{ matrix.artifact }}.deb
@@ -342,11 +387,23 @@ jobs:
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin
           mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit
+          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/etc/profile.d
 
-          # Copy files
+          # Copy binaries
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogmsedit
-          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/*
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogmsedit
+
+          # Copy helper script for EDITOR configuration
+          cp rpm/ogedit-set-editor rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit-set-editor
+
+          # Copy sample profile.d script (disabled by default)
+          cp rpm/ogedit-editor.sh.sample rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/etc/profile.d/
+          chmod 644 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/etc/profile.d/ogedit-editor.sh.sample
+
+          # Copy docs
           cp README.md rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit/
           cp LICENSE rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit/ 2>/dev/null || true
 
@@ -364,11 +421,22 @@ jobs:
           It features SIMD-optimized operations, handles large files efficiently,
           and provides a nostalgic MS-DOS Editor experience.
 
+          To set ogedit as the default EDITOR for all users, run:
+            sudo ogedit-set-editor --enable
+
           %files
           /usr/bin/ogedit
           /usr/bin/ogmsedit
+          /usr/bin/ogedit-set-editor
+          %config(noreplace) /etc/profile.d/ogedit-editor.sh.sample
           /usr/share/doc/ogedit/README.md
           %doc /usr/share/doc/ogedit/
+
+          %post
+          echo ""
+          echo "To set ogedit as the default EDITOR, run:"
+          echo "  sudo ogedit-set-editor --enable"
+          echo ""
 
           %changelog
           * $(date '+%a %b %d %Y') Nucs <nucs@users.noreply.github.com> - ${VERSION}-1
@@ -622,6 +690,15 @@ jobs:
           echo "\`\`\`" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "**Portable (all platforms):** Extract and add the directory to your PATH." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Optional: Set as Default EDITOR" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "All installers offer an option to set the \`EDITOR\` environment variable to \`ogedit\`. This variable is used by git, crontab, and many other tools." >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "- **Windows MSI:** Select \"Set as EDITOR\" in the feature tree during installation" >> $GITHUB_OUTPUT
+          echo "- **macOS PKG:** Check \"Set as EDITOR\" in the Customize menu during installation" >> $GITHUB_OUTPUT
+          echo "- **Linux DEB:** Answer \"Yes\" when prompted during installation" >> $GITHUB_OUTPUT
+          echo "- **Linux RPM:** Run \\\`sudo ogedit-set-editor --enable\\\` after installation" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create release

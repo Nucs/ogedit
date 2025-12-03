@@ -1,0 +1,83 @@
+#!/bin/bash
+# Helper script to enable/disable ogedit as the default EDITOR
+# Usage: ogedit-set-editor [--enable|--disable|--status]
+
+PROFILE_FILE="/etc/profile.d/ogedit-editor.sh"
+SAMPLE_FILE="/etc/profile.d/ogedit-editor.sh.sample"
+
+usage() {
+    echo "Usage: $0 [--enable|--disable|--status]"
+    echo ""
+    echo "Set or unset ogedit as the default EDITOR for all users."
+    echo ""
+    echo "Options:"
+    echo "  --enable   Set EDITOR to ogedit (creates $PROFILE_FILE)"
+    echo "  --disable  Unset ogedit as EDITOR (removes $PROFILE_FILE)"
+    echo "  --status   Show current status"
+    echo ""
+    echo "Note: This command requires root privileges (sudo)."
+    exit 1
+}
+
+check_root() {
+    if [ "$(id -u)" != "0" ]; then
+        echo "Error: This command requires root privileges."
+        echo "Try: sudo $0 $@"
+        exit 1
+    fi
+}
+
+enable_editor() {
+    check_root
+    cat > "$PROFILE_FILE" << 'EOF'
+# Set EDITOR to ogedit (managed by ogedit-set-editor)
+export EDITOR="/usr/bin/ogedit"
+EOF
+    chmod 644 "$PROFILE_FILE"
+    echo "EDITOR set to ogedit."
+    echo "Changes will take effect in new login sessions."
+    echo "To apply immediately, run: export EDITOR=/usr/bin/ogedit"
+}
+
+disable_editor() {
+    check_root
+    if [ -f "$PROFILE_FILE" ]; then
+        rm -f "$PROFILE_FILE"
+        echo "EDITOR variable configuration removed."
+        echo "Changes will take effect in new login sessions."
+    else
+        echo "EDITOR was not set to ogedit."
+    fi
+}
+
+show_status() {
+    if [ -f "$PROFILE_FILE" ]; then
+        echo "Status: EDITOR is set to ogedit (via $PROFILE_FILE)"
+    elif [ -f "$SAMPLE_FILE" ]; then
+        echo "Status: EDITOR configuration is available but disabled."
+        echo "Run '$0 --enable' to enable it."
+    else
+        echo "Status: EDITOR is not configured by ogedit."
+    fi
+
+    if [ -n "$EDITOR" ]; then
+        echo "Current EDITOR value: $EDITOR"
+    else
+        echo "Current EDITOR value: (not set)"
+    fi
+}
+
+case "${1:-}" in
+    --enable)
+        enable_editor
+        ;;
+    --disable)
+        disable_editor
+        ;;
+    --status)
+        show_status
+        ;;
+    *)
+        usage
+        ;;
+esac

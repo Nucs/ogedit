@@ -7,9 +7,10 @@
   - Installs ogedit.exe and ogmsedit.exe to Program Files\OGEdit
   - Adds installation directory to system PATH
   - Creates Start Menu shortcuts
-  - Optional desktop shortcut
+  - Optional: Desktop shortcut (enabled by default)
+  - Optional: Set EDITOR environment variable (disabled by default)
   - License agreement dialog
-  - Install directory selection
+  - Feature tree selection
 
   Build:
     wix build wix/main.wxs -arch x64 -d Version=1.2.2 -d BinaryPath=target/release -d AssetPath=assets -ext WixToolset.UI.wixext -o ogedit.msi
@@ -46,9 +47,6 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/Nucs/ogedit" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/Nucs/ogedit" />
     <Property Id="ARPURLUPDATEINFO" Value="https://github.com/Nucs/ogedit/releases" />
-
-    <!-- Default install directory -->
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
 
     <!-- License file for UI -->
     <WixVariable Id="WixUILicenseRtf" Value="wix\License.rtf" />
@@ -158,19 +156,44 @@
       </Component>
     </ComponentGroup>
 
+    <!-- Component: EDITOR environment variable (optional, user-level) -->
+    <ComponentGroup Id="EditorEnvVarComponents" Directory="INSTALLFOLDER">
+      <Component Id="EditorEnvVar" Guid="4B5C6D7E-8F9A-0B1C-2D3E-4F5A6B7C8D9E">
+        <Environment
+          Id="OGEditEditorVar"
+          Name="EDITOR"
+          Value="[INSTALLFOLDER]ogedit.exe"
+          Permanent="no"
+          Part="all"
+          Action="set"
+          System="no" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\OGEdit"
+          Name="EditorEnvVar"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
     <!-- Features -->
-    <Feature Id="MainFeature" Title="OGEdit" Description="Terminal-based text editor" Level="1" AllowAbsent="no">
+    <Feature Id="MainFeature" Title="OGEdit" Description="Terminal-based text editor" Level="1" AllowAbsent="no" Display="expand">
       <ComponentGroupRef Id="MainComponents" />
       <ComponentGroupRef Id="EnvironmentComponents" />
       <ComponentGroupRef Id="StartMenuComponents" />
+
+      <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut" Description="Create a desktop shortcut" Level="1" AllowAbsent="yes">
+        <ComponentGroupRef Id="DesktopShortcutComponents" />
+      </Feature>
+
+      <Feature Id="EditorEnvVarFeature" Title="Set as EDITOR" Description="Set the EDITOR environment variable to OGEdit (user-level). Used by git, crontab, and other tools." Level="1000" AllowAbsent="yes">
+        <ComponentGroupRef Id="EditorEnvVarComponents" />
+      </Feature>
     </Feature>
 
-    <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut" Description="Create a desktop shortcut" Level="1" AllowAbsent="yes">
-      <ComponentGroupRef Id="DesktopShortcutComponents" />
-    </Feature>
-
-    <!-- UI: Install directory dialog with license -->
-    <ui:WixUI Id="WixUI_InstallDir" />
+    <!-- UI: Feature tree dialog with license and install directory -->
+    <ui:WixUI Id="WixUI_FeatureTree" />
 
   </Package>
 </Wix>

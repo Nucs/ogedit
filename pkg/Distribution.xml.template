@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OGEdit macOS Installer Distribution
+
+  Features:
+  - Installs ogedit and ogmsedit to /usr/local/bin
+  - Optional: Set EDITOR environment variable (disabled by default)
+
+  Placeholders replaced during build:
+  - __VERSION__ : Package version (e.g., 1.2.2)
+  - __ARCH__ : Architecture (x64 or arm64)
+-->
+<installer-gui-script minSpecVersion="1">
+    <title>OGEdit</title>
+    <organization>com.nucs</organization>
+
+    <welcome file="welcome.html"/>
+    <license file="license.html"/>
+    <conclusion file="conclusion.html"/>
+
+    <options customize="always" require-scripts="false"/>
+
+    <!-- Main installation choice (required) -->
+    <choice id="ogedit-core"
+            title="OGEdit"
+            description="Install ogedit and ogmsedit to /usr/local/bin"
+            enabled="false"
+            selected="true">
+        <pkg-ref id="com.nucs.ogedit.core"/>
+    </choice>
+
+    <!-- Optional EDITOR environment variable (disabled by default) -->
+    <choice id="ogedit-editor-env"
+            title="Set as EDITOR"
+            description="Set the EDITOR environment variable to ogedit. Used by git, crontab, and other tools. Adds export to ~/.zshrc or ~/.bash_profile."
+            enabled="true"
+            selected="false">
+        <pkg-ref id="com.nucs.ogedit.editor-env"/>
+    </choice>
+
+    <choices-outline>
+        <line choice="ogedit-core"/>
+        <line choice="ogedit-editor-env"/>
+    </choices-outline>
+
+    <pkg-ref id="com.nucs.ogedit.core"
+             version="__VERSION__"
+             installKBytes="500">
+        ogedit-core-__ARCH__.pkg
+    </pkg-ref>
+
+    <pkg-ref id="com.nucs.ogedit.editor-env"
+             version="__VERSION__"
+             installKBytes="1">
+        ogedit-editor-env.pkg
+    </pkg-ref>
+</installer-gui-script>

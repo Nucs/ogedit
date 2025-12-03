@@ -1,0 +1,28 @@
+#!/bin/sh
+# Post-removal script for ogedit
+set -e
+
+PROFILE_FILE="/etc/profile.d/ogedit-editor.sh"
+
+case "$1" in
+    purge)
+        # Remove profile.d script and debconf data
+        rm -f "$PROFILE_FILE"
+        if [ -e /usr/share/debconf/confmodule ]; then
+            . /usr/share/debconf/confmodule
+            db_purge
+        fi
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

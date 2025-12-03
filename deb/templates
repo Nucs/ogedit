@@ -1,0 +1,9 @@
+Template: ogedit/set-editor
+Type: boolean
+Default: false
+Description: Set EDITOR environment variable to ogedit?
+ The EDITOR environment variable is used by many tools like git, crontab,
+ and others to determine which text editor to use.
+ .
+ If you choose yes, the EDITOR variable will be added to /etc/profile.d/ogedit.sh
+ for all users.

@@ -886,21 +886,29 @@ Triggered by tags matching `release/v*` (e.g., `release/v1.2.1`).
 - Installs to `Program Files\OGEdit`
 - Adds installation directory to system PATH
 - Creates Start Menu shortcuts
+- Optional: Desktop shortcut (enabled by default)
+- Optional: Set EDITOR environment variable (disabled by default)
 - Built using WiX Toolset v5
 - Configuration: `wix/main.wxs`
 
 **macOS PKG Installer:**
 - Installs to `/usr/local/bin` (already on PATH)
 - Includes both `ogedit` and `ogmsedit` binaries
-- Built using native `pkgbuild`
+- Optional: Set EDITOR environment variable (disabled by default, adds to ~/.zshrc or ~/.bash_profile)
+- Built using native `productbuild` with Distribution.xml
+- Configuration: `pkg/` directory
 
 **Linux DEB Package (Debian/Ubuntu):**
 - Installs to `/usr/bin`
 - Install: `sudo dpkg -i ogedit-linux-x64.deb`
+- Optional: Set EDITOR environment variable (prompts during installation via debconf, disabled by default)
+- Configuration: `deb/` directory
 
 **Linux RPM Package (Fedora/RHEL):**
 - Installs to `/usr/bin`
 - Install: `sudo rpm -i ogedit-linux-x64.rpm`
+- Optional: Set EDITOR environment variable by running `sudo ogedit-set-editor --enable` after installation
+- Configuration: `rpm/` directory
 
 **Linux AppImage:**
 - Universal portable format, runs on most Linux distributions

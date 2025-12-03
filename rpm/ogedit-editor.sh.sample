@@ -1,0 +1,4 @@
+# OGEdit EDITOR environment variable
+# To enable: sudo mv /etc/profile.d/ogedit-editor.sh.sample /etc/profile.d/ogedit-editor.sh
+# Or run: sudo ogedit-set-editor --enable
+export EDITOR="/usr/bin/ogedit"

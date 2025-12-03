@@ -1,0 +1,38 @@
+#!/bin/bash
+# Post-install script to set EDITOR environment variable
+# This runs as root, so we need to find the actual user
+
+# Get the console user (the real user, not root)
+CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "$USER")
+USER_HOME=$(eval echo "~$CONSOLE_USER")
+
+# Determine which shell config file to use
+if [ -f "$USER_HOME/.zshrc" ]; then
+    SHELL_RC="$USER_HOME/.zshrc"
+elif [ -f "$USER_HOME/.bash_profile" ]; then
+    SHELL_RC="$USER_HOME/.bash_profile"
+elif [ -f "$USER_HOME/.bashrc" ]; then
+    SHELL_RC="$USER_HOME/.bashrc"
+else
+    # Default to zsh on modern macOS
+    SHELL_RC="$USER_HOME/.zshrc"
+fi
+
+# Check if EDITOR is already set to ogedit
+if grep -q 'export EDITOR.*ogedit' "$SHELL_RC" 2>/dev/null; then
+    echo "EDITOR already set to ogedit in $SHELL_RC"
+    exit 0
+fi
+
+# Add EDITOR export to shell config
+echo "" >> "$SHELL_RC"
+echo "# Set by OGEdit installer" >> "$SHELL_RC"
+echo 'export EDITOR="/usr/local/bin/ogedit"' >> "$SHELL_RC"
+
+# Fix ownership if we're running as root
+if [ "$(id -u)" = "0" ] && [ -n "$CONSOLE_USER" ]; then
+    chown "$CONSOLE_USER" "$SHELL_RC" 2>/dev/null || true
+fi
+
+echo "EDITOR set to ogedit in $SHELL_RC"
+exit 0

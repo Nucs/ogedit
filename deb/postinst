@@ -1,0 +1,37 @@
+#!/bin/sh
+# Post-installation script for ogedit
+set -e
+
+. /usr/share/debconf/confmodule
+
+PROFILE_FILE="/etc/profile.d/ogedit-editor.sh"
+
+case "$1" in
+    configure)
+        # Check if user wants to set EDITOR
+        db_get ogedit/set-editor
+        if [ "$RET" = "true" ]; then
+            # Create profile.d script to set EDITOR
+            cat > "$PROFILE_FILE" << 'EOF'
+# Set EDITOR to ogedit (installed by ogedit package)
+export EDITOR="/usr/bin/ogedit"
+EOF
+            chmod 644 "$PROFILE_FILE"
+        else
+            # Remove profile.d script if it exists
+            rm -f "$PROFILE_FILE"
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
