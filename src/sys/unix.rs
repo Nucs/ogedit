@@ -9,14 +9,16 @@
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::fs::File;
 use std::mem::{self, ManuallyDrop, MaybeUninit};
-use std::os::fd::{AsRawFd as _, FromRawFd as _};
+use std::os::fd::FromRawFd as _;
+use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 use std::ptr::{self, NonNull, null_mut};
-use std::{thread, time};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time;
 
-use crate::arena::{Arena, ArenaString, scratch_arena};
+use crate::apperr;
+use crate::arena::{Arena, ArenaString};
 use crate::helpers::*;
-use crate::{apperr, arena_format};
 
 #[cfg(target_os = "netbsd")]
 const fn desired_mprotect(flags: c_int) -> c_int {
@@ -36,9 +38,8 @@ const fn desired_mprotect(_: c_int) -> c_int {
 struct State {
     stdin: libc::c_int,
     stdin_flags: libc::c_int,
-    stdout: libc::c_int,
+    stdin_current_flags: libc::c_int,
     stdout_initial_termios: Option<libc::termios>,
-    inject_resize: bool,
     // Buffer for incomplete UTF-8 sequences (max 4 bytes needed)
     utf8_buf: [u8; 4],
     utf8_len: usize,
@@ -46,18 +47,17 @@ struct State {
 
 static mut STATE: State = State {
     stdin: libc::STDIN_FILENO,
-    stdin_flags: 0,
-    stdout: libc::STDOUT_FILENO,
+    stdin_flags: -1,
+    stdin_current_flags: -1,
     stdout_initial_termios: None,
-    inject_resize: false,
     utf8_buf: [0; 4],
     utf8_len: 0,
 };
 
+static INJECT_RESIZE: AtomicBool = AtomicBool::new(false);
+
 extern "C" fn sigwinch_handler(_: libc::c_int) {
-    unsafe {
-        STATE.inject_resize = true;
-    }
+    INJECT_RESIZE.store(true, Ordering::Relaxed);
 }
 
 pub fn init() -> Deinit {
@@ -66,22 +66,18 @@ pub fn init() -> Deinit {
 
 pub fn switch_modes() -> apperr::Result<()> {
     unsafe {
-        // Reopen stdin if it's redirected (= piped input).
-        if libc::isatty(STATE.stdin) == 0 {
-            STATE.stdin = check_int_return(libc::open(c"/dev/tty".as_ptr(), libc::O_RDONLY))?;
-        }
-
         // Store the stdin flags so we can more easily toggle `O_NONBLOCK` later on.
         STATE.stdin_flags = check_int_return(libc::fcntl(STATE.stdin, libc::F_GETFL))?;
+        STATE.stdin_current_flags = STATE.stdin_flags;
 
-        // Set STATE.inject_resize to true whenever we get a SIGWINCH.
+        // Set INJECT_RESIZE to true whenever we get a SIGWINCH.
         let mut sigwinch_action: libc::sigaction = mem::zeroed();
         sigwinch_action.sa_sigaction = sigwinch_handler as *const () as libc::sighandler_t;
         check_int_return(libc::sigaction(libc::SIGWINCH, &sigwinch_action, null_mut()))?;
 
         // Get the original terminal modes so we can disable raw mode on exit.
         let mut termios = MaybeUninit::<libc::termios>::uninit();
-        check_int_return(libc::tcgetattr(STATE.stdout, termios.as_mut_ptr()))?;
+        check_int_return(libc::tcgetattr(libc::STDOUT_FILENO, termios.as_mut_ptr()))?;
         let mut termios = termios.assume_init();
         STATE.stdout_initial_termios = Some(termios);
 
@@ -104,7 +100,12 @@ pub fn switch_modes() -> apperr::Result<()> {
             | libc::ICRNL
             // Disable software flow control.
             | libc::IXON
+            | libc::IXOFF
         );
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            termios.c_iflag &= !libc::IUCLC;
+        }
         // Disable output processing.
         termios.c_oflag &= !libc::OPOST;
         termios.c_cflag &= !(
@@ -114,7 +115,7 @@ pub fn switch_modes() -> apperr::Result<()> {
             | libc::PARENB
         );
         // Set character size back to 8 bits.
-        termios.c_cflag |= libc::CS8;
+        termios.c_cflag |= libc::CS8 | libc::CREAD;
         termios.c_lflag &= !(
             // Disable signal generation (SIGINT, SIGTSTP, SIGQUIT).
             libc::ISIG
@@ -128,11 +129,20 @@ pub fn switch_modes() -> apperr::Result<()> {
             | libc::IEXTEN
         );
 
-        // Set the terminal to raw mode.
-        termios.c_lflag &= !(libc::ICANON | libc::ECHO);
-        check_int_return(libc::tcsetattr(STATE.stdout, libc::TCSANOW, &termios))?;
+        termios.c_cc[libc::VMIN] = 1;
+        termios.c_cc[libc::VTIME] = 0;
+        termios_setattr(libc::STDOUT_FILENO, &termios)
+    }
+}
 
-        Ok(())
+fn termios_setattr(fd: c_int, termios: &libc::termios) -> apperr::Result<()> {
+    loop {
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, termios) } == 0 {
+            return Ok(());
+        }
+        if errno() != libc::EINTR {
+            return Err(errno_to_apperr(errno()));
+        }
     }
 }
 
@@ -144,48 +154,52 @@ impl Drop for Deinit {
             #[allow(static_mut_refs)]
             if let Some(termios) = STATE.stdout_initial_termios.take() {
                 // Restore the original terminal modes.
-                libc::tcsetattr(STATE.stdout, libc::TCSANOW, &termios);
+                _ = termios_setattr(libc::STDOUT_FILENO, &termios);
+            }
+            if STATE.stdin_flags != -1 {
+                libc::fcntl(STATE.stdin, libc::F_SETFL, STATE.stdin_flags);
+                STATE.stdin_flags = -1;
+                STATE.stdin_current_flags = -1;
+            }
+            if STATE.stdin != libc::STDIN_FILENO {
+                libc::close(STATE.stdin);
+                STATE.stdin = libc::STDIN_FILENO;
             }
         }
     }
 }
 
-pub fn inject_window_size_into_stdin() {
-    unsafe {
-        STATE.inject_resize = true;
-    }
-}
-
-fn get_window_size() -> (u16, u16) {
+/// Read the native terminal size without injecting bytes into the input stream.
+pub fn get_window_size() -> apperr::Result<Size> {
     let mut winsz: libc::winsize = unsafe { mem::zeroed() };
-
-    for attempt in 1.. {
-        let ret = unsafe { libc::ioctl(STATE.stdout, libc::TIOCGWINSZ, &raw mut winsz) };
-        if ret == -1 || (winsz.ws_col != 0 && winsz.ws_row != 0) {
+    loop {
+        let ret = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &raw mut winsz) };
+        if ret == 0 {
             break;
         }
-
-        if attempt == 10 {
-            winsz.ws_col = 80;
-            winsz.ws_row = 24;
-            break;
+        let error = errno();
+        if error != libc::EINTR {
+            return Err(errno_to_apperr(error));
         }
-
-        // Some terminals are bad emulators and don't report TIOCGWINSZ immediately.
-        thread::sleep(time::Duration::from_millis(10 * attempt));
     }
-
-    (winsz.ws_col, winsz.ws_row)
+    if winsz.ws_col == 0 || winsz.ws_row == 0 {
+        Err(errno_to_apperr(libc::EINVAL))
+    } else {
+        Ok(Size { width: winsz.ws_col as CoordType, height: winsz.ws_row as CoordType })
+    }
 }
 
 /// Reads from stdin.
 ///
 /// Returns `None` if there was an error reading from stdin.
-/// Returns `Some("")` if the given timeout was reached.
-/// Otherwise, it returns the read, non-empty string.
-pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaString<'_>> {
+/// Returns `Some((resize, ""))` if the given timeout was reached.
+/// Otherwise, it returns the pending native resize and decoded input text.
+pub fn read_stdin(
+    arena: &Arena,
+    mut timeout: time::Duration,
+) -> Option<(Option<Size>, ArenaString<'_>)> {
     unsafe {
-        if STATE.inject_resize {
+        if INJECT_RESIZE.load(Ordering::Relaxed) {
             timeout = time::Duration::ZERO;
         }
 
@@ -220,10 +234,21 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
-                    ret = libc::poll(&mut pollfd, 1, timeout.as_millis() as libc::c_int);
+                    ret = libc::poll(
+                        &mut pollfd,
+                        1,
+                        timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int,
+                    );
                 }
                 if ret < 0 {
-                    return None; // Error? Let's assume it's an EOF.
+                    if errno() == libc::EINTR {
+                        timeout = timeout.saturating_sub(beg.elapsed());
+                        if INJECT_RESIZE.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        continue;
+                    }
+                    return None;
                 }
                 if ret == 0 {
                     break; // Timeout? We can stop reading.
@@ -248,7 +273,7 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
             }
             if ret < 0 {
                 match errno() {
-                    libc::EINTR if STATE.inject_resize => break,
+                    libc::EINTR if INJECT_RESIZE.load(Ordering::Relaxed) => break,
                     libc::EAGAIN if timeout == time::Duration::ZERO => break,
                     libc::EINTR | libc::EAGAIN => {}
                     _ => return None,
@@ -287,48 +312,54 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
 
         let mut result = ArenaString::from_utf8_lossy_owned(buf);
 
-        // We received a SIGWINCH? Add a fake window size sequence for our input parser.
-        // I prepend it so that on startup, the TUI system gets first initialized with a size.
-        if STATE.inject_resize {
-            STATE.inject_resize = false;
-            let (w, h) = get_window_size();
-            if w > 0 && h > 0 {
-                let scratch = scratch_arena(Some(arena));
-                let seq = arena_format!(&scratch, "\x1b[8;{h};{w}t");
-                result.replace_range(0..0, &seq);
-            }
-        }
+        let resize = if INJECT_RESIZE.swap(false, Ordering::Relaxed) {
+            get_window_size().ok()
+        } else {
+            None
+        };
 
         result.shrink_to_fit();
-        Some(result)
+        Some((resize, result))
     }
 }
 
 pub fn write_stdout(text: &str) {
-    if text.is_empty() {
-        return;
-    }
+    let mut buf = text.as_bytes();
 
-    // If we don't set the TTY to blocking mode,
-    // the write will potentially fail with EAGAIN.
-    set_tty_nonblocking(false);
+    while !buf.is_empty() {
+        let chunk = &buf[..buf.len().min(GIBI)];
+        let n = unsafe { libc::write(libc::STDOUT_FILENO, chunk.as_ptr().cast(), chunk.len()) };
 
-    let buf = text.as_bytes();
-    let mut written = 0;
-
-    while written < buf.len() {
-        let w = &buf[written..];
-        let w = &buf[..w.len().min(GIBI)];
-        let n = unsafe { libc::write(STATE.stdout, w.as_ptr() as *const _, w.len()) };
-
-        if n >= 0 {
-            written += n as usize;
+        if n > 0 {
+            buf = &buf[n as usize..];
             continue;
         }
 
-        let err = errno();
-        if err != libc::EINTR {
-            return;
+        if n == 0 {
+            return; // broken pipe
+        }
+
+        #[allow(unreachable_patterns, reason = "On Linux EAGAIN and EWOULDBLOCK are the same")]
+        match errno() {
+            libc::EINTR => continue,
+            libc::EAGAIN | libc::EWOULDBLOCK => {
+                // Block until it becomes writable
+                let mut pollfd =
+                    libc::pollfd { fd: libc::STDOUT_FILENO, events: libc::POLLOUT, revents: 0 };
+                loop {
+                    let ret = unsafe { libc::poll(&mut pollfd, 1, -1) };
+                    if ret >= 0 {
+                        if pollfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                            return; // broken pipe
+                        }
+                        break;
+                    }
+                    if errno() != libc::EINTR {
+                        return; // broken pipe
+                    }
+                }
+            }
+            _ => return, // broken pipe
         }
     }
 }
@@ -339,44 +370,42 @@ pub fn write_stdout(text: &str) {
 /// TTY is a bidirectional device and both handles refer to the same thing.
 fn set_tty_nonblocking(nonblock: bool) {
     unsafe {
-        let is_nonblock = (STATE.stdin_flags & libc::O_NONBLOCK) != 0;
+        let is_nonblock = (STATE.stdin_current_flags & libc::O_NONBLOCK) != 0;
         if is_nonblock != nonblock {
-            STATE.stdin_flags ^= libc::O_NONBLOCK;
-            let _ = libc::fcntl(STATE.stdin, libc::F_SETFL, STATE.stdin_flags);
+            let flags = STATE.stdin_current_flags ^ libc::O_NONBLOCK;
+            if libc::fcntl(STATE.stdin, libc::F_SETFL, flags) != -1 {
+                STATE.stdin_current_flags = flags;
+            }
         }
     }
 }
 
-pub fn open_stdin_if_redirected() -> Option<File> {
+/// Reopen the terminal input before consuming redirected stdin.
+pub fn reopen_stdin_if_redirected() -> apperr::Result<Option<File>> {
     unsafe {
-        // Did we reopen stdin during `init()`?
-        if STATE.stdin != libc::STDIN_FILENO {
-            Some(File::from_raw_fd(libc::STDIN_FILENO))
-        } else {
-            None
+        if libc::isatty(STATE.stdin) != 0 {
+            return Ok(None);
         }
+        // Keep the old state intact if opening the controlling terminal fails.
+        let terminal = check_int_return(libc::open(c"/dev/tty".as_ptr(), libc::O_RDONLY))?;
+        STATE.stdin = terminal;
+        Ok(Some(File::from_raw_fd(libc::STDIN_FILENO)))
     }
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct FileId {
-    st_dev: libc::dev_t,
-    st_ino: libc::ino_t,
+    dev: u64,
+    ino: u64,
 }
 
 /// Returns a unique identifier for the given file by handle or path.
 pub fn file_id(file: Option<&File>, path: &Path) -> apperr::Result<FileId> {
-    let file = match file {
-        Some(f) => f,
-        None => &File::open(path)?,
+    let metadata = match file {
+        Some(file) => file.metadata()?,
+        None => std::fs::metadata(path)?,
     };
-
-    unsafe {
-        let mut stat = MaybeUninit::<libc::stat>::uninit();
-        check_int_return(libc::fstat(file.as_raw_fd(), stat.as_mut_ptr()))?;
-        let stat = stat.assume_init();
-        Ok(FileId { st_dev: stat.st_dev, st_ino: stat.st_ino })
-    }
+    Ok(FileId { dev: metadata.dev(), ino: metadata.ino() })
 }
 
 /// Reserves a virtual memory region of the given size.
@@ -466,33 +495,56 @@ pub struct LibIcu {
 }
 
 pub fn load_icu() -> apperr::Result<LibIcu> {
-    const fn const_str_eq(a: &str, b: &str) -> bool {
-        let a = a.as_bytes();
-        let b = b.as_bytes();
-        let mut i = 0;
-
-        loop {
-            if i >= a.len() || i >= b.len() {
-                return a.len() == b.len();
-            }
-            if a[i] != b[i] {
-                return false;
-            }
-            i += 1;
-        }
-    }
-
     const LIBICUUC: &str = concat!(env!("EDIT_CFG_ICUUC_SONAME"), "\0");
     const LIBICUI18N: &str = concat!(env!("EDIT_CFG_ICUI18N_SONAME"), "\0");
+    let uc = CStr::from_bytes_with_nul(LIBICUUC.as_bytes())
+        .map_err(|_| errno_to_apperr(libc::EINVAL))?;
+    let i18n = CStr::from_bytes_with_nul(LIBICUI18N.as_bytes())
+        .map_err(|_| errno_to_apperr(libc::EINVAL))?;
+    select_icu_pair(uc, i18n, env!("EDIT_CFG_ICU_VERSIONED_FALLBACK") == "true", load_icu_pair)
+}
 
-    if const { const_str_eq(LIBICUUC, LIBICUI18N) } {
-        let icu = unsafe { load_library(LIBICUUC.as_ptr() as *const _)? };
-        Ok(LibIcu { libicuuc: icu, libicui18n: icu })
-    } else {
-        let libicuuc = unsafe { load_library(LIBICUUC.as_ptr() as *const _)? };
-        let libicui18n = unsafe { load_library(LIBICUI18N.as_ptr() as *const _)? };
-        Ok(LibIcu { libicuuc, libicui18n })
+fn load_icu_pair(uc: &CStr, i18n: &CStr) -> apperr::Result<LibIcu> {
+    let libicuuc = unsafe { load_library(uc.as_ptr())? };
+    if uc == i18n {
+        return Ok(LibIcu { libicuuc, libicui18n: libicuuc });
     }
+    match unsafe { load_library(i18n.as_ptr()) } {
+        Ok(libicui18n) => Ok(LibIcu { libicuuc, libicui18n }),
+        Err(error) => {
+            // A newer core library without its matching i18n library must not
+            // leak a loader reference before we try another installed pair.
+            unsafe { libc::dlclose(libicuuc.as_ptr()) };
+            Err(error)
+        }
+    }
+}
+
+fn select_icu_pair<T, E>(
+    uc: &CStr,
+    i18n: &CStr,
+    versioned_fallback: bool,
+    mut load: impl FnMut(&CStr, &CStr) -> Result<T, E>,
+) -> Result<T, E> {
+    let original_error = match load(uc, i18n) {
+        Ok(libraries) => return Ok(libraries),
+        Err(error) => error,
+    };
+    if versioned_fallback {
+        // ICU uses integer major versions in ELF SONAMEs. Probe through the
+        // platform loader, so ld.so.cache, standard paths and LD_LIBRARY_PATH
+        // retain their normal semantics. Bound the work and never mix versions.
+        for major in (1..=255).rev() {
+            let uc = format!("libicuuc.so.{major}\0");
+            let i18n = format!("libicui18n.so.{major}\0");
+            let uc = CStr::from_bytes_with_nul(uc.as_bytes()).unwrap();
+            let i18n = CStr::from_bytes_with_nul(i18n.as_bytes()).unwrap();
+            if let Ok(libraries) = load(uc, i18n) {
+                return Ok(libraries);
+            }
+        }
+    }
+    Err(original_error)
 }
 /// ICU, by default, adds the major version as a suffix to each exported symbol.
 /// They also recommend to disable this for system-level installations (`runConfigureICU Linux --disable-renaming`),
@@ -500,64 +552,31 @@ pub fn load_icu() -> apperr::Result<LibIcu> {
 /// This function returns the suffix, if any.
 #[cfg(edit_icu_renaming_auto_detect)]
 pub fn icu_detect_renaming_suffix(arena: &Arena, handle: NonNull<c_void>) -> ArenaString<'_> {
-    unsafe {
-        type T = *const c_void;
-
-        let mut res = ArenaString::new_in(arena);
-
-        // Check if the ICU library is using unversioned symbols.
-        // Return an empty suffix in that case.
-        if get_proc_address::<T>(handle, c"u_errorName".as_ptr()).is_ok() {
-            return res;
-        }
-
-        // In the versions (63-76) and distributions (Arch/Debian) I tested,
-        // this symbol seems to be always present. This allows us to call `dladdr`.
-        // It's the `UCaseMap::~UCaseMap()` destructor which for some reason isn't
-        // in a namespace. Thank you ICU maintainers for this oversight.
-        let proc = match get_proc_address::<T>(handle, c"_ZN8UCaseMapD1Ev".as_ptr()) {
-            Ok(proc) => proc,
-            Err(_) => return res,
-        };
-
-        // `dladdr` is specific to GNU's libc unfortunately.
-        let mut info: libc::Dl_info = mem::zeroed();
-        let ret = libc::dladdr(proc, &mut info);
-        if ret == 0 {
-            return res;
-        }
-
-        // The library path is in `info.dli_fname`.
-        let path = match CStr::from_ptr(info.dli_fname).to_str() {
-            Ok(name) => name,
-            Err(_) => return res,
-        };
-
-        let path = match std::fs::read_link(path) {
-            Ok(path) => path,
-            Err(_) => path.into(),
-        };
-
-        // I'm going to assume it's something like "libicuuc.so.76.1".
-        let path = path.into_os_string();
-        let path = path.to_string_lossy();
-        let suffix_start = match path.rfind(".so.") {
-            Some(pos) => pos + 4,
-            None => return res,
-        };
-        let version = &path[suffix_start..];
-        let version_end = version.find('.').unwrap_or(version.len());
-        let version = &version[..version_end];
-
-        res.push('_');
-        res.push_str(version);
-        res
+    let mut result = ArenaString::new_in(arena);
+    // Probe a public C export instead of relying on an incidental C++ destructor
+    // export or on filesystem symlink names; runtime-only and stripped ICU builds
+    // still provide u_errorName.
+    if unsafe { get_proc_address::<*const c_void>(handle, c"u_errorName".as_ptr()) }.is_ok() {
+        return result;
     }
+    for major in (1..=255).rev() {
+        let name = format!("u_errorName_{major}\0");
+        if unsafe { get_proc_address::<*const c_void>(handle, name.as_ptr().cast()) }.is_ok() {
+            result.push('_');
+            result.push_str(&major.to_string());
+            break;
+        }
+    }
+    result
 }
 
 #[cfg(edit_icu_renaming_auto_detect)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn icu_add_renaming_suffix<'a, 'b, 'r>(
+/// Appends the configured ICU symbol suffix into `arena`.
+///
+/// # Safety
+/// `name` must point to a live, null-terminated, valid UTF-8 symbol name.
+/// A newly allocated result remains valid only while `arena` is alive and not reset.
+pub unsafe fn icu_add_renaming_suffix<'a, 'b, 'r>(
     arena: &'a Arena,
     name: *const c_char,
     suffix: &str,
@@ -569,8 +588,7 @@ where
     if suffix.is_empty() {
         name
     } else {
-        // SAFETY: In this particular case we know that the string
-        // is valid UTF-8, because it comes from icu.rs.
+        // SAFETY: The caller guarantees a live, valid UTF-8 C string.
         let name = unsafe { CStr::from_ptr(name) };
         let name = unsafe { name.to_str().unwrap_unchecked() };
 
@@ -584,10 +602,17 @@ where
 }
 
 pub fn preferred_languages(arena: &Arena) -> Vec<ArenaString<'_>, &Arena> {
+    preferred_languages_from(arena, |key| std::env::var(key).ok())
+}
+
+fn preferred_languages_from<'a>(
+    arena: &'a Arena,
+    mut get: impl FnMut(&str) -> Option<String>,
+) -> Vec<ArenaString<'a>, &'a Arena> {
     let mut locales = Vec::new_in(arena);
 
-    for key in ["LANGUAGE", "LC_ALL", "LANG"] {
-        if let Ok(val) = std::env::var(key)
+    for key in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Some(val) = get(key)
             && !val.is_empty()
         {
             locales.extend(val.split(':').filter(|s| !s.is_empty()).map(|s| {
@@ -597,7 +622,9 @@ pub fn preferred_languages(arena: &Arena) -> Vec<ArenaString<'_>, &Arena> {
                 res.extend(s.as_bytes().iter().map(|&b| if b == b'_' { b'-' } else { b }));
                 unsafe { ArenaString::from_utf8_unchecked(res) }
             }));
-            break;
+            if !locales.is_empty() {
+                break;
+            }
         }
     }
 
@@ -641,4 +668,134 @@ const fn errno_to_apperr(no: c_int) -> apperr::Error {
 
 fn check_int_return(ret: libc::c_int) -> apperr::Result<libc::c_int> {
     if ret < 0 { Err(errno_to_apperr(errno())) } else { Ok(ret) }
+}
+
+#[cfg(test)]
+pub fn memfd() -> std::io::Result<File> {
+    fn checked_fd(ret: libc::c_int) -> std::io::Result<libc::c_int> {
+        if ret < 0 { Err(std::io::Error::last_os_error()) } else { Ok(ret) }
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let fd = checked_fd(libc::memfd_create(c"edit".as_ptr(), libc::MFD_CLOEXEC))?;
+        Ok(File::from_raw_fd(fd))
+    }
+    #[cfg(not(target_os = "linux"))]
+    unsafe {
+        let stream = libc::tmpfile();
+        if stream.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        // Duplicate the descriptor so that closing the C stream doesn't close our file.
+        let file = checked_fd(libc::fcntl(libc::fileno(stream), libc::F_DUPFD_CLOEXEC, 0))
+            .map(|fd| File::from_raw_fd(fd));
+        let close = checked_fd(libc::fclose(stream));
+        let file = file?;
+        close?;
+
+        Ok(file)
+    }
+}
+
+#[cfg(test)]
+mod upstream_tests {
+    use super::*;
+
+    #[test]
+    fn icu_runtime_selection_uses_complete_matching_versioned_pairs() {
+        let mut attempts = Vec::new();
+        let selected = select_icu_pair(c"libicuuc.so", c"libicui18n.so", true, |uc, i18n| {
+            let uc = uc.to_str().unwrap();
+            let i18n = i18n.to_str().unwrap();
+            attempts.push((uc.to_owned(), i18n.to_owned()));
+            // Newer core-only installations are skipped; both libraries must load.
+            if uc == "libicuuc.so.74" && i18n == "libicui18n.so.74" { Ok(74) } else { Err(()) }
+        });
+        assert_eq!(selected, Ok(74));
+        assert_eq!(attempts[0], ("libicuuc.so".to_owned(), "libicui18n.so".to_owned()));
+        for (uc, i18n) in &attempts[1..] {
+            assert_eq!(uc.strip_prefix("libicuuc.so."), i18n.strip_prefix("libicui18n.so."));
+        }
+        assert_eq!(attempts.last().unwrap().0, "libicuuc.so.74");
+    }
+
+    #[test]
+    fn icu_exact_overrides_never_fall_back_and_default_aliases_win() {
+        let mut attempts = 0;
+        let result: Result<(), _> =
+            select_icu_pair(c"/custom/uc.so", c"/custom/i18n.so", false, |uc, i18n| {
+                attempts += 1;
+                assert_eq!(uc, c"/custom/uc.so");
+                assert_eq!(i18n, c"/custom/i18n.so");
+                Err("custom load failure")
+            });
+        assert_eq!(result, Err("custom load failure"));
+        assert_eq!(attempts, 1);
+        let result: Result<_, ()> =
+            select_icu_pair(c"libicuuc.so", c"libicui18n.so", true, |_, _| {
+                attempts += 1;
+                Ok(())
+            });
+        assert_eq!(result, Ok(()));
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn icu_version_probe_is_bounded_and_preserves_the_initial_error() {
+        let mut attempts = 0;
+        let result: Result<(), _> =
+            select_icu_pair(c"libicuuc.so", c"libicui18n.so", true, |_, _| {
+                attempts += 1;
+                Err(attempts)
+            });
+        assert_eq!(attempts, 256);
+        assert_eq!(result, Err(1));
+    }
+
+    #[test]
+    #[cfg(edit_icu_renaming_auto_detect)]
+    fn native_runtime_icu_resolves_public_exports_without_development_aliases() {
+        let libraries = load_icu().expect("install the ICU runtime package for this native test");
+        let arena = Arena::new(MEBI).unwrap();
+        let suffix = icu_detect_renaming_suffix(&arena, libraries.libicuuc);
+        for (handle, name) in
+            [(libraries.libicuuc, "u_errorName"), (libraries.libicui18n, "ucol_open")]
+        {
+            let symbol = std::ffi::CString::new(format!("{name}{suffix}")).unwrap();
+            assert!(unsafe { get_proc_address::<*const c_void>(handle, symbol.as_ptr()) }.is_ok());
+        }
+        unsafe {
+            if libraries.libicui18n != libraries.libicuuc {
+                libc::dlclose(libraries.libicui18n.as_ptr());
+            }
+            libc::dlclose(libraries.libicuuc.as_ptr());
+        }
+    }
+
+    #[test]
+    fn language_fallback_skips_empty_and_delimiter_only_overrides() {
+        let arena = Arena::new(MEBI).unwrap();
+        let cases = [
+            (["", "", "pt_BR.UTF-8", "en_US"], vec!["pt-BR.UTF-8"]),
+            (["::", "de_DE", "fr_FR", "en_US"], vec!["de-DE"]),
+            (["fr_FR::en_US:", "de_DE", "", ""], vec!["fr-FR", "en-US"]),
+            (["", "", "", "en_US"], vec!["en-US"]),
+        ];
+        for (values, expected) in cases {
+            let keys = ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"];
+            let actual = preferred_languages_from(&arena, |key| {
+                Some(values[keys.iter().position(|&k| k == key).unwrap()].to_owned())
+            });
+            assert_eq!(actual.iter().map(|s| s.as_str()).collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn file_identity_uses_metadata_for_directories_and_open_files() {
+        let directory = std::env::temp_dir();
+        assert!(file_id(None, &directory).is_ok());
+        let file = memfd().unwrap();
+        assert!(file_id(Some(&file), Path::new("missing-not-used")).is_ok());
+    }
 }

@@ -3,7 +3,7 @@
 
 use ogedit::arena_format;
 use ogedit::helpers::*;
-use ogedit::input::vk;
+use ogedit::input::{kbmod, vk};
 use ogedit::tui::*;
 
 use crate::draw_editor::draw_duplicate_line;
@@ -45,11 +45,17 @@ pub fn draw_menubar(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_file(ctx: &mut Context, state: &mut State) {
+    if ctx.menubar_menu_button("Compare with disk", 'D', vk::NULL) {
+        crate::workbench::execute(state, "compare");
+    }
+    if ctx.menubar_menu_button("Recovery", 'Y', vk::NULL) {
+        crate::workbench::open(state, crate::workbench::Panel::Recovery);
+    }
     // Check for file changes immediately when File menu is opened
-    if let Some(doc) = state.documents.active() {
-        if doc.has_file_changed_on_disk() {
-            state.file_changed_cached = true;
-        }
+    if let Some(doc) = state.documents.active()
+        && doc.has_file_changed_on_disk()
+    {
+        state.file_changed_cached = true;
     }
 
     // Copy hotkeys to avoid borrow issues (InputKey is Copy)
@@ -63,6 +69,11 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
         logging::log_menu_click("File->Open");
         logging::log_dialog_open("File Open");
         state.wants_file_picker = StateFilePicker::Open;
+    }
+    if crate::native_dialog::NativeFilePicker::supported()
+        && ctx.menubar_menu_button("Browse File", 'B', vk::NULL)
+    {
+        state.wants_native_browse = true;
     }
     if state.documents.active().is_some() {
         if ctx.menubar_menu_button(loc(LocId::FileSave), 'S', hk.file_save) {
@@ -95,6 +106,22 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
             state.wants_close = true;
         }
     }
+    if let Some(path) = state.settings.path.clone()
+        && ctx.menubar_menu_button(loc(LocId::FilePreferences), 'P', vk::NULL)
+    {
+        match state.documents.add_file_path_literal(&path, &state.config) {
+            Ok(doc) => {
+                if !path.exists() && doc.buffer.borrow().text_length() == 0 {
+                    let mut buffer = doc.buffer.borrow_mut();
+                    buffer.set_crlf(false);
+                    buffer.write_raw(b"{\n  \"files.associations\": {\n  }\n}\n");
+                    buffer.cursor_move_to_logical(Default::default());
+                }
+                state.file_watcher.watch(&path);
+            }
+            Err(error) => error_log_add(ctx, state, error),
+        }
+    }
     if ctx.menubar_menu_button(loc(LocId::FileExit), 'X', hk.file_exit) {
         logging::log_menu_click("File->Exit");
         state.wants_exit = true;
@@ -103,6 +130,12 @@ fn draw_menu_file(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
+    if ctx.menubar_menu_button("Search workspace", 'W', kbmod::CTRL_SHIFT | vk::F) {
+        crate::workbench::open(state, crate::workbench::Panel::Search);
+    }
+    if ctx.menubar_menu_button("Record / stop macro", 'M', vk::F4) {
+        crate::workbench::execute(state, "record");
+    }
     // Copy hotkeys to avoid borrow issues (InputKey is Copy)
     let hk = state.config.hotkeys.clone();
 
@@ -178,6 +211,9 @@ fn draw_menu_edit(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_view(ctx: &mut Context, state: &mut State) {
+    if ctx.menubar_menu_button("Data view", 'D', kbmod::CTRL_SHIFT | vk::L) {
+        crate::workbench::execute(state, "lens");
+    }
     // Copy hotkeys to avoid borrow issues (InputKey is Copy)
     let hk = state.config.hotkeys.clone();
 
@@ -207,7 +243,10 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
             tb.set_word_wrap(new_state);
             state.config.word_wrap = new_state;
             // Save config to disk
-            let _ = state.config.save();
+            if let Err(error) = state.config.save() {
+                state.workbench.message =
+                    format!("Settings were not saved: {}", FormatApperr::from(error));
+            }
             ctx.needs_rerender();
         }
     }
@@ -216,6 +255,9 @@ fn draw_menu_view(ctx: &mut Context, state: &mut State) {
 }
 
 fn draw_menu_help(ctx: &mut Context, state: &mut State) {
+    if ctx.menubar_menu_button("Commands", 'C', vk::F2) {
+        crate::workbench::open(state, crate::workbench::Panel::Commands);
+    }
     if ctx.menubar_menu_button(loc(LocId::HelpAbout), 'A', vk::NULL) {
         logging::log_menu_click("Help->About");
         logging::log_dialog_open("About");
@@ -255,7 +297,7 @@ pub fn draw_dialog_about(ctx: &mut Context, state: &mut State) {
             ctx.attr_overflow(Overflow::TruncateTail);
             ctx.attr_position(Position::Center);
 
-            ctx.label("copyright", "Copyright (c) Microsoft Corp 2025");
+            ctx.label("copyright", "Copyright (c) Microsoft Corporation");
             ctx.attr_overflow(Overflow::TruncateTail);
             ctx.attr_position(Position::Center);
 

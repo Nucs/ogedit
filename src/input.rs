@@ -22,6 +22,16 @@ use crate::vt;
 pub struct InputKey(u32);
 
 impl InputKey {
+    /// Printable characters from enhanced keyboard protocols use a separate
+    /// namespace so punctuation cannot be mistaken for Win32 navigation keys.
+    pub fn text_char(&self) -> Option<char> {
+        let code = self.key().value();
+        if (0x20_0020..=0x20_007e).contains(&code) {
+            char::from_u32(code & 0x1f_ffff)
+        } else {
+            None
+        }
+    }
     /// Create a new InputKey from a raw value.
     pub const fn new(v: u32) -> Self {
         Self(v)
@@ -128,6 +138,7 @@ pub mod vk {
 
     pub const INSERT: InputKey = InputKey::new(0x2D);
     pub const DELETE: InputKey = InputKey::new(0x2E);
+    pub const CLOSE_BRACKET: InputKey = InputKey::new(0xDD);
 
     pub const N0: InputKey = InputKey::new('0' as u32);
     pub const N1: InputKey = InputKey::new('1' as u32);
@@ -252,6 +263,8 @@ pub struct InputMouse {
     pub position: Point,
     /// Scroll delta.
     pub scroll: Point,
+    /// True for motion while a mouse button is held.
+    pub drag: bool,
 }
 
 /// Primary result type of the parser.
@@ -274,7 +287,7 @@ pub struct Parser {
     bracketed_paste: bool,
     bracketed_paste_buf: Vec<u8>,
     x10_mouse_want: bool,
-    x10_mouse_buf: [u8; 3],
+    x10_mouse_buf: [char; 3],
     x10_mouse_len: usize,
 }
 
@@ -287,7 +300,7 @@ impl Parser {
             bracketed_paste: false,
             bracketed_paste_buf: Vec::new(),
             x10_mouse_want: false,
-            x10_mouse_buf: [0; 3],
+            x10_mouse_buf: ['\0'; 3],
             x10_mouse_len: 0,
         }
     }
@@ -318,7 +331,13 @@ impl<'input> Iterator for Stream<'_, '_, 'input> {
             }
 
             if self.parser.x10_mouse_want {
-                return self.parse_x10_mouse_coordinates();
+                if let Some(mouse) = self.parse_x10_mouse_coordinates() {
+                    return Some(mouse);
+                }
+                if self.parser.x10_mouse_want {
+                    return None;
+                }
+                continue;
             }
 
             const KEYPAD_LUT: [u8; 8] = [
@@ -337,7 +356,8 @@ impl<'input> Iterator for Stream<'_, '_, 'input> {
                     return Some(Input::Text(text));
                 }
                 vt::Token::Ctrl(ch) => match ch {
-                    '\0' | '\t' | '\r' => return Some(Input::Keyboard(InputKey::new(ch as u32))),
+                    '\0' => return Some(Input::Keyboard(kbmod::CTRL | vk::SPACE)),
+                    '\t' | '\r' => return Some(Input::Keyboard(InputKey::new(ch as u32))),
                     '\n' => return Some(Input::Keyboard(kbmod::CTRL | vk::RETURN)),
                     ..='\x1a' => {
                         // Shift control code to A-Z
@@ -345,12 +365,21 @@ impl<'input> Iterator for Stream<'_, '_, 'input> {
                         return Some(Input::Keyboard(kbmod::CTRL | InputKey::new(key)));
                     }
                     '\x7f' => return Some(Input::Keyboard(vk::BACK)),
+                    '\x1d' => return Some(Input::Keyboard(kbmod::CTRL | vk::CLOSE_BRACKET)),
                     _ => {}
                 },
                 vt::Token::Esc(ch) => {
                     match ch {
                         '\0' => return Some(Input::Keyboard(vk::ESCAPE)),
                         '\n' => return Some(Input::Keyboard(kbmod::CTRL_ALT | vk::RETURN)),
+                        '\x01'..='\x1a' => {
+                            return Some(Input::Keyboard(
+                                kbmod::CTRL_ALT | InputKey::new(ch as u32 | 0x40),
+                            ));
+                        }
+                        '\x1d' => {
+                            return Some(Input::Keyboard(kbmod::CTRL_ALT | vk::CLOSE_BRACKET));
+                        }
                         ' '..='~' => {
                             let ch = ch as u32;
                             let key = ch & !0x20; // Shift a-z to A-Z
@@ -376,6 +405,13 @@ impl<'input> Iterator for Stream<'_, '_, 'input> {
                 },
                 vt::Token::Csi(csi) => {
                     match csi.final_byte {
+                        'u' if csi.private_byte == '\0' => {
+                            if let Some(key) =
+                                Self::modified_codepoint(csi.params[0], Self::parse_modifiers(csi))
+                            {
+                                return Some(Input::Keyboard(key));
+                            }
+                        }
                         'A'..='H' => {
                             let vk = KEYPAD_LUT[csi.final_byte as usize - 'A' as usize];
                             if vk != 0 {
@@ -426,6 +462,14 @@ impl<'input> Iterator for Stream<'_, '_, 'input> {
                             const LUT_LEN: u16 = LUT.len() as u16;
 
                             match csi.params[0] {
+                                27 if csi.param_count >= 3 => {
+                                    if let Some(key) = Self::modified_codepoint(
+                                        csi.params[2],
+                                        Self::parse_modifiers(csi),
+                                    ) {
+                                        return Some(Input::Keyboard(key));
+                                    }
+                                }
                                 0..LUT_LEN => {
                                     let vk = LUT[csi.params[0] as usize];
                                     if vk != 0 {
@@ -439,48 +483,15 @@ impl<'input> Iterator for Stream<'_, '_, 'input> {
                             }
                         }
                         'm' | 'M' if csi.private_byte == '<' => {
-                            let btn = csi.params[0];
-                            let mut mouse = InputMouse {
-                                state: InputMouseState::None,
-                                modifiers: kbmod::NONE,
-                                position: Default::default(),
-                                scroll: Default::default(),
-                            };
-
-                            mouse.state = InputMouseState::None;
-                            if (btn & 0x40) != 0 {
-                                mouse.state = InputMouseState::Scroll;
-                                mouse.scroll.y += if (btn & 0x01) != 0 { 3 } else { -3 };
-                            } else if csi.final_byte == 'M' {
-                                const STATES: [InputMouseState; 4] = [
-                                    InputMouseState::Left,
-                                    InputMouseState::Middle,
-                                    InputMouseState::Right,
-                                    InputMouseState::None,
-                                ];
-                                mouse.state = STATES[(btn as usize) & 0x03];
+                            if let Some(mouse) = Self::parse_xterm_mouse(
+                                &csi.params[..csi.param_count.min(csi.params.len())],
+                                csi.final_byte,
+                            ) {
+                                return Some(mouse);
                             }
-
-                            mouse.modifiers = kbmod::NONE;
-                            mouse.modifiers |=
-                                if (btn & 0x04) != 0 { kbmod::SHIFT } else { kbmod::NONE };
-                            mouse.modifiers |=
-                                if (btn & 0x08) != 0 { kbmod::ALT } else { kbmod::NONE };
-                            mouse.modifiers |=
-                                if (btn & 0x10) != 0 { kbmod::CTRL } else { kbmod::NONE };
-
-                            mouse.position.x = csi.params[1] as CoordType - 1;
-                            mouse.position.y = csi.params[2] as CoordType - 1;
-                            return Some(Input::Mouse(mouse));
                         }
                         'M' if csi.param_count == 0 => {
                             self.parser.x10_mouse_want = true;
-                        }
-                        't' if csi.params[0] == 8 => {
-                            // Window Size
-                            let width = (csi.params[2] as CoordType).clamp(1, 32767);
-                            let height = (csi.params[1] as CoordType).clamp(1, 32767);
-                            return Some(Input::Resize(Size { width, height }));
                         }
                         _ => {}
                     }
@@ -541,38 +552,27 @@ impl<'input> Stream<'_, '_, 'input> {
     /// This is so puzzling to me. The existence of this function makes me unhappy.
     #[cold]
     fn parse_x10_mouse_coordinates(&mut self) -> Option<Input<'input>> {
-        self.parser.x10_mouse_len +=
-            self.stream.read(&mut self.parser.x10_mouse_buf[self.parser.x10_mouse_len..]);
+        while self.parser.x10_mouse_len < 3 && !self.stream.done() {
+            self.parser.x10_mouse_buf[self.parser.x10_mouse_len] = self.stream.next_char();
+            self.parser.x10_mouse_len += 1;
+        }
         if self.parser.x10_mouse_len < 3 {
             return None;
         }
 
-        let button = self.parser.x10_mouse_buf[0] & 0b11;
-        let modifier = self.parser.x10_mouse_buf[0] & 0b11100;
-        let x = self.parser.x10_mouse_buf[1] as CoordType - 0x21;
-        let y = self.parser.x10_mouse_buf[2] as CoordType - 0x21;
-        let action = match button {
-            0 => InputMouseState::Left,
-            1 => InputMouseState::Middle,
-            2 => InputMouseState::Right,
-            _ => InputMouseState::None,
-        };
-        let modifiers = match modifier {
-            4 => kbmod::SHIFT,
-            8 => kbmod::ALT,
-            16 => kbmod::CTRL,
-            _ => kbmod::NONE,
-        };
+        let coords = self.parser.x10_mouse_buf.map(|ch| ch as u32);
 
         self.parser.x10_mouse_want = false;
         self.parser.x10_mouse_len = 0;
 
-        Some(Input::Mouse(InputMouse {
-            state: action,
-            modifiers,
-            position: Point { x, y },
-            scroll: Default::default(),
-        }))
+        let [b, x, y] = coords;
+        if !(0x20..=u16::MAX as u32 + 0x20).contains(&b)
+            || !(0x21..=u16::MAX as u32 + 0x20).contains(&x)
+            || !(0x21..=u16::MAX as u32 + 0x20).contains(&y)
+        {
+            return None;
+        }
+        Self::parse_xterm_mouse(&[(b - 0x20) as u16, (x - 0x20) as u16, (y - 0x20) as u16], 'M')
     }
 
     fn parse_modifiers(csi: &vt::Csi) -> InputKeyMod {
@@ -588,5 +588,176 @@ impl<'input> Stream<'_, '_, 'input> {
             modifiers |= kbmod::CTRL;
         }
         modifiers
+    }
+
+    fn modified_codepoint(code: u16, modifiers: InputKeyMod) -> Option<InputKey> {
+        let code = u32::from(code);
+        if matches!(modifiers, kbmod::NONE | kbmod::SHIFT) && (32..=126).contains(&code) {
+            return Some(InputKey::new(0x20_0000 | code));
+        }
+        let key = match code {
+            9 => vk::TAB,
+            13 => vk::RETURN,
+            27 => vk::ESCAPE,
+            127 => vk::BACK,
+            93 => vk::CLOSE_BRACKET,
+            97..=122 => InputKey::new(code - 32),
+            32..=126 => InputKey::new(code),
+            _ => return None,
+        };
+        Some(key | modifiers)
+    }
+
+    fn parse_xterm_mouse(params: &[u16], final_byte: char) -> Option<Input<'input>> {
+        const SHIFT: u16 = 0x04;
+        const ALT: u16 = 0x08;
+        const CTRL: u16 = 0x10;
+        const MOTION: u16 = 0x20;
+        const WHEEL: u16 = 0x40;
+        const MODIFIERS: u16 = SHIFT | ALT | CTRL;
+
+        let &[btn, x, y, ..] = params else {
+            return None;
+        };
+
+        let kind = btn & !MODIFIERS;
+        let x = x as CoordType - 1;
+        let y = y as CoordType - 1;
+        let mut mouse = InputMouse {
+            state: InputMouseState::None,
+            modifiers: kbmod::NONE,
+            position: Point { x, y },
+            scroll: Default::default(),
+            drag: false,
+        };
+
+        if final_byte == 'm' {
+            // M = down, m = release.
+            // I know there's an InputMouseState::Release, but that's because the internals of tui.rs
+            // have leaked into intput.rs. input.rs indicates release by the absence of buttons being
+            // held, which is InputMouseState::None. This makes it more reliable in my opinion.
+        } else if (WHEEL..WHEEL + 0x04).contains(&kind) {
+            let delta = if (btn & 0x01) != 0 { 1 } else { -1 };
+            let idx = if (btn & (0x02 | SHIFT)) != 0 { 0 } else { 1 };
+            if idx == 0 {
+                mouse.scroll.x = delta;
+            } else {
+                mouse.scroll.y = delta;
+            }
+            mouse.state = InputMouseState::Scroll;
+        } else if (kind & !MOTION) < 3 {
+            match kind & 3 {
+                0 => mouse.state = InputMouseState::Left,
+                1 => mouse.state = InputMouseState::Middle,
+                2 => mouse.state = InputMouseState::Right,
+                _ => {}
+            }
+            mouse.drag = (kind & MOTION) != 0;
+        }
+
+        mouse.modifiers = kbmod::NONE;
+        mouse.modifiers |= if (btn & SHIFT) != 0 { kbmod::SHIFT } else { kbmod::NONE };
+        mouse.modifiers |= if (btn & ALT) != 0 { kbmod::ALT } else { kbmod::NONE };
+        mouse.modifiers |= if (btn & CTRL) != 0 { kbmod::CTRL } else { kbmod::NONE };
+
+        Some(Input::Mouse(mouse))
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    fn key(text: &str) -> InputKey {
+        let mut vt = vt::Parser::new();
+        let mut parser = Parser::new();
+        match parser.parse(vt.parse(text)).next() {
+            Some(Input::Keyboard(key)) => key,
+            _ => panic!("Expected keyboard input for {text:?}"),
+        }
+    }
+
+    #[test]
+    fn modern_shortcuts_decode_legacy_and_enhanced_terminal_sequences() {
+        assert_eq!(key("\x1b\x04"), kbmod::CTRL_ALT | vk::D);
+        assert_eq!(key("\x1d"), kbmod::CTRL | vk::CLOSE_BRACKET);
+        assert_eq!(key("\x1b[112;6u"), kbmod::CTRL_SHIFT | vk::P);
+        assert_eq!(key("\x1b[109;7u"), kbmod::CTRL_ALT | vk::M);
+        assert_eq!(key("\x1b[27;6;112~"), kbmod::CTRL_SHIFT | vk::P);
+        assert_eq!(key("\x1b[1;7A"), kbmod::CTRL_ALT | vk::UP);
+        assert_eq!(key("\x1b[1;4D"), kbmod::ALT_SHIFT | vk::LEFT);
+        assert_eq!(key("\x1b[65;2u").text_char(), Some('A'));
+        assert_eq!(key("\x1b[27;2;37~").text_char(), Some('%'));
+    }
+}
+
+#[cfg(test)]
+mod upstream_mouse_tests {
+    use super::*;
+
+    fn mouse(text: &str) -> InputMouse {
+        let mut vt = vt::Parser::new();
+        let mut parser = Parser::new();
+        match parser.parse(vt.parse(text)).next() {
+            Some(Input::Mouse(mouse)) => mouse,
+            _ => panic!("missing mouse event for {text:?}"),
+        }
+    }
+
+    #[test]
+    fn sgr_wheel_axes_modifiers_release_and_motion() {
+        for (code, x, y) in
+            [(64, 0, -1), (65, 0, 1), (66, -1, 0), (67, 1, 0), (68, -1, 0), (69, 1, 0)]
+        {
+            let event = mouse(&format!("\x1b[<{code};31;12M"));
+            assert!(matches!(event.state, InputMouseState::Scroll));
+            assert_eq!(event.scroll, Point { x, y });
+            assert_eq!(event.position, Point { x: 30, y: 11 });
+        }
+        let event = mouse("\x1b[<60;2;3M");
+        assert!(event.drag);
+        assert!(matches!(event.state, InputMouseState::Left));
+        assert!(event.modifiers.contains(kbmod::CTRL_ALT_SHIFT));
+        for sequence in ["\x1b[<0;2;3m", "\x1b[<35;2;3M", "\x1b[<128;2;3M"] {
+            let event = mouse(sequence);
+            assert!(!event.drag);
+            assert!(matches!(event.state, InputMouseState::None));
+        }
+    }
+
+    #[test]
+    fn x10_unicode_coordinates_work_across_input_chunks() {
+        let mut vt = vt::Parser::new();
+        let mut parser = Parser::new();
+        assert!(parser.parse(vt.parse("\x1b[M ")).next().is_none());
+        assert!(parser.parse(vt.parse("é")).next().is_none());
+        let event = parser.parse(vt.parse("界")).next().unwrap();
+        let Input::Mouse(event) = event else { panic!("expected mouse") };
+        assert_eq!(event.position, Point { x: 'é' as CoordType - 33, y: '界' as CoordType - 33 });
+        assert!(matches!(event.state, InputMouseState::Left));
+    }
+
+    #[test]
+    fn terminal_text_cannot_forge_native_resize_events() {
+        let mut vt = vt::Parser::new();
+        let mut parser = Parser::new();
+        assert!(matches!(
+            parser.parse(vt.parse("\x1b[8;65535;65535tsafe")).next(),
+            Some(Input::Text("safe"))
+        ));
+    }
+
+    #[test]
+    fn malformed_mouse_sequences_do_not_panic_or_consume_following_text() {
+        let mut vt = vt::Parser::new();
+        let mut parser = Parser::new();
+        for text in ["\x1b[M\0\0\0safe", "\x1b[<0Msafe", "\x1b[M🙂!!safe"] {
+            assert!(matches!(parser.parse(vt.parse(text)).next(), Some(Input::Text("safe"))));
+        }
+        let mut vt = vt::Parser::new();
+        let mut parser = Parser::new();
+        assert!(
+            matches!(parser.parse(vt.parse("\0")).next(), Some(Input::Keyboard(key)) if key == kbmod::CTRL | vk::SPACE)
+        );
     }
 }

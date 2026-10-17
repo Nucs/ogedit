@@ -1,11 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::cmp::Ordering;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ogedit::arena::scratch_arena;
 use ogedit::framebuffer::IndexedColor;
 use ogedit::helpers::*;
 use ogedit::input::{kbmod, vk};
@@ -15,6 +13,57 @@ use ogedit::{icu, path};
 use crate::localization::*;
 use crate::logging;
 use crate::state::*;
+
+const APP_SAVE_TARGET_OPEN: ogedit::apperr::Error = ogedit::apperr::Error::new_app(1005);
+
+#[derive(Default)]
+pub(crate) struct FilePickerPreview {
+    // Keep relative input anchored while its preview changes the displayed folder.
+    input_directory: Option<PathBuf>,
+    selected: Option<PathBuf>,
+}
+
+impl FilePickerPreview {
+    pub(crate) fn input_directory<'a>(&'a self, displayed: &'a Path) -> &'a Path {
+        self.input_directory.as_deref().unwrap_or(displayed)
+    }
+
+    pub(crate) fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn update(&mut self, displayed: &Path, input: &Path) -> Option<PathBuf> {
+        self.selected = None;
+        if input.as_os_str().is_empty() {
+            self.reset();
+            return None;
+        }
+        let base = self.input_directory.get_or_insert_with(|| displayed.to_owned());
+        let entered = path::join_user_input(base, input);
+        let (file, _) = crate::documents::DocumentManager::resolve_filename_goto(&entered);
+        if !file.is_file() {
+            return None;
+        }
+        self.selected = file.file_name().map(PathBuf::from);
+        let parent = file.parent().map(Path::to_owned);
+        // Absolute input does not need an anchor. A later basename replacement
+        // should resolve in the folder the user now sees.
+        if path::from_user_input(input).is_absolute() {
+            self.input_directory = parent.clone();
+        }
+        parent
+    }
+
+    fn selects(&self, entry: &Path) -> bool {
+        self.selected.as_deref().is_some_and(|selected| {
+            if cfg!(windows) {
+                selected.to_string_lossy().to_lowercase() == entry.to_string_lossy().to_lowercase()
+            } else {
+                selected == entry
+            }
+        })
+    }
+}
 
 pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
     // The save dialog is pre-filled with the current document filename.
@@ -44,6 +93,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
     {
         let contains_focus = ctx.contains_focus();
         let mut activated = false;
+        let mut reveal_selection = false;
 
         ctx.table_begin("path");
         ctx.table_set_columns(&[0, COORD_TYPE_SAFE_MAX]);
@@ -67,6 +117,7 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
 
             if ctx.contains_focus() {
                 if name_changed && ctx.is_focused() {
+                    reveal_selection |= update_path_preview(ctx, state);
                     update_autocomplete_suggestions(state);
                 }
             } else if !state.file_picker_autocomplete.is_empty() {
@@ -79,6 +130,13 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                 let focus_list_beg = ctx.is_focused() && ctx.consume_shortcut(vk::DOWN);
                 let focus_list_end = ctx.is_focused() && ctx.consume_shortcut(vk::UP);
                 let mut autocomplete_done = ctx.consume_shortcut(vk::ESCAPE);
+                let mut suggestion_changed = false;
+                // Enter on the path input opens the entered path immediately;
+                // an autocomplete popup must not swallow the first Enter.
+                if ctx.is_focused() && ctx.consume_shortcut(vk::RETURN) {
+                    activated = true;
+                    autocomplete_done = true;
+                }
 
                 ctx.list_begin("suggestions");
                 ctx.attr_float(FloatSpec {
@@ -95,11 +153,18 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                     for (idx, suggestion) in state.file_picker_autocomplete.iter().enumerate() {
                         let sel = ctx.list_item(false, suggestion.as_str());
                         if sel != ListSelection::Unchanged {
-                            logging::log_action(&format!("AUTOCOMPLETE_SELECT: {}", suggestion.as_str()));
+                            logging::log_action(&format!(
+                                "AUTOCOMPLETE_SELECT: {}",
+                                suggestion.as_str()
+                            ));
                             state.file_picker_pending_name = suggestion.as_path().into();
+                            suggestion_changed = true;
                         }
                         if sel == ListSelection::Activated {
-                            logging::log_action(&format!("AUTOCOMPLETE_ACTIVATE: {}", suggestion.as_str()));
+                            logging::log_action(&format!(
+                                "AUTOCOMPLETE_ACTIVATE: {}",
+                                suggestion.as_str()
+                            ));
                             autocomplete_done = true;
                         }
 
@@ -116,6 +181,10 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                     }
                 }
                 ctx.list_end();
+
+                if suggestion_changed {
+                    reveal_selection |= update_path_preview(ctx, state);
+                }
 
                 // If the user typed something, we want to put focus back into the editline.
                 // TODO: The input should be processed by the editline and not simply get swallowed.
@@ -135,6 +204,14 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         }
         ctx.table_end();
 
+        if state.wants_file_picker == StateFilePicker::Open
+            && crate::native_dialog::NativeFilePicker::supported()
+            && ctx.button("browse", "Browse", ButtonStyle::default().accelerator('B'))
+        {
+            state.wants_native_browse = true;
+            ctx.needs_rerender();
+        }
+
         if state.file_picker_entries.is_none() {
             draw_dialog_saveas_refresh_files(state);
         }
@@ -150,32 +227,63 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
             },
         );
         ctx.attr_background_rgba(ctx.indexed_alpha(IndexedColor::Black, 1, 4));
+        if reveal_selection {
+            let row = state
+                .file_picker_entries
+                .as_ref()
+                .unwrap()
+                .iter()
+                .flatten()
+                .position(|entry| state.file_picker_preview.selects(entry.as_path()));
+            if let Some(row) = row {
+                ctx.scrollarea_scroll_to(Point {
+                    x: 0,
+                    y: (row as CoordType - (height - 3) / 2).max(0),
+                });
+            }
+        }
         {
             ctx.next_block_id_mixin(state.file_picker_pending_dir_revision);
             ctx.list_begin("files");
             ctx.inherit_focus();
+            let list_focused = ctx.contains_focus();
 
             for entries in state.file_picker_entries.as_ref().unwrap() {
                 for entry in entries {
-                    match ctx.list_item(false, entry.as_str()) {
+                    let selected = state.file_picker_preview.selects(entry.as_path());
+                    match ctx.list_item(selected, entry.as_str()) {
                         ListSelection::Unchanged => {}
-                        ListSelection::Selected => {
+                        ListSelection::Selected if ctx.is_focused() => {
                             logging::log_action(&format!("FILE_LIST_SELECT: {}", entry.as_str()));
-                            state.file_picker_pending_name = entry.as_path().into()
+                            state.file_picker_pending_name = entry.as_path().into();
+                            state.file_picker_preview.reset();
                         }
+                        ListSelection::Selected => {} // Preview selection preserves the typed path.
                         ListSelection::Activated => {
                             logging::log_action(&format!("FILE_LIST_ACTIVATE: {}", entry.as_str()));
+                            state.file_picker_pending_name = entry.as_path().into();
+                            state.file_picker_preview.reset();
                             activated = true;
                         }
+                    }
+                    if selected && !list_focused {
+                        let bg = ctx.indexed(IndexedColor::Green);
+                        ctx.attr_background_rgba(bg);
+                        ctx.attr_foreground_rgba(ctx.contrasted(bg));
                     }
                     ctx.attr_overflow(Overflow::TruncateMiddle);
                 }
             }
 
             // Show recent files section (only in Open dialog)
-            if state.wants_file_picker == StateFilePicker::Open && !state.config.recent_files.is_empty() {
+            if state.wants_file_picker == StateFilePicker::Open
+                && !state.config.recent_files.is_empty()
+            {
                 // Filter recent files: must exist and not be currently open
-                let recent_to_show: Vec<_> = state.config.recent_files.iter()
+                let recent_to_show: Vec<_> = state
+                    .config
+                    .recent_files
+                    .iter()
                     .filter(|rf| rf.path.exists() && !state.documents.is_path_open(&rf.path))
                     .collect();
 
@@ -191,10 +299,12 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                             ListSelection::Selected => {
                                 logging::log_action(&format!("RECENT_FILE_SELECT: {}", display));
                                 state.file_picker_pending_name = recent.path.clone();
+                                state.file_picker_preview.reset();
                             }
                             ListSelection::Activated => {
                                 logging::log_action(&format!("RECENT_FILE_ACTIVATE: {}", display));
                                 state.file_picker_pending_name = recent.path.clone();
+                                state.file_picker_preview.reset();
                                 activated = true;
                             }
                         }
@@ -212,11 +322,20 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         {
             logging::log_action("NAVIGATE_BACK: ..");
             state.file_picker_pending_name = "..".into();
+            state.file_picker_preview.reset();
             activated = true;
         }
 
         if activated {
             doit = draw_file_picker_update_path(state);
+
+            if state.wants_file_picker != StateFilePicker::Open
+                && let Some(path) = doit.as_deref()
+                && save_target_is_open_elsewhere(&state.documents, path)
+            {
+                error_log_add(ctx, state, APP_SAVE_TARGET_OPEN);
+                doit = None;
+            }
 
             // Check if the file already exists and show an overwrite warning in that case.
             if state.wants_file_picker != StateFilePicker::Open
@@ -289,8 +408,10 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
         let is_open = state.wants_file_picker == StateFilePicker::Open;
         let res = if is_open {
             state.documents.add_file_path(&path, &state.config).map(|_| ())
+        } else if save_target_is_open_elsewhere(&state.documents, &path) {
+            Err(APP_SAVE_TARGET_OPEN)
         } else if let Some(doc) = state.documents.active_mut() {
-            doc.save(Some(path.clone()))
+            save_as_and_watch(doc, &path, &state.file_watcher)
         } else {
             Ok(())
         };
@@ -306,19 +427,26 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
                 } else {
                     logging::log_file_save(&path_str);
                     logging::log_dialog_close("File Picker", "file saved");
+                    if state.settings.is_settings_path(&path)
+                        && let Err(error) = state.settings.reload()
+                    {
+                        error_log_add_message(ctx, state, error);
+                    }
                     // Save the parent directory as the last-used save folder for this project
                     if let Some(parent) = path.parent() {
                         let parent_str = parent.to_string_lossy().to_string();
                         state.config.set_project_folder(&state.startup_cwd, &parent_str);
                     }
-                    // Start watching the new file path for external modifications
-                    state.file_watcher.watch(&path);
                 }
                 ctx.needs_rerender();
                 done = true;
             }
             Err(err) => {
-                logging::log_error(&format!("Failed to {}: {}", if is_open { "open" } else { "save" }, path_str));
+                logging::log_error(&format!(
+                    "Failed to {}: {}",
+                    if is_open { "open" } else { "save" },
+                    path_str
+                ));
                 error_log_add(ctx, state, err);
             }
         }
@@ -327,17 +455,44 @@ pub fn draw_file_picker(ctx: &mut Context, state: &mut State) {
     if done {
         state.wants_file_picker = StateFilePicker::None;
         state.file_picker_pending_name = Default::default();
+        state.file_picker_preview.reset();
         state.file_picker_entries = Default::default();
         state.file_picker_overwrite_warning = Default::default();
         state.file_picker_autocomplete = Default::default();
     }
 }
 
+fn save_as_and_watch(
+    doc: &mut crate::documents::Document,
+    path: &Path,
+    watcher: &crate::watch::FileWatcher,
+) -> ogedit::apperr::Result<()> {
+    let previous = doc.path.clone();
+    doc.save(Some(path.to_owned()))?;
+    if let Some(previous) = previous {
+        watcher.unwatch(&previous);
+    }
+    if let Some(saved) = &doc.path {
+        watcher.watch(saved);
+    }
+    Ok(())
+}
+
+/// The active document is the manager's first entry. Saving onto another open
+/// document would give two independent buffers authority over the same path.
+fn save_target_is_open_elsewhere(
+    documents: &crate::documents::DocumentManager,
+    path: &Path,
+) -> bool {
+    let resolved = crate::safe_save::resolved_path(path);
+    documents.iter().skip(1).any(|document| document.path.as_ref() == Some(&resolved))
+}
+
 // Returns Some(path) if the path refers to a file.
 fn draw_file_picker_update_path(state: &mut State) -> Option<PathBuf> {
-    let old_path = state.file_picker_pending_dir.as_path();
-    let path = old_path.join(&state.file_picker_pending_name);
-    let path = path::normalize(&path);
+    let old_path =
+        state.file_picker_preview.input_directory(state.file_picker_pending_dir.as_path());
+    let path = path::join_user_input(old_path, &state.file_picker_pending_name);
 
     let (dir, name) = if path.is_dir() {
         // If the current path is C:\ and the user selects "..", we want to
@@ -366,7 +521,37 @@ fn draw_file_picker_update_path(state: &mut State) -> Option<PathBuf> {
     }
 
     state.file_picker_pending_name = name;
+    state.file_picker_preview.reset();
     if state.file_picker_pending_name.as_os_str().is_empty() { None } else { Some(path) }
+}
+
+// Preview only existing files; partial input never navigates into a nonexistent folder.
+fn update_path_preview(ctx: &mut Context, state: &mut State) -> bool {
+    if state.wants_file_picker != StateFilePicker::Open {
+        return false;
+    }
+    let before = state.file_picker_preview.selected.clone();
+    let directory = state
+        .file_picker_preview
+        .update(state.file_picker_pending_dir.as_path(), &state.file_picker_pending_name);
+    let directory_changed =
+        directory.as_deref().is_some_and(|dir| dir != state.file_picker_pending_dir.as_path());
+    if directory_changed {
+        state.file_picker_pending_dir = DisplayablePathBuf::from_path(directory.unwrap());
+        state.file_picker_entries = None;
+    }
+    let changed = directory_changed || before != state.file_picker_preview.selected;
+    if changed {
+        if state.file_picker_preview.selected.is_some() {
+            // The file may have been created since this folder was first listed.
+            state.file_picker_entries = None;
+        }
+        // A new list identity discards its previous selection without moving input focus.
+        state.file_picker_pending_dir_revision =
+            state.file_picker_pending_dir_revision.wrapping_add(1);
+        ctx.needs_rerender();
+    }
+    changed
 }
 
 fn draw_dialog_saveas_refresh_files(state: &mut State) {
@@ -409,18 +594,7 @@ fn draw_dialog_saveas_refresh_files(state: &mut State) {
     }
 
     for entries in &mut dirs_files[1..] {
-        entries.sort_by(|a, b| {
-            let a = a.as_bytes();
-            let b = b.as_bytes();
-
-            let a_is_dir = a.last() == Some(&b'/');
-            let b_is_dir = b.last() == Some(&b'/');
-
-            match b_is_dir.cmp(&a_is_dir) {
-                Ordering::Equal => icu::compare_strings(a, b),
-                other => other,
-            }
-        });
+        entries.sort_unstable_by(|a, b| icu::compare_strings(a.as_bytes(), b.as_bytes()));
     }
 
     state.file_picker_entries = Some(dirs_files);
@@ -428,49 +602,389 @@ fn draw_dialog_saveas_refresh_files(state: &mut State) {
 
 #[inline(never)]
 fn update_autocomplete_suggestions(state: &mut State) {
-    state.file_picker_autocomplete.clear();
-
-    if state.file_picker_pending_name.as_os_str().is_empty() {
+    if state.file_picker_preview.selected.is_some() {
+        state.file_picker_autocomplete.clear();
         return;
     }
+    let directory =
+        state.file_picker_preview.input_directory(state.file_picker_pending_dir.as_path());
+    let cached = if directory == state.file_picker_pending_dir.as_path() {
+        state.file_picker_entries.as_ref()
+    } else {
+        None
+    };
+    state.file_picker_autocomplete =
+        complete_entered_path(directory, &state.file_picker_pending_name, cached);
+}
 
-    let scratch = scratch_arena(None);
-    let needle = state.file_picker_pending_name.as_os_str().as_encoded_bytes();
-    let mut matches = Vec::new();
+fn complete_entered_path(
+    directory: &Path,
+    input: &Path,
+    cached: Option<&[Vec<DisplayablePathBuf>; 3]>,
+) -> Vec<DisplayablePathBuf> {
+    use std::ffi::{OsStr, OsString};
 
-    // Using binary search below we'll quickly find the lower bound
-    // of items that match the needle (= share a common prefix).
-    //
-    // The problem is finding the upper bound. Here I'm using a trick:
-    // By appending U+10FFFF (the highest possible Unicode code point)
-    // we create a needle that naturally yields an upper bound.
-    let mut needle_upper_bound = Vec::with_capacity_in(needle.len() + 4, &*scratch);
-    needle_upper_bound.extend_from_slice(needle);
-    needle_upper_bound.extend_from_slice(b"\xf4\x8f\xbf\xbf");
+    if input.as_os_str().is_empty() {
+        return Vec::new();
+    }
+    let bytes = input.as_os_str().as_encoded_bytes();
+    let quoted = bytes.first() == Some(&b'"');
+    let mut entered = path::from_user_input(input);
+    // Look inside an opening quote for suggestions while it is being typed.
+    // Commit parsing remains strict and never removes an unmatched quote.
+    if quoted
+        && entered.as_os_str().as_encoded_bytes().first() == Some(&b'"')
+        && !bytes[1..].contains(&b'"')
+    {
+        let interior = unsafe { OsStr::from_encoded_bytes_unchecked(&bytes[1..]) };
+        entered = path::from_user_input(Path::new(interior));
+    }
+    #[cfg(unix)]
+    let quoted = if directory.join(input).exists() {
+        entered = input.to_owned();
+        false
+    } else {
+        quoted
+    };
 
-    if let Some(dirs_files) = &state.file_picker_entries {
-        'outer: for entries in &dirs_files[1..] {
-            let lower = entries
-                .binary_search_by(|entry| icu::compare_strings(entry.as_bytes(), needle))
-                .unwrap_or_else(|i| i);
-
-            for entry in &entries[lower..] {
-                let haystack = entry.as_bytes();
-                match icu::compare_strings(haystack, &needle_upper_bound) {
-                    Ordering::Less => {
-                        matches.push(entry.clone());
-                        if matches.len() >= 5 {
-                            break 'outer; // Limit to 5 suggestions
-                        }
-                    }
-                    // We're looking for suggestions, not for matches.
-                    Ordering::Equal => {}
-                    // No more matches possible.
-                    Ordering::Greater => break,
+    let trailing_separator = entered
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|&byte| byte == b'/' || cfg!(windows) && byte == b'\\');
+    let (prefix, needle) = if trailing_separator {
+        (entered.as_path(), OsStr::new(""))
+    } else {
+        (entered.parent().unwrap_or_else(|| Path::new("")), entered.file_name().unwrap_or_default())
+    };
+    let scan_dir = path::normalize(&directory.join(prefix));
+    let needle = needle.to_string_lossy();
+    let needle = if cfg!(windows) { needle.to_lowercase() } else { needle.into_owned() };
+    let mut matches: Vec<(bool, String, OsString)> = Vec::new();
+    let mut consider = |name: OsString, is_dir: bool| {
+        let text = name.to_string_lossy();
+        let matches_prefix = if cfg!(windows) {
+            text.to_lowercase().starts_with(&needle)
+        } else {
+            text.starts_with(&needle)
+        };
+        if !matches_prefix {
+            return;
+        }
+        let candidate = (!is_dir, text.into_owned(), name);
+        let index = matches
+            .binary_search_by(|entry| {
+                entry
+                    .0
+                    .cmp(&candidate.0)
+                    .then_with(|| icu::compare_strings(entry.1.as_bytes(), candidate.1.as_bytes()))
+                    .then_with(|| entry.2.cmp(&candidate.2))
+            })
+            .unwrap_or_else(|i| i);
+        if index < 5 {
+            matches.insert(index, candidate);
+            matches.truncate(5);
+        }
+    };
+    if scan_dir == path::normalize(directory)
+        && let Some(cached) = cached
+    {
+        for (index, entries) in cached.iter().enumerate().skip(1) {
+            for entry in entries {
+                if let Some(name) = entry.as_path().file_name() {
+                    consider(name.to_owned(), index == 1);
                 }
             }
         }
+    } else if let Ok(entries) = fs::read_dir(&scan_dir) {
+        for entry in entries.flatten() {
+            let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+            consider(entry.file_name(), is_dir);
+        }
+    }
+    matches
+        .into_iter()
+        .map(|(is_file, _, name)| {
+            let mut suggestion = prefix.join(name).into_os_string();
+            if !is_file {
+                suggestion.push(std::path::MAIN_SEPARATOR_STR);
+            }
+            if quoted {
+                let mut wrapped = OsString::from("\"");
+                wrapped.push(suggestion);
+                wrapped.push("\"");
+                suggestion = wrapped;
+            }
+            DisplayablePathBuf::from_path(PathBuf::from(suggestion))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod save_as_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_save_as_releases_previous_directory_watches_and_failed_save_keeps_them() {
+        let _runtime = crate::test_runtime::lock();
+        let fixture = PreviewFixture::new();
+        let watcher = crate::watch::FileWatcher::new();
+        let mut documents = crate::documents::DocumentManager::default();
+        let doc = documents.add_untitled(&crate::config::Config::default()).unwrap();
+        doc.buffer.borrow_mut().write_raw(b"keep this");
+        for i in 0..32 {
+            let directory = fixture.0.join(format!("save-{i}"));
+            fs::create_dir(&directory).unwrap();
+            save_as_and_watch(doc, &directory.join("notes.txt"), &watcher).unwrap();
+            assert_eq!(watcher.registration_counts(), (1, 1));
+            let before = doc.path.clone();
+            assert!(save_as_and_watch(doc, &directory, &watcher).is_err());
+            assert_eq!(doc.path, before);
+            assert_eq!(watcher.registration_counts(), (1, 1));
+        }
+        drop(watcher);
+        drop(documents);
     }
 
-    state.file_picker_autocomplete = matches;
+    struct PreviewFixture(PathBuf);
+
+    impl PreviewFixture {
+        fn new() -> Self {
+            let suffix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir()
+                .join(format!("ogedit-path-preview-{}-{suffix}", std::process::id()));
+            fs::create_dir_all(root.join("sub folder")).unwrap();
+            fs::write(root.join("sub folder/CLAUDE.md"), "fixture\nsecond line").unwrap();
+            fs::write(root.join("sub folder/other.txt"), "other fixture").unwrap();
+            Self(root)
+        }
+    }
+
+    impl Drop for PreviewFixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn preview_follows_quoted_paths_and_line_suffixes() {
+        let fixture = PreviewFixture::new();
+        let directory = fixture.0.join("sub folder");
+        let target = directory.join("CLAUDE.md");
+        for input in [
+            target.clone(),
+            PathBuf::from(format!("\"{}\"", target.display())),
+            PathBuf::from(format!("\"{}\":2:3", target.display())),
+        ] {
+            let mut preview = FilePickerPreview::default();
+            assert_eq!(preview.update(&fixture.0, &input), Some(directory.clone()));
+            assert!(preview.selects(Path::new("CLAUDE.md")));
+            assert!(!preview.selects(Path::new("other.txt")));
+        }
+        #[cfg(windows)]
+        {
+            let input = PathBuf::from(
+                format!("\"{}\\claude.md\"", directory.display())
+                    .replace("\\sub folder", "/sub folder"),
+            );
+            let mut preview = FilePickerPreview::default();
+            assert_eq!(preview.update(&fixture.0, &input), Some(directory));
+            assert!(preview.selects(Path::new("CLAUDE.md")));
+        }
+    }
+
+    #[test]
+    fn preview_keeps_relative_input_anchored_until_cleared_or_navigation() {
+        let fixture = PreviewFixture::new();
+        let directory = fixture.0.join("sub folder");
+        let input = Path::new("sub folder/CLAUDE.md");
+        let mut preview = FilePickerPreview::default();
+        assert_eq!(preview.update(&fixture.0, input), Some(directory.clone()));
+        // Renders, further typing, Enter, and Browse all use the original base.
+        assert_eq!(preview.update(&directory, input), Some(directory.clone()));
+        assert_eq!(
+            path::join_user_input(preview.input_directory(&directory), input),
+            directory.join("CLAUDE.md")
+        );
+        assert_eq!(
+            preview.update(&directory, Path::new("sub folder/other.txt")),
+            Some(directory.clone())
+        );
+        assert!(preview.selects(Path::new("other.txt")));
+        assert!(!preview.selects(Path::new("CLAUDE.md")));
+        assert_eq!(preview.update(&directory, Path::new("")), None);
+        assert_eq!(preview.input_directory(&directory), directory);
+        assert_eq!(preview.update(&directory, Path::new("CLAUDE.md")), Some(directory.clone()));
+        preview.reset();
+        assert_eq!(preview.input_directory(&fixture.0), fixture.0);
+    }
+
+    #[test]
+    fn replacing_an_absolute_path_uses_the_previewed_directory() {
+        let fixture = PreviewFixture::new();
+        let directory = fixture.0.join("sub folder");
+        let mut preview = FilePickerPreview::default();
+        assert_eq!(
+            preview.update(&fixture.0, &directory.join("CLAUDE.md")),
+            Some(directory.clone())
+        );
+        assert_eq!(preview.update(&directory, Path::new("other.txt")), Some(directory));
+        assert!(preview.selects(Path::new("other.txt")));
+    }
+
+    #[test]
+    fn incomplete_paths_remove_preview_selection_without_changing_folder() {
+        let fixture = PreviewFixture::new();
+        let directory = fixture.0.join("sub folder");
+        let mut preview = FilePickerPreview::default();
+        assert_eq!(
+            preview.update(&fixture.0, Path::new("sub folder/CLAUDE.md")),
+            Some(directory.clone())
+        );
+        for input in
+            ["sub folder/CLAU", "missing/CLAUDE.md", "sub folder", "\"sub folder/CLAUDE.md"]
+        {
+            assert_eq!(preview.update(&directory, Path::new(input)), None, "{input}");
+            assert!(preview.selected.is_none());
+            assert_eq!(preview.input_directory(&directory), fixture.0);
+        }
+    }
+
+    #[test]
+    fn save_as_cannot_alias_another_open_buffer() {
+        let _runtime = crate::test_runtime::lock();
+        let suffix =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir()
+            .join(format!("ogedit-saveas-open-{}-{suffix}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let first = directory.join("first.txt");
+        let second = directory.join("second.txt");
+        fs::write(&first, "first contents").unwrap();
+        fs::write(&second, "second contents").unwrap();
+        let mut documents = crate::documents::DocumentManager::default();
+        let config = crate::config::Config::default();
+        documents.add_file_path(&first, &config).unwrap();
+        documents.add_file_path(&second, &config).unwrap();
+        assert!(save_target_is_open_elsewhere(&documents, &first));
+        assert!(save_target_is_open_elsewhere(&documents, &directory.join(".").join("first.txt")));
+        assert!(!save_target_is_open_elsewhere(&documents, &second));
+        assert!(!save_target_is_open_elsewhere(&documents, &directory.join("new.txt")));
+        drop(documents);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn completion_keeps_natural_top_five_in_cached_and_scanned_directories() {
+        let _runtime = crate::test_runtime::lock();
+        icu::init().unwrap();
+        let fixture = PreviewFixture::new();
+        let directory = fixture.0.join("natural");
+        fs::create_dir(&directory).unwrap();
+        let files = [
+            "file100.txt",
+            "file10.txt",
+            "file30.txt",
+            "file2.txt",
+            "file20.txt",
+            "file1.txt",
+            "file11.txt",
+        ];
+        let dirs = ["dir10", "dir2", "dir1"];
+        for file in files {
+            fs::write(directory.join(file), "fixture").unwrap();
+        }
+        for dir in dirs {
+            fs::create_dir(directory.join(dir)).unwrap();
+        }
+        let cached = [
+            Vec::new(),
+            dirs.into_iter()
+                .map(|name| DisplayablePathBuf::from_path(PathBuf::from(name)))
+                .collect(),
+            files
+                .into_iter()
+                .map(|name| DisplayablePathBuf::from_path(PathBuf::from(name)))
+                .collect(),
+        ];
+        let names = |matches: Vec<DisplayablePathBuf>| {
+            matches
+                .into_iter()
+                .map(|entry| entry.as_path().file_name().unwrap().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        for cache in [Some(&cached), None] {
+            assert_eq!(
+                names(complete_entered_path(&directory, Path::new("file"), cache)),
+                ["file1.txt", "file2.txt", "file10.txt", "file11.txt", "file20.txt"]
+            );
+            assert_eq!(
+                names(complete_entered_path(&directory, Path::new("./"), cache)),
+                ["dir1", "dir2", "dir10", "file1.txt", "file2.txt"]
+            );
+        }
+        let quoted = complete_entered_path(&fixture.0, Path::new(r#""natural/file"#), None);
+        assert_eq!(quoted.len(), 5);
+        let resolved: Vec<_> =
+            quoted.iter().map(|entry| path::join_user_input(&fixture.0, entry.as_path())).collect();
+        let expected: Vec<_> = ["file1.txt", "file2.txt", "file10.txt", "file11.txt", "file20.txt"]
+            .into_iter()
+            .map(|name| directory.join(name))
+            .collect();
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn completion_breaks_equivalent_unicode_collation_ties_by_original_name() {
+        let _runtime = crate::test_runtime::lock();
+        icu::init().unwrap();
+        let first = "cafe\u{301}.txt";
+        let second = "café.txt";
+        assert!(icu::compare_strings(first.as_bytes(), second.as_bytes()).is_eq());
+        for order in [[first, second], [second, first]] {
+            let cached = [
+                Vec::new(),
+                Vec::new(),
+                order
+                    .into_iter()
+                    .map(|name| DisplayablePathBuf::from_path(PathBuf::from(name)))
+                    .collect(),
+            ];
+            let matches = complete_entered_path(Path::new("."), Path::new("caf"), Some(&cached));
+            let actual: Vec<_> = matches.iter().map(|entry| entry.as_path().as_os_str()).collect();
+            let mut expected = [std::ffi::OsStr::new(first), std::ffi::OsStr::new(second)];
+            expected.sort();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn completion_resolves_typed_parent_paths_and_quote_wrappers() {
+        let root = std::env::temp_dir().join(format!("ogedit-completion-{}", std::process::id()));
+        let directory = root.join("sub folder");
+        fs::create_dir_all(&directory).unwrap();
+        let target = directory.join("CLAUDE.md");
+        fs::write(&target, "data").unwrap();
+        fs::write(directory.join("config.toml"), "data").unwrap();
+        for input in [r#""sub folder/CL"#, r#""sub folder/CL""#, "sub folder/CL"] {
+            let matches = complete_entered_path(&root, Path::new(input), None);
+            assert_eq!(matches.len(), 1, "{input}");
+            assert_eq!(path::join_user_input(&root, matches[0].as_path()), target);
+        }
+        #[cfg(windows)]
+        {
+            let matches = complete_entered_path(&root, Path::new(r#""sub folder\CL"#), None);
+            assert_eq!(matches.len(), 1);
+            assert_eq!(path::join_user_input(&root, matches[0].as_path()), target);
+            let input =
+                format!("\"{}\"", directory.join("cl").to_string_lossy().replace('\\', "/"));
+            let matches = complete_entered_path(&root, Path::new(&input), None);
+            assert_eq!(matches.len(), 1);
+            assert_eq!(path::join_user_input(&root, matches[0].as_path()), target);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }

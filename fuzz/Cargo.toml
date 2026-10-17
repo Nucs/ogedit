@@ -1,0 +1,21 @@
+[package]
+name = "ogedit-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+ogedit = { path = ".." }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "highlighter"
+path = "fuzz_targets/highlighter.rs"
+test = false
+doc = false
+bench = false

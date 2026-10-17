@@ -1,0 +1,2 @@
+# Historical unified diffs retain their original whitespace and context markers.
+docs/legacy-audit/*.patch -whitespace

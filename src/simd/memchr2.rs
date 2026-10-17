@@ -16,13 +16,15 @@ pub fn memchr2(needle1: u8, needle2: u8, haystack: &[u8], offset: usize) -> usiz
         let end = beg.add(haystack.len());
         let it = beg.add(offset.min(haystack.len()));
         let it = memchr2_raw(needle1, needle2, it, end);
-        it.offset_from_unsigned(beg)
+        let offset = it.offset_from_unsigned(beg);
+        debug_assert!(offset <= haystack.len());
+        offset
     }
 }
 
 unsafe fn memchr2_raw(needle1: u8, needle2: u8, beg: *const u8, end: *const u8) -> *const u8 {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "loongarch64"))]
-    return unsafe { MEMCHR2_DISPATCH(needle1, needle2, beg, end) };
+    return unsafe { memchr2_dispatch(needle1, needle2, beg, end) };
 
     #[cfg(target_arch = "aarch64")]
     return unsafe { memchr2_neon(needle1, needle2, beg, end) };
@@ -49,22 +51,18 @@ unsafe fn memchr2_fallback(
     }
 }
 
-// In order to make `memchr2_raw` slim and fast, we use a function pointer that updates
-// itself to the correct implementation on the first call. This reduces binary size.
-// It would also reduce branches if we had >2 implementations (a jump still needs to be predicted).
-// NOTE that this ONLY works if Control Flow Guard is disabled on Windows.
+// Cache hardware dispatch once; background search and UI threads may enter concurrently.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "loongarch64"))]
-static mut MEMCHR2_DISPATCH: unsafe fn(
-    needle1: u8,
-    needle2: u8,
-    beg: *const u8,
-    end: *const u8,
-) -> *const u8 = memchr2_dispatch;
+type Memchr2Fn = unsafe fn(needle1: u8, needle2: u8, beg: *const u8, end: *const u8) -> *const u8;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "loongarch64"))]
+static MEMCHR2_DISPATCH: std::sync::OnceLock<Memchr2Fn> = std::sync::OnceLock::new();
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 unsafe fn memchr2_dispatch(needle1: u8, needle2: u8, beg: *const u8, end: *const u8) -> *const u8 {
-    let func = if is_x86_feature_detected!("avx2") { memchr2_avx2 } else { memchr2_fallback };
-    unsafe { MEMCHR2_DISPATCH = func };
+    let func = MEMCHR2_DISPATCH.get_or_init(|| {
+        if is_x86_feature_detected!("avx2") { memchr2_avx2 } else { memchr2_fallback }
+    });
     unsafe { func(needle1, needle2, beg, end) }
 }
 
@@ -106,14 +104,16 @@ unsafe fn memchr2_avx2(needle1: u8, needle2: u8, mut beg: *const u8, end: *const
 unsafe fn memchr2_dispatch(needle1: u8, needle2: u8, beg: *const u8, end: *const u8) -> *const u8 {
     use std::arch::is_loongarch_feature_detected;
 
-    let func = if is_loongarch_feature_detected!("lasx") {
-        memchr2_lasx
-    } else if is_loongarch_feature_detected!("lsx") {
-        memchr2_lsx
-    } else {
-        memchr2_fallback
-    };
-    unsafe { MEMCHR2_DISPATCH = func };
+    let func = MEMCHR2_DISPATCH.get_or_init(|| {
+        if is_loongarch_feature_detected!("lasx") {
+            memchr2_lasx
+        } else if is_loongarch_feature_detected!("lsx") {
+            memchr2_lsx
+        } else {
+            memchr2_fallback
+        }
+    });
+
     unsafe { func(needle1, needle2, beg, end) }
 }
 
@@ -195,7 +195,7 @@ unsafe fn memchr2_neon(needle1: u8, needle2: u8, mut beg: *const u8, end: *const
             let n2 = vdupq_n_u8(needle2);
 
             loop {
-                let v = vld1q_u8(beg as *const _);
+                let v = vld1q_u8(beg.cast());
                 let a = vceqq_u8(v, n1);
                 let b = vceqq_u8(v, n2);
                 let c = vorrq_u8(a, b);
@@ -226,7 +226,7 @@ mod tests {
     use std::slice;
 
     use super::*;
-    use crate::sys;
+    use crate::sys::{virtual_commit, virtual_reserve};
 
     #[test]
     fn test_empty() {
@@ -265,8 +265,8 @@ mod tests {
             const PAGE_SIZE: usize = 64 * 1024; // 64 KiB to cover many architectures.
 
             // 3 pages: uncommitted, committed, uncommitted
-            let ptr = sys::virtual_reserve(PAGE_SIZE * 3).unwrap();
-            sys::virtual_commit(ptr.add(PAGE_SIZE), PAGE_SIZE).unwrap();
+            let ptr = virtual_reserve(PAGE_SIZE * 3).unwrap();
+            virtual_commit(ptr.add(PAGE_SIZE), PAGE_SIZE).unwrap();
             slice::from_raw_parts_mut(ptr.add(PAGE_SIZE).as_ptr(), PAGE_SIZE)
         };
 

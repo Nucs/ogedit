@@ -1,0 +1,5098 @@
+{
+  "review_date": "2026-10-17",
+  "cutoff_local": "2026-10-17T00:00:00+03:00",
+  "fork_base": "82cc84a610ded54d57f956285a8c4307c74bf364",
+  "legacy_head": "01cf53f500831993d59d677fef92bc224b2e34bd",
+  "upstream_before_cutoff": "cb6de0a8966aecd01d19a3541dab1829d0e679ca",
+  "fork_commits": [
+    {
+      "sha": "82f2e4204df9d285d730c4b68dfec64309d5b458",
+      "author_date": "2025-11-27T07:55:59+02:00",
+      "commit_date": "2025-11-27T07:57:08+02:00",
+      "subject": "Rename project to ogedit and add comprehensive documentation",
+      "files": [
+        {
+          "status": "M",
+          "path": ".gitignore"
+        },
+        {
+          "status": "A",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/localization.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        }
+      ],
+      "stat": "12 files changed, 690 insertions(+), 59 deletions(-)",
+      "areas": [
+        "identity"
+      ],
+      "review": "Renames Cargo package/binary, imports and CLI help/version to ogedit; adds developer documentation and dist ignore. The Cargo dependency lockfile is also refreshed."
+    },
+    {
+      "sha": "249501f2d8821a3c497e16bf23fcea763510cb30",
+      "author_date": "2025-11-27T08:10:10+02:00",
+      "commit_date": "2025-11-27T08:12:59+02:00",
+      "subject": "Add persistent Word Wrap configuration",
+      "files": [
+        {
+          "status": "A",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        }
+      ],
+      "stat": "6 files changed, 279 insertions(+), 34 deletions(-)",
+      "areas": [
+        "settings"
+      ],
+      "review": "Adds ~/.ogedit/state.json, word-wrap persistence, startup defaults, JSON parsing/serialization and corrupt-config backup. Word wrap itself is inherited from Edit."
+    },
+    {
+      "sha": "940f30b50db1faa189fe664fbcdfc7e43a2d3ea7",
+      "author_date": "2025-11-27T08:25:33+02:00",
+      "commit_date": "2025-11-27T08:25:33+02:00",
+      "subject": "Update About dialog with OGEdit fork information",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        }
+      ],
+      "stat": "3 files changed, 114 insertions(+), 1 deletion(-)",
+      "areas": [
+        "identity",
+        "duplicate"
+      ],
+      "review": "Updates About attribution AND introduces the duplicate-line/selection implementation, Edit > Duplicate and its English localization. The title understates the code change."
+    },
+    {
+      "sha": "1af1a9b3d8da89ce629fd3c9d7be644189c0542f",
+      "author_date": "2025-11-27T08:40:55+02:00",
+      "commit_date": "2025-11-27T08:52:47+02:00",
+      "subject": "Add Ctrl+D duplicate line feature with comprehensive tests",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+)",
+      "areas": [
+        "duplicate"
+      ],
+      "review": "Adds the two-line Ctrl+D shortcut dispatch. Despite the subject/body, this diff contains no tests; the implementation had landed in 940f30b."
+    },
+    {
+      "sha": "b8f09efc12241852e23a6c632b96d27f322aef81",
+      "author_date": "2025-11-27T16:36:53+02:00",
+      "commit_date": "2025-11-27T22:55:16+02:00",
+      "subject": "Add comprehensive debug logging system",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "A",
+          "path": "src/bin/edit/logging.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        }
+      ],
+      "stat": "7 files changed, 824 insertions(+), 24 deletions(-)",
+      "areas": [
+        "logging"
+      ],
+      "review": "Adds per-session log files and instrumentation for input, search, menus, file operations, settings and cursor state. Logs include user text by default in the historical snapshot."
+    },
+    {
+      "sha": "39d4f92589f8dad71dca25189f94365e6cb34d33",
+      "author_date": "2025-11-27T23:03:41+02:00",
+      "commit_date": "2025-11-27T23:11:48+02:00",
+      "subject": "Document debug logging system in CLAUDE.md",
+      "files": [
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/logging.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        }
+      ],
+      "stat": "3 files changed, 96 insertions(+), 1 deletion(-)",
+      "areas": [
+        "logging"
+      ],
+      "review": "Adds a panic hook, startup/resize logging and documentation; this is not a documentation-only change."
+    },
+    {
+      "sha": "7686004cb5cd729fafa360a28887449e4c224599",
+      "author_date": "2025-11-28T00:12:14+02:00",
+      "commit_date": "2025-11-28T00:12:14+02:00",
+      "subject": "Fix Ctrl+D duplicate line crashes and improve behavior",
+      "files": [
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/logging.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "6 files changed, 590 insertions(+), 170 deletions(-)",
+      "areas": [
+        "duplicate",
+        "logging"
+      ],
+      "review": "Moves duplication into TextBuffer, fixes line/selection and wrap handling, adds cursor byte offsets; also logs selected content and whole-document idle snapshots."
+    },
+    {
+      "sha": "26c591d7ce9cab58a37a5135fc6071bbcc714cc1",
+      "author_date": "2025-11-28T06:46:51+02:00",
+      "commit_date": "2025-11-28T06:51:49+02:00",
+      "subject": "Expand configuration system with more settings and comments",
+      "files": [
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        }
+      ],
+      "stat": "4 files changed, 237 insertions(+), 53 deletions(-)",
+      "areas": [
+        "settings"
+      ],
+      "review": "Adds persistent indentation, tab size, newline, line numbers, current-line highlight, final-newline and ruler defaults; supports full-line // comments and saves status-bar changes."
+    },
+    {
+      "sha": "e3c588b1de7d30512acc311e28c590898222a369",
+      "author_date": "2025-11-28T07:19:55+02:00",
+      "commit_date": "2025-11-28T07:19:55+02:00",
+      "subject": "Add file modification tracking (Commit 1: timestamp detection)",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        }
+      ],
+      "stat": "1 file changed, 38 insertions(+)",
+      "areas": [
+        "reload"
+      ],
+      "review": "Captures file mtimes on open/save/reload and exposes has_file_changed_on_disk; not yet a complete user-visible reload flow."
+    },
+    {
+      "sha": "b88162977fa2776aee837f6821c4e1d4fc0b6673",
+      "author_date": "2025-11-28T10:43:51+02:00",
+      "commit_date": "2025-11-28T10:43:51+02:00",
+      "subject": "Add status bar reload indicator and menu (Commit 2: UI integration)",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        }
+      ],
+      "stat": "2 files changed, 63 insertions(+)",
+      "areas": [
+        "reload"
+      ],
+      "review": "Adds a changed-on-disk status button and reload popup. That particular status UI is removed in cb15dae and replaced by File-menu reload in 3bea69e."
+    },
+    {
+      "sha": "30960dee92518c4bf5d8ada9f77b72fde3e772b1",
+      "author_date": "2025-11-28T21:30:41+02:00",
+      "commit_date": "2025-11-28T21:30:41+02:00",
+      "subject": "Update README for OGEdit fork and improve CI workflow",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        }
+      ],
+      "stat": "3 files changed, 185 insertions(+), 74 deletions(-)",
+      "areas": [
+        "delivery",
+        "reload",
+        "docs"
+      ],
+      "review": "Rewrites README for the fork; adds macOS CI and optimized-build checks, cache fallback and removes formatting check; shortens the temporary reload status label."
+    },
+    {
+      "sha": "c42460ae0f6ec650ff3e8f20271ffea40efab607",
+      "author_date": "2025-11-28T21:33:42+02:00",
+      "commit_date": "2025-11-28T21:33:42+02:00",
+      "subject": "Fix edit:: to use imported CoordType",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)",
+      "areas": [
+        "build"
+      ],
+      "review": "Fixes a remaining edit::helpers::CoordType reference in main after the crate rename."
+    },
+    {
+      "sha": "c2786f856d155688b9f4c18aeb4d241ef37f6f6c",
+      "author_date": "2025-11-28T21:39:13+02:00",
+      "commit_date": "2025-11-28T21:39:13+02:00",
+      "subject": "Fix edit:: to ogedit:: in benchmarks",
+      "files": [
+        {
+          "status": "M",
+          "path": "benches/lib.rs"
+        }
+      ],
+      "stat": "1 file changed, 3 insertions(+), 3 deletions(-)",
+      "areas": [
+        "build"
+      ],
+      "review": "Renames benchmark crate imports from edit to ogedit."
+    },
+    {
+      "sha": "d87a7f8bb53e5f0d3cab6afa4e30fd7928b00983",
+      "author_date": "2025-11-28T21:42:08+02:00",
+      "commit_date": "2025-11-28T21:42:08+02:00",
+      "subject": "Fix function pointer cast in Unix signal handler",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/sys/unix.rs"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)",
+      "areas": [
+        "build"
+      ],
+      "review": "Uses an intermediate pointer cast for the Unix signal handler to satisfy the function-cast lint."
+    },
+    {
+      "sha": "5ddfbf9c0da4ffe5dd99e19ab4397aef232daca8",
+      "author_date": "2025-11-28T21:44:33+02:00",
+      "commit_date": "2025-11-28T21:44:33+02:00",
+      "subject": "Use is_some_and instead of map_or(false, ...)",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)",
+      "areas": [
+        "build"
+      ],
+      "review": "Replaces map_or(false, ...) with is_some_and in status-bar change detection; behavior-preserving lint cleanup."
+    },
+    {
+      "sha": "a7ce6a9d659a5c74bbc2d205f809ccf3bc3f1fd2",
+      "author_date": "2025-11-28T22:00:31+02:00",
+      "commit_date": "2025-11-28T22:00:31+02:00",
+      "subject": "Release v1.2.2",
+      "files": [
+        {
+          "status": "A",
+          "path": ".github/workflows/release.yml"
+        },
+        {
+          "status": "D",
+          "path": ".github/workflows/winget.yml"
+        },
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        }
+      ],
+      "stat": "4 files changed, 301 insertions(+), 41 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Bumps to 1.2.2, adds five-target release ZIP/checksum workflow, removes upstream WinGet workflow and documents fork release/versioning."
+    },
+    {
+      "sha": "3f89875f79da41371205b723228921df4ae71463",
+      "author_date": "2025-11-29T09:47:57+02:00",
+      "commit_date": "2025-11-29T09:47:57+02:00",
+      "subject": "Add copyright notice for OGEdit fork",
+      "files": [
+        {
+          "status": "M",
+          "path": "LICENSE"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+)",
+      "areas": [
+        "identity"
+      ],
+      "review": "Adds the fork copyright line to LICENSE while retaining the Microsoft license."
+    },
+    {
+      "sha": "6344b1ac749560711874e30774afcd5f21534b24",
+      "author_date": "2025-11-29T09:48:35+02:00",
+      "commit_date": "2025-11-29T09:48:35+02:00",
+      "subject": "Add MSI installer support for Windows releases",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/release.yml"
+        },
+        {
+          "status": "A",
+          "path": "wix/License.rtf"
+        },
+        {
+          "status": "A",
+          "path": "wix/main.wxs"
+        }
+      ],
+      "stat": "3 files changed, 267 insertions(+), 6 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Adds WiX MSI packages for Windows x64/ARM64, PATH integration, shortcuts, license and directory UI."
+    },
+    {
+      "sha": "fcc68d8f23d280dd22207779e77e6e62e6dad63f",
+      "author_date": "2025-11-29T09:49:18+02:00",
+      "commit_date": "2025-11-29T09:49:18+02:00",
+      "subject": "Add per-project folder memory for Save As dialog",
+      "files": [
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        }
+      ],
+      "stat": "6 files changed, 288 insertions(+), 12 deletions(-)",
+      "areas": [
+        "settings",
+        "reload"
+      ],
+      "review": "Persists last Save As directory keyed by launch working directory; chooses that directory on startup. Also introduces interim frame/time-based disk-check scheduling."
+    },
+    {
+      "sha": "cb15dae97219a1bf4654d0593e3b171d86f54959",
+      "author_date": "2025-11-29T09:49:43+02:00",
+      "commit_date": "2025-11-29T09:49:43+02:00",
+      "subject": "Add recent files feature to Go to File dialog (Ctrl+P)",
+      "files": [
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        }
+      ],
+      "stat": "9 files changed, 372 insertions(+), 65 deletions(-)",
+      "areas": [
+        "recent",
+        "reload",
+        "identity"
+      ],
+      "review": "Adds up to 100 timestamped recent paths to Ctrl+P and Open, filters missing/open files, tracks startup/dialog opens, updates About maintainer. Also removes the earlier status reload popup and changes polling."
+    },
+    {
+      "sha": "3bea69ea193a7db2de0fa128a2210a87033fa986",
+      "author_date": "2025-11-29T09:54:48+02:00",
+      "commit_date": "2025-11-29T09:54:48+02:00",
+      "subject": "Add reload dialog with confirmation for all scenarios",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "6 files changed, 277 insertions(+), 9 deletions(-)",
+      "areas": [
+        "reload",
+        "logging"
+      ],
+      "review": "Adds File > Reload/F5 and dirty/external/both confirmation variants with localization, reload state and flags. Fixes idle snapshot logging marking documents clean by introducing read-only copy_content."
+    },
+    {
+      "sha": "f7029afb89b28111b7ccf804263eba634ca61a73",
+      "author_date": "2025-11-29T10:01:34+02:00",
+      "commit_date": "2025-11-29T10:01:34+02:00",
+      "subject": "Add file watcher for detecting external modifications",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        },
+        {
+          "status": "A",
+          "path": "src/bin/edit/watch.rs"
+        }
+      ],
+      "stat": "6 files changed, 710 insertions(+), 2 deletions(-)",
+      "areas": [
+        "watch"
+      ],
+      "review": "Adds background native watching (ReadDirectoryChangesW/inotify/kqueue) with timestamp fallback, register/unregister lifecycle and event handling in editor state."
+    },
+    {
+      "sha": "337772f1f13d907e1a08f765820a487aec775618",
+      "author_date": "2025-11-29T12:03:47+02:00",
+      "commit_date": "2025-11-29T12:03:47+02:00",
+      "subject": "Fix file watcher and remove duplicate polling",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/watch.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/tui.rs"
+        }
+      ],
+      "stat": "5 files changed, 307 insertions(+), 298 deletions(-)",
+      "areas": [
+        "watch",
+        "shortcuts"
+      ],
+      "review": "Reworks Windows overlapped watcher lifetime/events, canonicalizes paths, joins worker on drop, adjusts Unix debounce and fallback polling; removes duplicate frame polling and renders function-key menu shortcuts."
+    },
+    {
+      "sha": "9eb7304a8fd9c5ea1e896dd5a99d18eb67b2d7ef",
+      "author_date": "2025-11-29T14:58:48+02:00",
+      "commit_date": "2025-11-29T14:58:48+02:00",
+      "subject": "Add integration tests for file watcher",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/watch.rs"
+        }
+      ],
+      "stat": "2 files changed, 396 insertions(+), 1 deletion(-)",
+      "areas": [
+        "tests"
+      ],
+      "review": "Adds native watcher integration tests and updates the lockfile. The OS-backed tests include timing/wait helpers."
+    },
+    {
+      "sha": "d120e7bf914c17eeb1aa5926d21b4ab4238ad23b",
+      "author_date": "2025-11-29T17:53:31+02:00",
+      "commit_date": "2025-11-29T17:53:31+02:00",
+      "subject": "Fix crash when pasting over selection with word wrap enabled",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "1 file changed, 7 insertions(+), 2 deletions(-)",
+      "areas": [
+        "editing-fix"
+      ],
+      "review": "Recomputes the safe cursor start after paste-over-selection with word wrap to avoid using visual positions from the old buffer."
+    },
+    {
+      "sha": "0ff7f96097782386708dc3286e67c0a28673779c",
+      "author_date": "2025-11-29T18:10:43+02:00",
+      "commit_date": "2025-11-29T18:10:43+02:00",
+      "subject": "Add selection auto-highlight feature",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "1 file changed, 176 insertions(+)",
+      "areas": [
+        "highlight"
+      ],
+      "review": "Adds identical-selection occurrence highlighting, selection eligibility rules, generation/selection caching and a 1,000-match display cap."
+    },
+    {
+      "sha": "09da7a6f6717ffb176859505c1ba0b068937972b",
+      "author_date": "2025-11-29T18:41:03+02:00",
+      "commit_date": "2025-11-29T18:41:03+02:00",
+      "subject": "Restore cursor position after file reload",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "2 files changed, 180 insertions(+), 3 deletions(-)",
+      "areas": [
+        "reload",
+        "editing-fix"
+      ],
+      "review": "Restores cursor on reload using saved-line matching/nearest location; adds line extraction/matching helpers and updates visual statistics before setting the cursor."
+    },
+    {
+      "sha": "6a5c9ed5b756c3276f1a277b8d90d8996498204f",
+      "author_date": "2025-11-29T18:41:39+02:00",
+      "commit_date": "2025-11-29T18:41:39+02:00",
+      "subject": "Add configurable keyboard shortcuts",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/input.rs"
+        }
+      ],
+      "stat": "4 files changed, 410 insertions(+), 42 deletions(-)",
+      "areas": [
+        "shortcuts"
+      ],
+      "review": "Adds serialized configurable file/edit/view shortcuts, parser/defaults and menu/global dispatch; implements InputKey display formatting."
+    },
+    {
+      "sha": "99b33af35aaaf1b506d01dafafa8202523d11e88",
+      "author_date": "2025-11-29T18:42:03+02:00",
+      "commit_date": "2025-11-29T18:42:03+02:00",
+      "subject": "Update documentation for configurable hotkeys",
+      "files": [
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        }
+      ],
+      "stat": "2 files changed, 83 insertions(+)",
+      "areas": [
+        "docs"
+      ],
+      "review": "Documents shortcut names, keys, modifiers and customization examples; no product-code change."
+    },
+    {
+      "sha": "1d854632e39c2f8a69c1de1acfd1f0ab6ab98325",
+      "author_date": "2025-11-29T18:49:50+02:00",
+      "commit_date": "2025-11-29T18:49:50+02:00",
+      "subject": "Suppress dead_code warning for safe_start field",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+)",
+      "areas": [
+        "build"
+      ],
+      "review": "Allows the now-unused EditInfo.safe_start field after the wrapped-edit fix; lint-only change."
+    },
+    {
+      "sha": "3c2812355c7e46283c4c71f4dc0f1d0e5220db23",
+      "author_date": "2025-11-29T18:54:40+02:00",
+      "commit_date": "2025-11-29T18:57:14+02:00",
+      "subject": "Fix clippy warnings",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/watch.rs"
+        }
+      ],
+      "stat": "3 files changed, 18 insertions(+), 20 deletions(-)",
+      "areas": [
+        "build"
+      ],
+      "review": "Lint-only parser/reload/watcher simplification (strip_prefix, direct returns, iteration)."
+    },
+    {
+      "sha": "1b220e4109d9631a082a5352a4465d008334a243",
+      "author_date": "2025-11-29T19:01:50+02:00",
+      "commit_date": "2025-11-29T19:01:50+02:00",
+      "subject": "Fix clippy warnings",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/watch.rs"
+        }
+      ],
+      "stat": "1 file changed, 3 insertions(+), 3 deletions(-)",
+      "areas": [
+        "build"
+      ],
+      "review": "Completes watcher iteration lint fixes; no new feature."
+    },
+    {
+      "sha": "7ee6888e4850a2b76d1f0e117eb66e305a22b208",
+      "author_date": "2025-11-29T19:23:18+02:00",
+      "commit_date": "2025-11-29T19:23:18+02:00",
+      "subject": "Actively check disk on F5 reload instead of relying only on watcher",
+      "files": [
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+), 1 deletion(-)",
+      "areas": [
+        "reload"
+      ],
+      "review": "F5 checks current disk metadata as well as the watcher cache before deciding which confirmation to show."
+    },
+    {
+      "sha": "3f95547dee31b1c8f870612127a8c493559a4945",
+      "author_date": "2025-11-29T20:02:06+02:00",
+      "commit_date": "2025-11-29T20:02:50+02:00",
+      "subject": "Add documentation and comprehensive unit tests for new features",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/config.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/buffer/mod.rs"
+        }
+      ],
+      "stat": "8 files changed, 621 insertions(+), 18 deletions(-)",
+      "areas": [
+        "tests",
+        "docs",
+        "logging"
+      ],
+      "review": "Adds settings/hotkey/history and buffer highlighting/line-helper tests, serial watcher CI step and docs. Also expands menu/dialog/clipboard logging."
+    },
+    {
+      "sha": "396c1114911d81edbb865e9f2038e16363cbd8b8",
+      "author_date": "2025-11-29T21:14:20+02:00",
+      "commit_date": "2025-11-29T21:14:20+02:00",
+      "subject": "Add line number click selection feature",
+      "files": [
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/state.rs"
+        },
+        {
+          "status": "M",
+          "path": "src/tui.rs"
+        }
+      ],
+      "stat": "8 files changed, 71 insertions(+), 1 deletion(-)",
+      "areas": [
+        "gutter",
+        "logging"
+      ],
+      "review": "Adds line-number click, Shift+click and drag selection in the TUI, explicitly credited to Microsoft Edit PR #622 by jenia90; expands dialog logging."
+    },
+    {
+      "sha": "e0371c6508aa22f949af3c5aa7c0b6aefa089af7",
+      "author_date": "2025-11-29T21:48:39+02:00",
+      "commit_date": "2025-11-29T21:48:39+02:00",
+      "subject": "Add cross-platform installers and native archive formats",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/release.yml"
+        },
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        }
+      ],
+      "stat": "2 files changed, 426 insertions(+), 37 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Adds macOS PKG/TAR.GZ and Linux DEB/RPM/AppImage/TAR archives plus checksums and release-note instructions."
+    },
+    {
+      "sha": "9c35dab1a7cc7d1177c82369d7971c1c0b6b365f",
+      "author_date": "2025-11-29T21:51:51+02:00",
+      "commit_date": "2025-11-29T21:51:51+02:00",
+      "subject": "Fix YAML syntax error in CI workflow",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Quotes the CI command containing watch:: to fix YAML parsing."
+    },
+    {
+      "sha": "de573b883986689f3374ee1bbc16d5fdc24a392f",
+      "author_date": "2025-11-29T21:53:44+02:00",
+      "commit_date": "2025-11-29T21:53:44+02:00",
+      "subject": "Run flaky file watcher tests only on Linux",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+), 1 deletion(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Temporarily limits native watcher integration tests to Linux because of Windows/macOS timing failures; superseded by 067ffe7."
+    },
+    {
+      "sha": "067ffe7b4098c1b484254944af712bcf1c8b06fb",
+      "author_date": "2025-11-29T21:57:59+02:00",
+      "commit_date": "2025-11-29T21:57:59+02:00",
+      "subject": "Fix macOS file watcher test failures",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/watch.rs"
+        }
+      ],
+      "stat": "2 files changed, 13 insertions(+), 5 deletions(-)",
+      "areas": [
+        "watch",
+        "tests"
+      ],
+      "review": "Deletes the kqueue filter before closing an unwatched descriptor, increases command-settling wait, and re-enables watcher tests on all platforms."
+    },
+    {
+      "sha": "7fc67cfa72f894905cec654f3ea9f058d90fb948",
+      "author_date": "2025-11-29T22:02:20+02:00",
+      "commit_date": "2025-11-29T22:02:20+02:00",
+      "subject": "Improve file watcher test reliability on Windows",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "A",
+          "path": "docs/design-mark-highlights.md"
+        },
+        {
+          "status": "A",
+          "path": "ogedit.exe.lnk"
+        },
+        {
+          "status": "M",
+          "path": "src/bin/edit/watch.rs"
+        },
+        {
+          "status": "A",
+          "path": "test_reload.txt"
+        },
+        {
+          "status": "A",
+          "path": "test_reload_feature.sh"
+        }
+      ],
+      "stat": "6 files changed, 1208 insertions(+), 12 deletions(-)",
+      "areas": [
+        "tests",
+        "delivery"
+      ],
+      "review": "Increases Windows watcher waits/retries and diagnostics, enables full backtraces; accidentally includes design notes, a shortcut and scratch test files."
+    },
+    {
+      "sha": "dee789efdbb9732d8f8c26d2a013b1f834dc6d40",
+      "author_date": "2025-11-29T22:02:52+02:00",
+      "commit_date": "2025-11-29T22:02:52+02:00",
+      "subject": "Remove accidentally committed test files",
+      "files": [
+        {
+          "status": "D",
+          "path": "docs/design-mark-highlights.md"
+        },
+        {
+          "status": "D",
+          "path": "ogedit.exe.lnk"
+        },
+        {
+          "status": "D",
+          "path": "test_reload.txt"
+        },
+        {
+          "status": "D",
+          "path": "test_reload_feature.sh"
+        }
+      ],
+      "stat": "4 files changed, 1183 deletions(-)",
+      "areas": [
+        "cleanup"
+      ],
+      "review": "Removes the four accidental scratch files from 7fc67cf. They exist in history but not in the final fork delta."
+    },
+    {
+      "sha": "8e578c417fcf08004b96b9516718e8038f2f0afe",
+      "author_date": "2025-11-30T08:42:27+02:00",
+      "commit_date": "2025-11-30T08:42:27+02:00",
+      "subject": "Release v1.2.3",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Bumps Cargo.toml version to 1.2.3; no feature code changes."
+    },
+    {
+      "sha": "9ae091ec07bde356f8dfc4199d499fe4266f5692",
+      "author_date": "2025-11-30T11:31:17+02:00",
+      "commit_date": "2025-11-30T11:31:17+02:00",
+      "subject": "Release v1.2.4",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/release.yml"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        }
+      ],
+      "stat": "3 files changed, 7 insertions(+), 5 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Bumps Cargo.toml/lockfile to 1.2.4 and extracts appimagetool before building to avoid the CI FUSE requirement."
+    },
+    {
+      "sha": "4a7beb08ba702e53e635ce599927279991bfa113",
+      "author_date": "2025-12-03T08:03:52+02:00",
+      "commit_date": "2025-12-03T08:03:52+02:00",
+      "subject": "Add auto-tagging workflow for releases",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/release.yml"
+        },
+        {
+          "status": "A",
+          "path": ".github/workflows/version-tag.yml"
+        }
+      ],
+      "stat": "2 files changed, 82 insertions(+), 10 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Adds Cargo-version auto-tag workflow and changes release version extraction to Cargo.toml. The historical GITHUB_TOKEN tag push does not trigger the release workflow."
+    },
+    {
+      "sha": "e69f3a2c603620baea002aef4a8d3442d9af4bf9",
+      "author_date": "2025-12-03T08:12:22+02:00",
+      "commit_date": "2025-12-03T08:12:22+02:00",
+      "subject": "Handle race condition in auto-tag workflow",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/version-tag.yml"
+        }
+      ],
+      "stat": "1 file changed, 12 insertions(+), 2 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Adds auto-tag concurrency and treats all failed pushes as tag races, hiding real push failures; repaired during the legacy audit."
+    },
+    {
+      "sha": "01cf53f500831993d59d677fef92bc224b2e34bd",
+      "author_date": "2025-12-03T19:40:40+02:00",
+      "commit_date": "2025-12-03T19:40:40+02:00",
+      "subject": "Add optional EDITOR env var setting to installers",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/release.yml"
+        },
+        {
+          "status": "M",
+          "path": "CLAUDE.md"
+        },
+        {
+          "status": "A",
+          "path": "deb/config"
+        },
+        {
+          "status": "A",
+          "path": "deb/postinst"
+        },
+        {
+          "status": "A",
+          "path": "deb/postrm"
+        },
+        {
+          "status": "A",
+          "path": "deb/templates"
+        },
+        {
+          "status": "A",
+          "path": "pkg/Distribution.xml.template"
+        },
+        {
+          "status": "A",
+          "path": "pkg/conclusion.html"
+        },
+        {
+          "status": "A",
+          "path": "pkg/license.html"
+        },
+        {
+          "status": "A",
+          "path": "pkg/postinstall-editor-env"
+        },
+        {
+          "status": "A",
+          "path": "pkg/welcome.html"
+        },
+        {
+          "status": "A",
+          "path": "rpm/ogedit-editor.sh.sample"
+        },
+        {
+          "status": "A",
+          "path": "rpm/ogedit-set-editor"
+        },
+        {
+          "status": "M",
+          "path": "wix/main.wxs"
+        }
+      ],
+      "stat": "14 files changed, 466 insertions(+), 24 deletions(-)",
+      "areas": [
+        "delivery"
+      ],
+      "review": "Adds opt-in EDITOR setup in MSI/PKG/DEB and the RPM helper, templates/scripts and release integration. Default remains off; audit found lifecycle/privilege issues in scripts."
+    }
+  ],
+  "upstream_commits": [
+    {
+      "sha": "5f284a1df9266ab07bb068e5eff6d7844b651a97",
+      "author_date": "2025-12-01T21:51:55+01:00",
+      "commit_date": "2025-12-01T21:51:55+01:00",
+      "subject": "Move arena & helpers into their own crate (#694)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        },
+        {
+          "status": "D",
+          "path": "benches/lib.rs"
+        },
+        {
+          "status": "D",
+          "path": "build/helpers.rs"
+        },
+        {
+          "status": "D",
+          "path": "build/i18n.rs"
+        },
+        {
+          "status": "D",
+          "path": "build/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/build/helpers.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/build/i18n.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/build/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/apperr.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/base64.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/edit.exe.manifest"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/localization.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/state.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/buffer/gap_buffer.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/buffer/line_cache.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/buffer/navigation.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/cell.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/clipboard.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/document.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/fuzzy.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/hash.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/icu.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/input.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/oklab.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/path.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/simd/lines_bwd.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/simd/lines_fwd.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/simd/memchr2.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/simd/memset.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/simd/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/sys/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/sys/windows.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/tui.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/unicode/measurement.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/unicode/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/unicode/tables.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/unicode/utf8.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/vt.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/arena/debug.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/arena/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/arena/release.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/arena/scratch.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/arena/string.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/helpers.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/sys/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/sys/unix.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/sys/windows.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/unicode-gen/Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "crates/unicode-gen/README.md"
+        },
+        {
+          "status": "A",
+          "path": "crates/unicode-gen/src/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/unicode-gen/src/rules.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/apperr.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/arena/debug.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/arena/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/arena/release.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/arena/scratch.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/arena/string.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/base64.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/documents.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/edit.exe.manifest"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/localization.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/main.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/bin/edit/state.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/buffer/gap_buffer.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/buffer/line_cache.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/buffer/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/buffer/navigation.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/cell.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/clipboard.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/document.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/framebuffer.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/fuzzy.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/hash.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/helpers.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/icu.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/input.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/lib.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/oklab.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/path.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/simd/lines_bwd.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/simd/lines_fwd.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/simd/memchr2.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/simd/memset.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/simd/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/sys/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/sys/unix.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/sys/windows.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/tui.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/unicode/measurement.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/unicode/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/unicode/tables.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/unicode/utf8.rs"
+        },
+        {
+          "status": "D",
+          "path": "src/vt.rs"
+        },
+        {
+          "status": "D",
+          "path": "tools/grapheme-table-gen/Cargo.lock"
+        },
+        {
+          "status": "D",
+          "path": "tools/grapheme-table-gen/Cargo.toml"
+        },
+        {
+          "status": "D",
+          "path": "tools/grapheme-table-gen/README.md"
+        },
+        {
+          "status": "D",
+          "path": "tools/grapheme-table-gen/src/main.rs"
+        },
+        {
+          "status": "D",
+          "path": "tools/grapheme-table-gen/src/rules.rs"
+        }
+      ],
+      "stat": "65 files changed, 799 insertions(+), 776 deletions(-)"
+    },
+    {
+      "sha": "1601c3f592a042e8c331fe6184361fe0d627db8a",
+      "author_date": "2025-12-02T00:15:54+03:00",
+      "commit_date": "2025-12-01T22:15:54+01:00",
+      "subject": "i18n: Add Arabic translations (#634)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 56 insertions(+)"
+    },
+    {
+      "sha": "ca661a2901f0b92fd51a1772f801af445d98fa74",
+      "author_date": "2025-12-01T23:16:34+02:00",
+      "commit_date": "2025-12-01T22:16:34+01:00",
+      "subject": "i18n: Add Estonian translations (#693)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 55 insertions(+)"
+    },
+    {
+      "sha": "d71e94b3035d2ac27c3d5f2d3d5e02fd444048a5",
+      "author_date": "2025-12-02T06:17:14+09:00",
+      "commit_date": "2025-12-01T22:17:14+01:00",
+      "subject": "Improve Korean translations (#663)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 5 insertions(+), 5 deletions(-)"
+    },
+    {
+      "sha": "3df9e7cb6cc2b454af03651241541f0604b84419",
+      "author_date": "2025-12-01T22:24:27+01:00",
+      "commit_date": "2025-12-01T15:24:27-06:00",
+      "subject": "Fix multiple issues found under Linux (#706)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".vscode/launch.json"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/input.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/vt.rs"
+        }
+      ],
+      "stat": "4 files changed, 34 insertions(+), 28 deletions(-)"
+    },
+    {
+      "sha": "364579a0456348c6f0e5f84c83d86d48751790e7",
+      "author_date": "2025-12-02T04:33:40+07:00",
+      "commit_date": "2025-12-01T21:33:40Z",
+      "subject": "Add Indonesian translation (#629)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 54 insertions(+)"
+    },
+    {
+      "sha": "fa2b1b88cc6fe4b28362311af0d43bfa540ab30e",
+      "author_date": "2026-01-05T15:12:26+01:00",
+      "commit_date": "2026-01-05T14:12:26Z",
+      "subject": "Update man page for edit command to version 1.2.1 (#727)",
+      "files": [
+        {
+          "status": "M",
+          "path": "assets/manpage/edit.1"
+        }
+      ],
+      "stat": "1 file changed, 5 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "dbd74656a9cae4f097a1d8d7d4e3b42e3df5e615",
+      "author_date": "2026-01-05T17:50:36+01:00",
+      "commit_date": "2026-01-05T17:50:36+01:00",
+      "subject": "Fix colors with Terminal.app's Clear Dark theme (#728)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".vscode/launch.json"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/string.rs"
+        }
+      ],
+      "stat": "7 files changed, 62 insertions(+), 16 deletions(-)"
+    },
+    {
+      "sha": "48c2ab29498699feb65d2f3c9cbf80e084d64bc7",
+      "author_date": "2026-01-13T10:33:37-05:00",
+      "commit_date": "2026-01-13T15:33:37Z",
+      "subject": "Use platform line ending when opening single line files (#739)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "d0db071474c193785aacafe426498bee43f6b2ae",
+      "author_date": "2026-01-20T13:10:55-06:00",
+      "commit_date": "2026-01-20T13:10:55-06:00",
+      "subject": "Create parent directories when saving to a non-existent path (#738)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        }
+      ],
+      "stat": "2 files changed, 14 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "8d9b1ede11eecc98d0df6ecae9af06a00f6a6aae",
+      "author_date": "2026-01-20T22:11:44+01:00",
+      "commit_date": "2026-01-20T15:11:44-06:00",
+      "subject": "Add proper multithreading support to Arena (#741)",
+      "files": [
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/apperr.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/debug.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/arena/fs.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/release.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/scratch.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/string.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/sys/windows.rs"
+        }
+      ],
+      "stat": "10 files changed, 158 insertions(+), 47 deletions(-)"
+    },
+    {
+      "sha": "6b6a4b2d9fb83a7c2513506325e80b8a17200f0a",
+      "author_date": "2026-01-21T00:05:09+01:00",
+      "commit_date": "2026-01-21T00:05:09+01:00",
+      "subject": "Add a JSON parser (#742)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/json.json"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/json.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        }
+      ],
+      "stat": "6 files changed, 841 insertions(+), 85 deletions(-)"
+    },
+    {
+      "sha": "9bc86c5acdc8e9ffe86dabee68626e87724457af",
+      "author_date": "2026-01-22T19:49:04+01:00",
+      "commit_date": "2026-01-22T19:49:04+01:00",
+      "subject": "Add a glob matcher (#743)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/glob.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        }
+      ],
+      "stat": "3 files changed, 286 insertions(+), 3 deletions(-)"
+    },
+    {
+      "sha": "ad8415fd44e1630716e902505869a8ef33305758",
+      "author_date": "2026-01-23T13:57:42+01:00",
+      "commit_date": "2026-01-23T13:57:42+01:00",
+      "subject": "Clean up error handling (#745)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "D",
+          "path": "crates/edit/src/apperr.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/localization.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/state.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/gap_buffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/clipboard.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/document.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "19 files changed, 176 insertions(+), 397 deletions(-)"
+    },
+    {
+      "sha": "e5a92eb7d672b82387b4bb6e00f8d24f591a1cb9",
+      "author_date": "2026-01-26T23:30:31+01:00",
+      "commit_date": "2026-01-26T23:30:31+01:00",
+      "subject": "Fix the latest clippy warning (#751)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        }
+      ],
+      "stat": "2 files changed, 2 insertions(+), 6 deletions(-)"
+    },
+    {
+      "sha": "524b22c3c5eb9a81a527e3bb40f8a97518d8371f",
+      "author_date": "2026-01-28T00:12:20+01:00",
+      "commit_date": "2026-01-28T00:12:20+01:00",
+      "subject": "Fix warnings when building on macOS (#754)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        }
+      ],
+      "stat": "2 files changed, 4 insertions(+), 14 deletions(-)"
+    },
+    {
+      "sha": "14c1defa25b5e8ce857b81a5dabce7807e24775a",
+      "author_date": "2026-02-12T22:28:53+01:00",
+      "commit_date": "2026-02-12T22:28:53+01:00",
+      "subject": "Remove the majority of nightly features (#761)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/measurement.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/debug.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/release.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        }
+      ],
+      "stat": "12 files changed, 94 insertions(+), 68 deletions(-)"
+    },
+    {
+      "sha": "719a478cf017d70221a6a8388c37e1bef672e0af",
+      "author_date": "2026-02-12T16:37:14-05:00",
+      "commit_date": "2026-02-12T22:37:14+01:00",
+      "subject": "Change copyright in draw_menubar.rs (#760)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_menubar.rs"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)"
+    },
+    {
+      "sha": "6c79a1d7e392a45a6e4d95a8ac81db0186fcc157",
+      "author_date": "2026-02-12T23:23:57+01:00",
+      "commit_date": "2026-02-12T23:23:57+01:00",
+      "subject": "Remove allocator_api (#762)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/base64.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/document.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/fuzzy.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/json.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/oklab.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/edit/src/simd/memset.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/alloc.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/debug.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/fs.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/release.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/scratch.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/arena/string.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/collections/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/collections/string.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/collections/vec.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/simd/memset.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/simd/mod.rs"
+        }
+      ],
+      "stat": "31 files changed, 1480 insertions(+), 803 deletions(-)"
+    },
+    {
+      "sha": "ff45b14d5e7200556e020db5a8b9bdb2434852a2",
+      "author_date": "2026-02-14T01:51:38+01:00",
+      "commit_date": "2026-02-14T01:51:38+01:00",
+      "subject": "BVec::push_encode_utf16, Some micro optimizations (#764)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/measurement.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/edit/src/unicode/utf8.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/vt.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/string.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/vec.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/unicode/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/unicode/utf8.rs"
+        }
+      ],
+      "stat": "11 files changed, 90 insertions(+), 28 deletions(-)"
+    },
+    {
+      "sha": "017c0ba30de458f9707f65265be1f99a4508fc4c",
+      "author_date": "2026-03-19T23:52:26+01:00",
+      "commit_date": "2026-03-19T22:52:26Z",
+      "subject": "Fix an incorrect debug assert (#774)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "2 files changed, 45 insertions(+), 51 deletions(-)"
+    },
+    {
+      "sha": "baa3cb05b4738c0fe2275d11b2eb2be3cfe7fc40",
+      "author_date": "2026-03-19T23:57:00+01:00",
+      "commit_date": "2026-03-19T23:57:00+01:00",
+      "subject": "Use natural sort for filenames (#763)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".cargo/release-nightly.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        }
+      ],
+      "stat": "3 files changed, 32 insertions(+), 10 deletions(-)"
+    },
+    {
+      "sha": "8ad89c849dd93940c2784b7a3cee67734c7d667a",
+      "author_date": "2026-03-20T21:41:42+01:00",
+      "commit_date": "2026-03-20T15:41:42-05:00",
+      "subject": "Introduce the LSH compiler (#753)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/COMMIT_EDITMSG"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/diff.diff"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/git-rebase-todo"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/git_commit_messsage.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/git_ignore.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/git_rebase_todo.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/backend.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/charset.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/frontend.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/generator.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/optimizer.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/runtime.rs"
+        }
+      ],
+      "stat": "19 files changed, 4756 insertions(+), 21 deletions(-)"
+    },
+    {
+      "sha": "0bfb7a321008cba1c47c149c63a248f4d667349d",
+      "author_date": "2026-03-23T22:22:24+01:00",
+      "commit_date": "2026-03-23T21:22:24Z",
+      "subject": "Add the LSH runtime (#776)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/edit/src/glob.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh-bin/Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh-bin/src/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/backend.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/runtime.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/glob.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        }
+      ],
+      "stat": "9 files changed, 570 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "fa709bade0c51430db208998a770b8b8c55d9007",
+      "author_date": "2026-03-25T01:17:45+01:00",
+      "commit_date": "2026-03-24T19:17:45-05:00",
+      "subject": "Integrate LSH into edit (#777)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/build/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/state.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/edit/src/buffer/line_cache.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/lsh/cache.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/lsh/definitions.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/lsh/highlighter.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/lsh/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/diff.lsh"
+        },
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "17 files changed, 603 insertions(+), 127 deletions(-)"
+    },
+    {
+      "sha": "d1908b0b5317e43f747b5ecc86ef67a7035e30fb",
+      "author_date": "2026-03-25T20:50:24+01:00",
+      "commit_date": "2026-03-25T20:50:24+01:00",
+      "subject": "Add rudimentary settings.json support (#779)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/apperr.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/bin/edit/settings.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/state.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/json.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/float.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "12 files changed, 458 insertions(+), 14 deletions(-)"
+    },
+    {
+      "sha": "05452ab90ce7fa7b6161ca003307828bf168bef2",
+      "author_date": "2026-03-27T19:01:09+01:00",
+      "commit_date": "2026-03-27T19:01:09+01:00",
+      "subject": "Complete the initial LSH implementation (#624)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".vscode/launch.json"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/bash.sh"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/batch.bat"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/html.html"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/markdown.md"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/powershell.ps1"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/properties.conf"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/xml.xml"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/yaml.yml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/json.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/lsh.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/markdown.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/powershell.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/properties.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/utility.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/xml.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/yaml.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/backend.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/charset.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        },
+        {
+          "status": "D",
+          "path": "rust-toolchain.toml"
+        }
+      ],
+      "stat": "25 files changed, 1340 insertions(+), 199 deletions(-)"
+    },
+    {
+      "sha": "4cef4eacdaf80e7c2218d2c4366754d026bfb4d5",
+      "author_date": "2026-03-27T16:17:23-05:00",
+      "commit_date": "2026-03-27T16:17:23-05:00",
+      "subject": "lsh: fix up PowerShell a bit (#784)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/powershell.lsh"
+        }
+      ],
+      "stat": "1 file changed, 12 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "8b24907aabb5b36edac064025d404df2b692ac6f",
+      "author_date": "2026-03-27T22:17:56+01:00",
+      "commit_date": "2026-03-27T22:17:56+01:00",
+      "subject": "Add a small fuzzing harness for LSH (#782)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/runtime.rs"
+        },
+        {
+          "status": "A",
+          "path": "fuzz/.gitignore"
+        },
+        {
+          "status": "A",
+          "path": "fuzz/Cargo.lock"
+        },
+        {
+          "status": "A",
+          "path": "fuzz/Cargo.toml"
+        },
+        {
+          "status": "A",
+          "path": "fuzz/fuzz_targets/highlighter.rs"
+        }
+      ],
+      "stat": "7 files changed, 308 insertions(+), 78 deletions(-)"
+    },
+    {
+      "sha": "5820364ce484ba58ce0de98abbb62cd9f02655b4",
+      "author_date": "2026-03-30T20:10:17+02:00",
+      "commit_date": "2026-03-30T20:10:17+02:00",
+      "subject": "Prepare for v2.0.0 (#785)",
+      "files": [
+        {
+          "status": "D",
+          "path": ".cargo/release-nightly.toml"
+        },
+        {
+          "status": "M",
+          "path": ".cargo/release-windows-ms.toml"
+        },
+        {
+          "status": "M",
+          "path": ".cargo/release.toml"
+        },
+        {
+          "status": "M",
+          "path": ".pipelines/release.yml"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "M",
+          "path": "assets/manpage/edit.1"
+        },
+        {
+          "status": "M",
+          "path": "assets/snapcraft.yaml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        }
+      ],
+      "stat": "9 files changed, 31 insertions(+), 34 deletions(-)"
+    },
+    {
+      "sha": "c92c166ef6a3a5c4ea31ba13418c5cce229bcec2",
+      "author_date": "2026-03-30T21:24:16+02:00",
+      "commit_date": "2026-03-30T21:24:16+02:00",
+      "subject": "Fix the Azure pipeline (#787)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".cargo/release-windows-ms.toml"
+        }
+      ],
+      "stat": "1 file changed, 20 insertions(+), 17 deletions(-)"
+    },
+    {
+      "sha": "35b863f826ec7a7a55f0833ddc57f2e4c8038b6d",
+      "author_date": "2026-03-31T18:25:11-05:00",
+      "commit_date": "2026-03-31T18:25:11-05:00",
+      "subject": "lsh: fix strings in PowerShell (#790)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/powershell.lsh"
+        }
+      ],
+      "stat": "1 file changed, 20 insertions(+), 6 deletions(-)"
+    },
+    {
+      "sha": "6468920b16c85ed0ee6e57ae74a002b364863d7f",
+      "author_date": "2026-04-07T23:26:12+02:00",
+      "commit_date": "2026-04-07T23:26:12+02:00",
+      "subject": "Add Shell, Python and JavaScript highlighting (#795)",
+      "files": [
+        {
+          "status": "D",
+          "path": "assets/highlighting-tests/bash.sh"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/javascript.js"
+        },
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/markdown.md"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/python.py"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/shellscript.sh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/javascript.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/markdown.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/python.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/shellscript.lsh"
+        }
+      ],
+      "stat": "9 files changed, 737 insertions(+), 72 deletions(-)"
+    },
+    {
+      "sha": "7c0b3d17c1d566aac4198117798b7c120eaea633",
+      "author_date": "2026-04-16T12:27:08+01:00",
+      "commit_date": "2026-04-16T13:27:08+02:00",
+      "subject": "clippy: fix ptr_as_ptr lint (#730)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/base64.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/hash.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/memchr2.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/fs.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/release.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/vec.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/simd/memset.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/sys/unix.rs"
+        }
+      ],
+      "stat": "12 files changed, 47 insertions(+), 46 deletions(-)"
+    },
+    {
+      "sha": "c157ff328086a2e3a5afbec0956c0666b88d10f0",
+      "author_date": "2026-04-17T15:39:49-05:00",
+      "commit_date": "2026-04-17T15:39:49-05:00",
+      "subject": "feat(tools): add one-line Linux installer (curl|bash) with ICU symlink shim + docs (#628)",
+      "files": [
+        {
+          "status": "M",
+          "path": "README.md"
+        },
+        {
+          "status": "A",
+          "path": "assets/install.sh"
+        }
+      ],
+      "stat": "2 files changed, 228 insertions(+), 6 deletions(-)"
+    },
+    {
+      "sha": "d887414dabb764b555eea34085e6469176f606f6",
+      "author_date": "2026-04-18T05:25:11+08:00",
+      "commit_date": "2026-04-17T16:25:11-05:00",
+      "subject": "Handle horizontal scrolling on macOS touchpads (#794)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/input.rs"
+        }
+      ],
+      "stat": "2 files changed, 22 insertions(+), 11 deletions(-)"
+    },
+    {
+      "sha": "d4d3f3b6dca2c969b425da3005fb65d602ef990f",
+      "author_date": "2026-04-21T00:09:30+02:00",
+      "commit_date": "2026-04-20T15:09:30-07:00",
+      "subject": "Fix Azure pipeline (again) (#807)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".cargo/release-windows-ms.toml"
+        },
+        {
+          "status": "M",
+          "path": ".pipelines/release.yml"
+        }
+      ],
+      "stat": "2 files changed, 6 insertions(+), 3 deletions(-)"
+    },
+    {
+      "sha": "330d345a5da6ae485a3503d2ad518381d7ab20df",
+      "author_date": "2026-04-21T00:10:55+02:00",
+      "commit_date": "2026-04-20T15:10:55-07:00",
+      "subject": "Align LSH language IDs with VS Code (#806)",
+      "files": [
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/git_commit.lsh"
+        },
+        {
+          "status": "D",
+          "path": "crates/lsh/definitions/git_commit_messsage.lsh"
+        },
+        {
+          "status": "D",
+          "path": "crates/lsh/definitions/git_ignore.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/git_rebase.lsh"
+        },
+        {
+          "status": "D",
+          "path": "crates/lsh/definitions/git_rebase_todo.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/ignore.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/generator.rs"
+        }
+      ],
+      "stat": "4 files changed, 6 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "23db2ba93e22131bb096566c311648f7deb14f62",
+      "author_date": "2026-04-21T21:01:43+02:00",
+      "commit_date": "2026-04-21T12:01:43-07:00",
+      "subject": "Improve LSH documentation (#805)",
+      "files": [
+        {
+          "status": "A",
+          "path": "crates/README.md"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh-bin/src/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/README.md"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/README.md"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/lib.rs"
+        }
+      ],
+      "stat": "5 files changed, 211 insertions(+), 11 deletions(-)"
+    },
+    {
+      "sha": "9e7b938e9e771a51bbdaf9bbe0b4e8213ff2460f",
+      "author_date": "2026-04-23T17:37:56+02:00",
+      "commit_date": "2026-04-23T10:37:56-05:00",
+      "subject": "Fix reading redirected input from stdin (#810)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        }
+      ],
+      "stat": "3 files changed, 60 insertions(+), 53 deletions(-)"
+    },
+    {
+      "sha": "c8a9787607b354ea1a73ac73e918b6618c496389",
+      "author_date": "2026-04-23T19:51:49+02:00",
+      "commit_date": "2026-04-23T19:51:49+02:00",
+      "subject": "Fix scrolling in modals (#812)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "1 file changed, 43 insertions(+), 31 deletions(-)"
+    },
+    {
+      "sha": "8ed85518f0fdec1958a681573089711e5b706884",
+      "author_date": "2026-04-27T12:58:53+02:00",
+      "commit_date": "2026-04-27T12:58:53+02:00",
+      "subject": "Further improve LSH docs (#813)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/README.md"
+        }
+      ],
+      "stat": "1 file changed, 269 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "2800cbb2ef57d3e5330fcfb04204a8c246dc6315",
+      "author_date": "2026-04-27T19:44:24+02:00",
+      "commit_date": "2026-04-27T19:44:24+02:00",
+      "subject": "lsh: Fix PowerShell keyword lists (#820)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/powershell.lsh"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "24e2d79b879cc6f015f25aa363f7da03115133f9",
+      "author_date": "2026-04-27T19:44:39+02:00",
+      "commit_date": "2026-04-27T19:44:39+02:00",
+      "subject": "Fix multi-line pastes into single-line fields (#818)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "3 files changed, 13 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "de3db9b10ae65db01d884c68b1cb850e2b3193ad",
+      "author_date": "2026-04-27T19:44:56+02:00",
+      "commit_date": "2026-04-27T19:44:56+02:00",
+      "subject": "Further improve xterm mouse decoding (#819)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/input.rs"
+        }
+      ],
+      "stat": "1 file changed, 61 insertions(+), 65 deletions(-)"
+    },
+    {
+      "sha": "e5f0c4574871f5a351e3bac44ddfddf07e3ec479",
+      "author_date": "2026-04-27T20:44:52+02:00",
+      "commit_date": "2026-04-27T20:44:52+02:00",
+      "subject": "Stop moving focus into the search box (#821)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "3 files changed, 1 insertion(+), 4 deletions(-)"
+    },
+    {
+      "sha": "2bb7c1090ac12fa3c039ce5a3884a67aff148c8e",
+      "author_date": "2026-04-27T21:31:25+02:00",
+      "commit_date": "2026-04-27T19:31:25Z",
+      "subject": "Fix stability of compare_strings_ascii (#823)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        }
+      ],
+      "stat": "1 file changed, 9 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "d14e24b349b36d5a143c0c76d9dffd2c2b968028",
+      "author_date": "2026-04-28T00:18:27+03:00",
+      "commit_date": "2026-04-27T21:18:27Z",
+      "subject": "Fix zero-width regex replace (#815)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        }
+      ],
+      "stat": "2 files changed, 115 insertions(+), 46 deletions(-)"
+    },
+    {
+      "sha": "d3f86975dc3c1298bf7300dbdf409a1df8d8b2b7",
+      "author_date": "2026-04-28T17:26:08+02:00",
+      "commit_date": "2026-04-28T17:26:08+02:00",
+      "subject": "Fix text search on *nix (#824)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "2 files changed, 2 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "c481b718da336ed43adbbfdf543b0368a24fe740",
+      "author_date": "2026-04-29T15:38:59+03:00",
+      "commit_date": "2026-04-29T12:38:59Z",
+      "subject": "Update Turkish translations (#833)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 4 insertions(+)"
+    },
+    {
+      "sha": "58408a72d2dcd8a47e6fb91e709ca9216e7b8f26",
+      "author_date": "2026-04-30T00:33:49+08:00",
+      "commit_date": "2026-04-29T16:33:49Z",
+      "subject": "update and correct zh-hant translation (#830)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 19 insertions(+), 19 deletions(-)"
+    },
+    {
+      "sha": "f7de3513efb267a5ca60046fd8385673e74f2848",
+      "author_date": "2026-04-29T19:14:57+02:00",
+      "commit_date": "2026-04-29T19:14:57+02:00",
+      "subject": "Fix localization selection (#835)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/build/i18n.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "3 files changed, 265 insertions(+), 263 deletions(-)"
+    },
+    {
+      "sha": "3afb4f7fb2576b054d271938760243ba62a12a12",
+      "author_date": "2026-04-29T19:38:12+02:00",
+      "commit_date": "2026-04-29T12:38:12-05:00",
+      "subject": "Support both Serbian languages (Cyrillic & Latin) (#749)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 122 insertions(+), 54 deletions(-)"
+    },
+    {
+      "sha": "9642f7ffca7026c3c4fe8ef54061201b7344a3b0",
+      "author_date": "2026-05-04T16:31:27+02:00",
+      "commit_date": "2026-05-04T14:31:27Z",
+      "subject": "Update Polish translations (#838)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 6 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "cc5f7ef8b8f22e96e7255b37051dca35301ff51c",
+      "author_date": "2026-05-04T22:31:58+08:00",
+      "commit_date": "2026-05-04T14:31:58Z",
+      "subject": "Add macOS Homebrew install instructions (#839)",
+      "files": [
+        {
+          "status": "M",
+          "path": "README.md"
+        }
+      ],
+      "stat": "1 file changed, 7 insertions(+)"
+    },
+    {
+      "sha": "737450cef9ee40030221d1ddc4e91a5e67173306",
+      "author_date": "2026-05-05T04:51:54+08:00",
+      "commit_date": "2026-05-04T22:51:54+02:00",
+      "subject": "Fix stdarch_loongarch support in stdext (#837)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        }
+      ],
+      "stat": "1 file changed, 6 insertions(+)"
+    },
+    {
+      "sha": "428ef55715ff747782759e309a37e5ce8e49010a",
+      "author_date": "2026-06-09T10:19:36-04:00",
+      "commit_date": "2026-06-09T09:19:36-05:00",
+      "subject": "Fix zh-Hant locale fallback (#846)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/localization.rs"
+        },
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "2 files changed, 39 insertions(+), 3 deletions(-)"
+    },
+    {
+      "sha": "10cbfcc7330c894f2173611029df44ca5cb6fd77",
+      "author_date": "2026-06-30T13:29:24-04:00",
+      "commit_date": "2026-06-30T12:29:24-05:00",
+      "subject": "Load settings before parsing args (#875)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        }
+      ],
+      "stat": "1 file changed, 6 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "c5d54558e09b44934b5dbf7c7df640818fef4b31",
+      "author_date": "2026-07-22T05:26:08+08:00",
+      "commit_date": "2026-07-21T23:26:08+02:00",
+      "subject": "LoongArch SIMD: use immediate compare and simplify accumulator setup (#858)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/lines_bwd.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/lines_fwd.rs"
+        }
+      ],
+      "stat": "2 files changed, 16 insertions(+), 20 deletions(-)"
+    },
+    {
+      "sha": "e04a6708fe24744d119944cc90839c7c45659c12",
+      "author_date": "2026-07-22T16:11:53+02:00",
+      "commit_date": "2026-07-22T16:11:53+02:00",
+      "subject": "Fix release pipeline (#897)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".pipelines/release.yml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/build/i18n.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/gap_buffer.rs"
+        }
+      ],
+      "stat": "3 files changed, 16 insertions(+), 30 deletions(-)"
+    },
+    {
+      "sha": "ed52eff8ac2a0f7cdca74c05517f338d4e675a17",
+      "author_date": "2026-07-22T16:24:06+02:00",
+      "commit_date": "2026-07-22T14:24:06Z",
+      "subject": "Use copied() instead of cloned() for u16 iterator (#884)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/string.rs"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)"
+    },
+    {
+      "sha": "e16e2a40c1e231bcf9f086b361a68cccf2d2b31c",
+      "author_date": "2026-07-22T11:59:02-03:00",
+      "commit_date": "2026-07-22T16:59:02+02:00",
+      "subject": "Add TOML highlighting (#866)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/toml.toml"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/toml.lsh"
+        }
+      ],
+      "stat": "2 files changed, 133 insertions(+)"
+    },
+    {
+      "sha": "885ef2e8f8f01afe643ef4eb939c03619fd06848",
+      "author_date": "2026-07-22T17:25:30+02:00",
+      "commit_date": "2026-07-22T17:25:30+02:00",
+      "subject": "Add Java highlighting (#898)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/java.java"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/java.lsh"
+        }
+      ],
+      "stat": "3 files changed, 188 insertions(+)"
+    },
+    {
+      "sha": "b5303d7d9639f236b997f57b024b009384012034",
+      "author_date": "2026-07-27T10:46:50-05:00",
+      "commit_date": "2026-07-27T17:46:50+02:00",
+      "subject": "input: Translate \\0 as Ctrl+Space (#899)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/input.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        }
+      ],
+      "stat": "2 files changed, 8 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "843e48f54427c8f1f1166d800a5e08e043bd695a",
+      "author_date": "2026-07-27T12:47:13-04:00",
+      "commit_date": "2026-07-27T16:47:13Z",
+      "subject": "Require --goto for file positions (#900)",
+      "files": [
+        {
+          "status": "M",
+          "path": "assets/manpage/edit.1"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        }
+      ],
+      "stat": "3 files changed, 83 insertions(+), 73 deletions(-)"
+    },
+    {
+      "sha": "b05f727e52cf1583a3104673783143af7bc5aa42",
+      "author_date": "2026-07-28T18:39:26+02:00",
+      "commit_date": "2026-07-28T18:39:26+02:00",
+      "subject": "Fix two LSH issues (#901)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        }
+      ],
+      "stat": "2 files changed, 39 insertions(+), 47 deletions(-)"
+    },
+    {
+      "sha": "ebc3f7a735ae5d83ce34e5356e7e360f649e3f41",
+      "author_date": "2026-07-28T19:11:40+02:00",
+      "commit_date": "2026-07-28T12:11:40-05:00",
+      "subject": "Fix large_const_arrays warning (#902)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/generator.rs"
+        }
+      ],
+      "stat": "1 file changed, 5 insertions(+), 5 deletions(-)"
+    },
+    {
+      "sha": "9c9fdcc135cbf5c2f850f57988e5b6490c903e73",
+      "author_date": "2026-07-28T18:18:17-04:00",
+      "commit_date": "2026-07-28T22:18:17Z",
+      "subject": "Add Rust highlighting (#809)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/rust.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/rust.lsh"
+        }
+      ],
+      "stat": "2 files changed, 259 insertions(+)"
+    },
+    {
+      "sha": "774a02f705b80140e62da2f112bd1b865ff91e0c",
+      "author_date": "2026-07-28T23:19:31+01:00",
+      "commit_date": "2026-07-28T22:19:31Z",
+      "subject": "Add Lua highlighting (#800)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/lua.lua"
+        },
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/markdown.md"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/lua.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/markdown.lsh"
+        }
+      ],
+      "stat": "4 files changed, 192 insertions(+)"
+    },
+    {
+      "sha": "68d54e435fb75a188c80257c2f73079e1a29749f",
+      "author_date": "2026-07-29T15:24:27+01:00",
+      "commit_date": "2026-07-29T16:24:27+02:00",
+      "subject": "Add C# highlighting (#802)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/csharp.cs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh-bin/src/main.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/csharp.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/charset.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        }
+      ],
+      "stat": "6 files changed, 267 insertions(+), 14 deletions(-)"
+    },
+    {
+      "sha": "67047813fc6e600830aba00e0bd2c4afafd120a7",
+      "author_date": "2026-07-30T01:45:24+10:00",
+      "commit_date": "2026-07-29T17:45:24+02:00",
+      "subject": "Add F# highlighting (#857)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/fsharp.fsx"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/fsharp.lsh"
+        }
+      ],
+      "stat": "2 files changed, 225 insertions(+)"
+    },
+    {
+      "sha": "60a47dccf28a6fb740278da19b9fdf8841ccbc43",
+      "author_date": "2026-07-30T07:20:10+09:00",
+      "commit_date": "2026-07-30T00:20:10+02:00",
+      "subject": "Add Ruby highlighting (#849)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/ruby.rb"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/ruby.lsh"
+        }
+      ],
+      "stat": "2 files changed, 210 insertions(+)"
+    },
+    {
+      "sha": "b2fac443bb967c42d7b6a4aa37a04fc3b843007e",
+      "author_date": "2026-07-30T03:21:34+02:00",
+      "commit_date": "2026-07-29T20:21:34-05:00",
+      "subject": "Fix backtracking in alternations (#903)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh-bin/src/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        }
+      ],
+      "stat": "2 files changed, 68 insertions(+), 13 deletions(-)"
+    },
+    {
+      "sha": "570011725492fc6196d4a314bf928e0ddd076eaa",
+      "author_date": "2026-07-30T19:30:16+03:00",
+      "commit_date": "2026-07-30T18:30:16+02:00",
+      "subject": "Add C/C++ highlighting (#796)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/c.c"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/cpp.cpp"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/c.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/cpp.lsh"
+        }
+      ],
+      "stat": "4 files changed, 298 insertions(+)"
+    },
+    {
+      "sha": "33ae9b0632f6e26f6a7981ec88f537d66701e7cd",
+      "author_date": "2026-07-30T17:36:21+01:00",
+      "commit_date": "2026-07-30T16:36:21Z",
+      "subject": "Add assert_unchecked for memchr2's return value (#836)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/memchr2.rs"
+        }
+      ],
+      "stat": "1 file changed, 3 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "5366d29363de17cf9976f4bbfc0f00a9be2bc926",
+      "author_date": "2026-07-30T17:36:31+01:00",
+      "commit_date": "2026-07-30T18:36:31+02:00",
+      "subject": "Fix case-insensitive matching with uppercase literals (#850)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        }
+      ],
+      "stat": "1 file changed, 11 insertions(+)"
+    },
+    {
+      "sha": "874ef3e437baebbc9a897d287423b34a819121ce",
+      "author_date": "2026-07-31T03:48:53+08:00",
+      "commit_date": "2026-07-30T21:48:53+02:00",
+      "subject": "Add Go highlighting (#859)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/go.go"
+        },
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/markdown.md"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/go.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/markdown.lsh"
+        }
+      ],
+      "stat": "4 files changed, 184 insertions(+), 21 deletions(-)"
+    },
+    {
+      "sha": "a6b0f4239c3f127a0cec55d717390e7d8e4ebe98",
+      "author_date": "2026-07-31T14:13:00+01:00",
+      "commit_date": "2026-07-31T13:13:00Z",
+      "subject": "Use Cargo v3 resolver (#905)",
+      "files": [
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        }
+      ],
+      "stat": "1 file changed, 1 insertion(+), 1 deletion(-)"
+    },
+    {
+      "sha": "6301ef3268baf4bda96dda682c58f3d018bf874b",
+      "author_date": "2026-07-31T16:17:52+01:00",
+      "commit_date": "2026-07-31T15:17:52Z",
+      "subject": "Check clippy on workspace packages (#906)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/arena/scratch.rs"
+        }
+      ],
+      "stat": "2 files changed, 2 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "729d6aed08d7e2c15fa407da5e2051126a96c499",
+      "author_date": "2026-07-31T19:04:35+03:00",
+      "commit_date": "2026-07-31T18:04:35+02:00",
+      "subject": "Add Odin highlighting (#863)",
+      "files": [
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/markdown.md"
+        },
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/odin.odin"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/markdown.lsh"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/odin.lsh"
+        }
+      ],
+      "stat": "4 files changed, 217 insertions(+)"
+    },
+    {
+      "sha": "3e2061572a30c6d039dbd8bf1e56d82eea63d8df",
+      "author_date": "2026-08-01T05:52:37+08:00",
+      "commit_date": "2026-07-31T23:52:37+02:00",
+      "subject": "Support negative line numbers for goto (#841)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/documents.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        }
+      ],
+      "stat": "3 files changed, 62 insertions(+), 40 deletions(-)"
+    },
+    {
+      "sha": "0a6f8a33bb2d7110a36434956aef023338cde326",
+      "author_date": "2026-08-03T16:45:55+01:00",
+      "commit_date": "2026-08-03T17:45:55+02:00",
+      "subject": "Select lines when clicking/dragging on line numbers (#622)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "1 file changed, 22 insertions(+), 3 deletions(-)"
+    },
+    {
+      "sha": "11f0848e02bec715122adb8c295f1e1a87edec3c",
+      "author_date": "2026-08-03T08:54:25-07:00",
+      "commit_date": "2026-08-03T17:54:25+02:00",
+      "subject": "Correctly parse colours on big endian systems (#721)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/oklab.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "6 files changed, 61 insertions(+), 64 deletions(-)"
+    },
+    {
+      "sha": "a6eeb205c68906cf858cefa2467c55f64f887493",
+      "author_date": "2026-08-03T12:05:35-04:00",
+      "commit_date": "2026-08-03T18:05:35+02:00",
+      "subject": "Scroll sideways while holding the shift key and scroll fast while holding the alt key (#766)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/input.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "2 files changed, 10 insertions(+), 4 deletions(-)"
+    },
+    {
+      "sha": "721d84815f485ba9cb2a2cd6b1de038d36469caa",
+      "author_date": "2026-08-04T16:45:35+05:00",
+      "commit_date": "2026-08-04T13:45:35+02:00",
+      "subject": "Don't auto-scroll horizontal drag-selection in the top/bottom rows (#895)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "1 file changed, 12 insertions(+), 6 deletions(-)"
+    },
+    {
+      "sha": "93dfdf99296a58708fea3166f693074d683e1852",
+      "author_date": "2026-08-07T03:19:04+08:00",
+      "commit_date": "2026-08-06T19:19:04Z",
+      "subject": "Use compatible checkbox marker glyphs (#840)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "1 file changed, 3 insertions(+), 3 deletions(-)"
+    },
+    {
+      "sha": "9b34f1876966d834453cba39968f97137d0471b4",
+      "author_date": "2026-08-07T02:59:32+03:00",
+      "commit_date": "2026-08-07T01:59:32+02:00",
+      "subject": "Toggle menus on click (#793)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "1 file changed, 23 insertions(+)"
+    },
+    {
+      "sha": "d6ba99bf3f961972d04ac55aae0f5e27a5db0c2f",
+      "author_date": "2026-08-10T20:00:01+08:00",
+      "commit_date": "2026-08-10T12:00:01Z",
+      "subject": "Update Chinese translations (#910)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "adf09b8b60013148cea34064836905816be6cf42",
+      "author_date": "2026-08-11T00:30:34+02:00",
+      "commit_date": "2026-08-11T00:30:34+02:00",
+      "subject": "Sanitize all text before printing (#913)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".vscode/launch.json"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/string.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/vec.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/maybe_owned.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/unicode/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/stdext/src/unicode/sanitize.rs"
+        }
+      ],
+      "stat": "10 files changed, 364 insertions(+), 98 deletions(-)"
+    },
+    {
+      "sha": "01b3bc64118c19482ae7f4d947ae149b19baf15b",
+      "author_date": "2026-08-11T14:14:24+02:00",
+      "commit_date": "2026-08-11T12:14:24Z",
+      "subject": "Add Norwegian translations (#914)",
+      "files": [
+        {
+          "status": "M",
+          "path": "i18n/edit.toml"
+        }
+      ],
+      "stat": "1 file changed, 119 insertions(+)"
+    },
+    {
+      "sha": "7557c7800ed856eaad51384d27b401f16f0c905e",
+      "author_date": "2026-08-11T21:31:26+09:00",
+      "commit_date": "2026-08-11T12:31:26Z",
+      "subject": "Improve Ruby highlighting (#911)",
+      "files": [
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/ruby.rb"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/ruby.lsh"
+        }
+      ],
+      "stat": "2 files changed, 20 insertions(+), 7 deletions(-)"
+    },
+    {
+      "sha": "22689f47b82b8c99537a13939e4b24810e5519c7",
+      "author_date": "2026-08-19T09:43:15-04:00",
+      "commit_date": "2026-08-19T15:43:15+02:00",
+      "subject": "Pin GitHub Actions to full-length commit SHAs (#920)",
+      "files": [
+        {
+          "status": "A",
+          "path": ".github/dependabot.yml"
+        },
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": ".github/workflows/winget.yml"
+        }
+      ],
+      "stat": "3 files changed, 19 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "861419d10e69485c6479e772db4f9cef2822b8d4",
+      "author_date": "2026-08-26T02:58:34+08:00",
+      "commit_date": "2026-08-25T18:58:34Z",
+      "subject": "Allow memset fallback to non SIMD implementation on x86 (#940)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/stdext/src/simd/memset.rs"
+        }
+      ],
+      "stat": "1 file changed, 7 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "4bfb9d956c5519338ae95e57bace6bcd692c7508",
+      "author_date": "2026-08-27T01:44:38+02:00",
+      "commit_date": "2026-08-27T01:44:38+02:00",
+      "subject": "json: Double perf, Thirdle memory use (#941)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/json.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/string.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/collections/vec.rs"
+        }
+      ],
+      "stat": "3 files changed, 112 insertions(+), 17 deletions(-)"
+    },
+    {
+      "sha": "310d6e66c87657e9ce206c6d4bee226fb9cd7bc2",
+      "author_date": "2026-08-27T21:30:27+02:00",
+      "commit_date": "2026-08-27T21:30:27+02:00",
+      "subject": "Fix a \"chunk size must be non-zero\" panic (#919)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/input.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "7 files changed, 106 insertions(+), 124 deletions(-)"
+    },
+    {
+      "sha": "826b4c097b6f14ba0a846dc56f2f0223a3aaf73a",
+      "author_date": "2026-08-27T22:52:08+02:00",
+      "commit_date": "2026-08-27T22:52:08+02:00",
+      "subject": "Add an Inno Setup Installer (#915)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/winget.yml"
+        },
+        {
+          "status": "A",
+          "path": ".pipelines/nuget.config"
+        },
+        {
+          "status": "A",
+          "path": ".pipelines/packages.config"
+        },
+        {
+          "status": "M",
+          "path": ".pipelines/release.yml"
+        },
+        {
+          "status": "A",
+          "path": "assets/build-windows-setup.ps1"
+        },
+        {
+          "status": "A",
+          "path": "assets/edit.iss"
+        }
+      ],
+      "stat": "6 files changed, 358 insertions(+), 25 deletions(-)"
+    },
+    {
+      "sha": "adc60a88d966d76944458294a550b3cd36e8b43e",
+      "author_date": "2026-09-17T21:33:34+05:00",
+      "commit_date": "2026-09-17T18:33:34+02:00",
+      "subject": "Don't indent a line the selection stops at column 0 of (#918)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "1 file changed, 5 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "650edc1c7467932aebeb4d1fc8de607bc40e1c6f",
+      "author_date": "2026-09-18T01:27:34+03:00",
+      "commit_date": "2026-09-18T00:27:34+02:00",
+      "subject": "Unindent leading whitespace on backspace (#792)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "2 files changed, 63 insertions(+), 7 deletions(-)"
+    },
+    {
+      "sha": "8c97fa2d95ac03403b738c77d6e10cfdac53218f",
+      "author_date": "2026-09-18T20:33:51+02:00",
+      "commit_date": "2026-09-18T20:33:51+02:00",
+      "subject": "Theoretical fix for crashing when tabbing (#955)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        }
+      ],
+      "stat": "1 file changed, 8 insertions(+), 8 deletions(-)"
+    },
+    {
+      "sha": "b767559c323bebf95f5987a7fa66e79832291a5e",
+      "author_date": "2026-09-18T20:34:02+02:00",
+      "commit_date": "2026-09-18T20:34:02+02:00",
+      "subject": "Configure CodeQL (#956)",
+      "files": [
+        {
+          "status": "A",
+          "path": ".github/codeql/codeql-config.yml"
+        },
+        {
+          "status": "A",
+          "path": ".github/workflows/codeql-analysis.yml"
+        }
+      ],
+      "stat": "2 files changed, 39 insertions(+)"
+    },
+    {
+      "sha": "f6ae6154576316a38854800f25e2d3c6a737dce6",
+      "author_date": "2026-09-21T16:48:28+02:00",
+      "commit_date": "2026-09-21T16:48:28+02:00",
+      "subject": "Fix reading overly large files (#954)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/gap_buffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "2 files changed, 62 insertions(+), 21 deletions(-)"
+    },
+    {
+      "sha": "2c4177f6ffb0752a677ea9bf8296beb9b79574e7",
+      "author_date": "2026-09-21T18:12:41+02:00",
+      "commit_date": "2026-09-21T18:12:41+02:00",
+      "subject": "Turn lsh into a standalone crate (#958)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/README.md"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/build/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lsh/highlighter.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lsh/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/lsh-bin/Cargo.toml"
+        },
+        {
+          "status": "D",
+          "path": "crates/lsh-bin/src/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/README.md"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/backend.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/charset.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/frontend.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/generator.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/index_vec.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/compiler/ir.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/optimizer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/glob.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/src/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/runtime.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/glob.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/stdext/src/lib.rs"
+        }
+      ],
+      "stat": "26 files changed, 1093 insertions(+), 1265 deletions(-)"
+    },
+    {
+      "sha": "3cff89ee82ee1a7fd1a520449259f4bb8f364b8f",
+      "author_date": "2026-09-21T18:33:41+02:00",
+      "commit_date": "2026-09-21T18:33:41+02:00",
+      "subject": "Enable CodeQL for actions (#959)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/codeql-analysis.yml"
+        }
+      ],
+      "stat": "1 file changed, 12 insertions(+), 6 deletions(-)"
+    },
+    {
+      "sha": "c470ca59af44c176ea39c672d09b32061c274896",
+      "author_date": "2026-09-21T22:48:38+02:00",
+      "commit_date": "2026-09-21T22:48:38+02:00",
+      "subject": "Reintegrate stdext into edit (#960)",
+      "files": [
+        {
+          "status": "M",
+          "path": ".github/workflows/ci.yml"
+        },
+        {
+          "status": "M",
+          "path": "Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "crates/README.md"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/alloc.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/arena/debug.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/arena/fs.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/arena/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/arena/release.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/arena/scratch.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/base64.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_editor.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_filepicker.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_menubar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/draw_statusbar.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/localization.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/main.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/bin/edit/settings.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/gap_buffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/collections/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/collections/string.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/collections/vec.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/document.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/float.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/framebuffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/fuzzy.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/helpers.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/icu.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/json.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lsh/cache.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/lsh/highlighter.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/maybe_owned.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/memchr2.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/simd/memset.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/simd/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/tui.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/measurement.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/mod.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/unicode/sanitize.rs"
+        },
+        {
+          "status": "A",
+          "path": "crates/edit/src/unicode/utf8.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/vt.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/README.md"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/Cargo.toml"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/alloc.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/arena/debug.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/arena/fs.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/arena/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/arena/release.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/arena/scratch.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/collections/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/collections/string.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/collections/vec.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/float.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/helpers.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/lib.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/maybe_owned.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/simd/memset.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/simd/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/sys/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/sys/unix.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/sys/windows.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/unicode/mod.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/unicode/sanitize.rs"
+        },
+        {
+          "status": "D",
+          "path": "crates/stdext/src/unicode/utf8.rs"
+        },
+        {
+          "status": "M",
+          "path": "fuzz/Cargo.lock"
+        },
+        {
+          "status": "M",
+          "path": "fuzz/Cargo.toml"
+        },
+        {
+          "status": "M",
+          "path": "fuzz/fuzz_targets/highlighter.rs"
+        }
+      ],
+      "stat": "58 files changed, 355 insertions(+), 510 deletions(-)"
+    },
+    {
+      "sha": "469e0e2648a1cb066488b07bdfae60c79898aae8",
+      "author_date": "2026-10-02T00:56:16+05:30",
+      "commit_date": "2026-10-01T19:26:16Z",
+      "subject": "Add various file extensions (#945)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/cpp.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/fsharp.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/json.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/xml.lsh"
+        }
+      ],
+      "stat": "4 files changed, 7 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "91244f5f405a9bac289b98dabfcf55ae5866000b",
+      "author_date": "2026-10-02T00:05:50+04:00",
+      "commit_date": "2026-10-01T22:05:50+02:00",
+      "subject": "Add Zig highlighting (#925)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/zig.zig"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/zig.lsh"
+        }
+      ],
+      "stat": "2 files changed, 267 insertions(+)"
+    },
+    {
+      "sha": "8bb20388aca01287c404a1de64815606a88a5290",
+      "author_date": "2026-10-02T02:35:56+05:30",
+      "commit_date": "2026-10-01T23:05:56+02:00",
+      "subject": "Add SQL syntax highlighting (#943)",
+      "files": [
+        {
+          "status": "A",
+          "path": "assets/highlighting-tests/sql.sql"
+        },
+        {
+          "status": "A",
+          "path": "crates/lsh/definitions/sql.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/zig.lsh"
+        }
+      ],
+      "stat": "3 files changed, 204 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "731fc9a3b7e6421211c99e919114aa1206774864",
+      "author_date": "2026-10-01T23:49:16+02:00",
+      "commit_date": "2026-10-01T16:49:16-05:00",
+      "subject": "Introduce utf8_decode_last (#969)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/utf8.rs"
+        }
+      ],
+      "stat": "1 file changed, 97 insertions(+), 14 deletions(-)"
+    },
+    {
+      "sha": "78cf564a57ec9f957ff1c29b00a77c26f4ad7918",
+      "author_date": "2026-10-01T21:50:57Z",
+      "commit_date": "2026-10-01T23:50:57+02:00",
+      "subject": "Improve YAML highlighting (#967)",
+      "files": [
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/yaml.yml"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/yaml.lsh"
+        }
+      ],
+      "stat": "2 files changed, 73 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "c04475cf38af0cb1e263bd93fb26601a8ade1639",
+      "author_date": "2026-10-01T23:53:41+02:00",
+      "commit_date": "2026-10-01T16:53:41-05:00",
+      "subject": "Don't require grapheme boundaries (#970)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/navigation.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/document.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/measurement.rs"
+        }
+      ],
+      "stat": "3 files changed, 102 insertions(+), 38 deletions(-)"
+    },
+    {
+      "sha": "25fcee57c8e0422fa1f75390b1e45f6c0109aa09",
+      "author_date": "2026-10-02T00:51:46+02:00",
+      "commit_date": "2026-10-02T00:51:46+02:00",
+      "subject": "Fix undo grouping in TextBuffer benchmarks (#971)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "2 files changed, 61 insertions(+), 23 deletions(-)"
+    },
+    {
+      "sha": "a359626098076da4a1a01dd93446d2b63b17a271",
+      "author_date": "2026-10-05T18:12:43+02:00",
+      "commit_date": "2026-10-05T18:12:43+02:00",
+      "subject": "Improve Arena allocator perf (#974)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/arena/release.rs"
+        }
+      ],
+      "stat": "1 file changed, 3 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "be94eccd7f27091783f56e3a96f7ac012a2ef36a",
+      "author_date": "2026-10-06T21:08:29+02:00",
+      "commit_date": "2026-10-06T21:08:29+02:00",
+      "subject": "Make newline normalization undoable (#978)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        }
+      ],
+      "stat": "2 files changed, 326 insertions(+), 124 deletions(-)"
+    },
+    {
+      "sha": "61184294aa3e5058fd9724f6ba27f78e16ff8678",
+      "author_date": "2026-10-06T23:22:29+02:00",
+      "commit_date": "2026-10-06T23:22:29+02:00",
+      "subject": "Fix several major undo/redo issues (#979)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/gap_buffer.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/unicode/utf8.rs"
+        }
+      ],
+      "stat": "4 files changed, 390 insertions(+), 238 deletions(-)"
+    },
+    {
+      "sha": "cc1b35e58e29c32bb138825e7bc71e63b099bd23",
+      "author_date": "2026-10-06T23:25:27+02:00",
+      "commit_date": "2026-10-06T21:25:27Z",
+      "subject": "Introduce copious amounts of TextBuffer tests (#980)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/buffer/mod.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/windows.rs"
+        }
+      ],
+      "stat": "3 files changed, 748 insertions(+), 16 deletions(-)"
+    },
+    {
+      "sha": "e3e3b4c4d56a9dbd5e1586d3cf2e4f4848d72f26",
+      "author_date": "2026-10-06T23:37:03+02:00",
+      "commit_date": "2026-10-06T23:37:03+02:00",
+      "subject": "Fix multiline strings for .js/.py/.sh (#973)",
+      "files": [
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/javascript.js"
+        },
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/python.py"
+        },
+        {
+          "status": "M",
+          "path": "assets/highlighting-tests/shellscript.sh"
+        },
+        {
+          "status": "M",
+          "path": "crates/edit/benches/lib.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/README.md"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/javascript.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/python.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/shellscript.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/frontend.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/compiler/regex.rs"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/src/runtime.rs"
+        }
+      ],
+      "stat": "11 files changed, 221 insertions(+), 99 deletions(-)"
+    },
+    {
+      "sha": "fdc3d14ef87b4de8f7c9c6a6add6ba79cc486d63",
+      "author_date": "2026-10-08T00:22:45+02:00",
+      "commit_date": "2026-10-07T22:22:45Z",
+      "subject": "unix: Fix EINTR handling in write_stdout (#982)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        }
+      ],
+      "stat": "1 file changed, 31 insertions(+), 19 deletions(-)"
+    },
+    {
+      "sha": "01df2525411e01fce951c229018cee2cf9aa6b36",
+      "author_date": "2026-10-08T00:52:37+02:00",
+      "commit_date": "2026-10-07T17:52:37-05:00",
+      "subject": "unix: Avoid open() in file_id() (#983)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        }
+      ],
+      "stat": "1 file changed, 8 insertions(+), 13 deletions(-)"
+    },
+    {
+      "sha": "a820b05544bd751a0f138e7b25ebcdddea29de1f",
+      "author_date": "2026-10-08T01:23:35+02:00",
+      "commit_date": "2026-10-07T18:23:35-05:00",
+      "subject": "unix: Fix lang selection with an empty LANGUAGE env var (#984)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        }
+      ],
+      "stat": "1 file changed, 4 insertions(+), 2 deletions(-)"
+    },
+    {
+      "sha": "67543cbfcdf24be10bfc1e36296f7a6a5843cd08",
+      "author_date": "2026-10-08T01:44:54+02:00",
+      "commit_date": "2026-10-08T01:44:54+02:00",
+      "subject": "unix: Fix EINTR handling around termios (#985)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/edit/src/sys/unix.rs"
+        }
+      ],
+      "stat": "1 file changed, 35 insertions(+), 12 deletions(-)"
+    },
+    {
+      "sha": "1be69c85a63bcd475a0b397196d0be3dbed60023",
+      "author_date": "2026-10-09T17:15:19+02:00",
+      "commit_date": "2026-10-09T17:15:19+02:00",
+      "subject": "Fix lsh manifest (#988)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/Cargo.toml"
+        }
+      ],
+      "stat": "1 file changed, 2 insertions(+), 1 deletion(-)"
+    },
+    {
+      "sha": "cb6de0a8966aecd01d19a3541dab1829d0e679ca",
+      "author_date": "2026-10-12T13:50:34+01:00",
+      "commit_date": "2026-10-12T14:50:34+02:00",
+      "subject": "python.lsh: Avoid capturing underscores as numeric literals (#981)",
+      "files": [
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/c.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/cpp.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/csharp.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/fsharp.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/go.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/java.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/javascript.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/odin.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/python.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/ruby.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/rust.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/toml.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/yaml.lsh"
+        },
+        {
+          "status": "M",
+          "path": "crates/lsh/definitions/zig.lsh"
+        }
+      ],
+      "stat": "14 files changed, 16 insertions(+), 16 deletions(-)"
+    }
+  ]
+}

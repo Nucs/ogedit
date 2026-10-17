@@ -9,11 +9,13 @@ use std::ops::{BitOr, BitXor};
 use std::ptr;
 use std::slice::ChunksExact;
 
-use crate::arena::{Arena, ArenaString};
+use crate::arena::{Arena, ArenaString, scratch_arena};
 use crate::helpers::{CoordType, Point, Rect, Size};
 use crate::oklab::StraightRgba;
 use crate::simd::{MemsetSafe, memset};
-use crate::unicode::MeasurementConfig;
+use crate::unicode::{
+    MeasurementConfig, SanitizedControlChars, SanitizedText, sanitize_control_chars,
+};
 
 // Same constants as used in the PCG family of RNGs.
 #[cfg(target_pointer_width = "32")]
@@ -102,6 +104,7 @@ pub struct Framebuffer {
     auto_colors: [StraightRgba; 2],
     /// A cache table for previously contrasted colors.
     /// See: <https://fgiesen.wordpress.com/2019/02/11/cache-tables/>
+    auto_color_threshold: f32,
     contrast_colors: [Cell<(StraightRgba, StraightRgba)>; CACHE_TABLE_SIZE],
     background_fill: StraightRgba,
     foreground_fill: StraightRgba,
@@ -118,6 +121,7 @@ impl Framebuffer {
                 DEFAULT_THEME[IndexedColor::Black as usize],
                 DEFAULT_THEME[IndexedColor::BrightWhite as usize],
             ],
+            auto_color_threshold: 0.5,
             contrast_colors: [const { Cell::new((StraightRgba::zero(), StraightRgba::zero())) };
                 CACHE_TABLE_SIZE],
             background_fill: DEFAULT_THEME[IndexedColor::Background as usize],
@@ -138,13 +142,21 @@ impl Framebuffer {
             self.indexed_colors[IndexedColor::Black as usize],
             self.indexed_colors[IndexedColor::BrightWhite as usize],
         ];
-        if !Self::is_dark(self.auto_colors[0]) {
+        let lightness = self.auto_colors.map(|c| c.as_oklab().lightness());
+        self.auto_color_threshold = (lightness[0] + lightness[1]) * 0.5;
+        for slot in &self.contrast_colors {
+            slot.set((StraightRgba::zero(), StraightRgba::zero()));
+        }
+        if lightness[0] > lightness[1] {
             self.auto_colors.swap(0, 1);
         }
     }
 
     /// Begins a new frame with the given `size`.
     pub fn flip(&mut self, size: Size) {
+        if size.is_empty() {
+            return;
+        }
         if size != self.buffers[0].bg_bitmap.size {
             for buffer in &mut self.buffers {
                 buffer.text = LineBuffer::new(size);
@@ -174,15 +186,61 @@ impl Framebuffer {
     /// Replaces text contents in a single line of the framebuffer.
     /// All coordinates are in viewport coordinates.
     /// Assumes that control characters have been replaced or escaped.
+    #[inline]
     pub fn replace_text(
         &mut self,
         y: CoordType,
         origin_x: CoordType,
         clip_right: CoordType,
-        text: &str,
+        text: &(impl AsRef<[u8]> + ?Sized),
     ) {
+        self.replace_text_impl(y, origin_x, clip_right, text.as_ref());
+    }
+
+    fn replace_text_impl(
+        &mut self,
+        y: CoordType,
+        origin_x: CoordType,
+        clip_right: CoordType,
+        text: &[u8],
+    ) {
+        let scratch = scratch_arena(None);
+        let sanitized = sanitize_control_chars(&scratch, text);
+
         let back = &mut self.buffers[self.frame_counter & 1];
-        back.text.replace_text(y, origin_x, clip_right, text)
+        back.text.replace_text(y, origin_x, clip_right, &sanitized);
+
+        if let SanitizedText::Owned(sanitized) = &sanitized {
+            self.highlight_sanitized(y, origin_x, clip_right, sanitized);
+        }
+    }
+
+    /// Highlights the replacements that [`sanitize_control_chars`] made in yellow.
+    #[cold]
+    fn highlight_sanitized(
+        &mut self,
+        y: CoordType,
+        origin_x: CoordType,
+        clip_right: CoordType,
+        sanitized: &SanitizedControlChars,
+    ) {
+        let bg = self.indexed(IndexedColor::Yellow);
+        let fg = self.contrasted(bg);
+        let text = sanitized.text.as_bytes();
+        let mut cfg = MeasurementConfig::new(&text);
+
+        for range in sanitized.unsane_ranges.iter() {
+            // The ranges are sorted, so once we're past the right edge we're done.
+            let left = origin_x + cfg.goto_offset(range.start).visual_pos.x;
+            if left >= clip_right {
+                break;
+            }
+
+            let right = origin_x + cfg.goto_offset(range.end).visual_pos.x;
+            let rect = Rect { left, top: y, right: right.min(clip_right), bottom: y + 1 };
+            self.blend_bg(rect, bg);
+            self.blend_fg(rect, fg);
+        }
     }
 
     /// Draws a scrollbar in the given `track` rectangle.
@@ -339,13 +397,10 @@ impl Framebuffer {
     #[cold]
     fn contrasted_slow(&self, color: StraightRgba) -> StraightRgba {
         let idx = (color.to_ne() as usize).wrapping_mul(HASH_MULTIPLIER) >> CACHE_TABLE_SHIFT;
-        let contrast = self.auto_colors[Self::is_dark(color) as usize];
+        let contrast =
+            self.auto_colors[(color.as_oklab().lightness() < self.auto_color_threshold) as usize];
         self.contrast_colors[idx].set((color, contrast));
         contrast
-    }
-
-    fn is_dark(color: StraightRgba) -> bool {
-        color.as_oklab().lightness() < 0.5
     }
 
     /// Blends the given sRGB color onto the background bitmap.
@@ -491,6 +546,13 @@ impl Framebuffer {
 
                 if last_attr != attr {
                     let diff = last_attr ^ attr;
+                    if diff.is(Attributes::Bold) {
+                        result.push_str(if attr.is(Attributes::Bold) {
+                            "\x1b[1m"
+                        } else {
+                            "\x1b[22m"
+                        });
+                    }
                     if diff.is(Attributes::Italic) {
                         if attr.is(Attributes::Italic) {
                             result.push_str("\x1b[3m");
@@ -504,6 +566,13 @@ impl Framebuffer {
                         } else {
                             result.push_str("\x1b[24m");
                         }
+                    }
+                    if diff.is(Attributes::Strikethrough) {
+                        result.push_str(if attr.is(Attributes::Strikethrough) {
+                            "\x1b[9m"
+                        } else {
+                            "\x1b[29m"
+                        });
                     }
                     last_attr = attr;
                 }
@@ -799,7 +868,7 @@ impl Bitmap {
 
     /// Iterates over each row in the bitmap.
     fn iter(&self) -> ChunksExact<'_, StraightRgba> {
-        self.data.chunks_exact(self.size.width as usize)
+        self.data.chunks_exact((self.size.width as usize).max(1))
     }
 }
 
@@ -807,7 +876,7 @@ impl Bitmap {
 ///
 /// It being a bitfield allows for simple diffing.
 #[repr(transparent)]
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Attributes(u8);
 
 #[allow(non_upper_case_globals)]
@@ -815,7 +884,9 @@ impl Attributes {
     pub const None: Self = Self(0);
     pub const Italic: Self = Self(0b1);
     pub const Underlined: Self = Self(0b10);
-    pub const All: Self = Self(0b11);
+    pub const Bold: Self = Self(0b100);
+    pub const Strikethrough: Self = Self(0b1000);
+    pub const All: Self = Self(0b1111);
 
     pub const fn is(self, attr: Self) -> bool {
         (self.0 & attr.0) == attr.0
@@ -885,7 +956,7 @@ impl AttributeBuffer {
 
     /// Iterates over each row in the bitmap.
     fn iter(&self) -> ChunksExact<'_, Attributes> {
-        self.data.chunks_exact(self.size.width as usize)
+        self.data.chunks_exact((self.size.width as usize).max(1))
     }
 }
 
@@ -903,5 +974,198 @@ impl Cursor {
 
     const fn new_disabled() -> Self {
         Self { pos: Point { x: -1, y: -1 }, overtype: false }
+    }
+}
+
+#[cfg(test)]
+mod insertion_cursor_tests {
+    use super::*;
+    use crate::buffer::TextBuffer;
+
+    #[test]
+    fn secondary_insertion_cursors_underline_without_selecting_the_following_character() {
+        let mut text = TextBuffer::new(true).unwrap();
+        text.set_crlf(false);
+        text.write_raw(b"abc\ndef\nghi");
+        text.set_width(12);
+        text.select_rectangle(Point { x: 1, y: 0 }, Point { x: 1, y: 2 });
+        assert_eq!(text.selection_ranges(), vec![(1, 1), (5, 5), (9, 9)]);
+
+        let mut framebuffer = Framebuffer::new();
+        framebuffer.flip(Size { width: 12, height: 4 });
+        text.render(
+            Point::default(),
+            Rect { left: 0, top: 0, right: 12, bottom: 4 },
+            true,
+            &mut framebuffer,
+        );
+        let back = &framebuffer.buffers[framebuffer.frame_counter & 1];
+        for cell in [1, 13] {
+            assert!(back.attributes.data[cell].is(Attributes::Underlined));
+            assert_eq!(back.bg_bitmap.data[cell], back.bg_bitmap.data[cell + 1]);
+            assert_eq!(back.fg_bitmap.data[cell], back.fg_bitmap.data[cell + 1]);
+            assert!(!back.attributes.data[cell + 1].is(Attributes::Underlined));
+        }
+        assert_eq!(back.cursor.pos, Point { x: 1, y: 2 });
+        assert!(!back.cursor.overtype);
+        assert!(!back.attributes.data[25].is(Attributes::Underlined));
+        assert_eq!(back.bg_bitmap.data[25], back.bg_bitmap.data[26]);
+        let arena = crate::arena::scratch_arena(None);
+        let output = framebuffer.render(&arena);
+        assert!(output.contains("\x1b[4m"));
+        assert!(output.contains("\x1b[5 q"));
+    }
+
+    #[test]
+    fn real_rectangular_selections_keep_selection_backgrounds() {
+        let mut text = TextBuffer::new(true).unwrap();
+        text.set_crlf(false);
+        text.write_raw(b"abc\ndef\nghi");
+        text.set_width(12);
+        text.select_rectangle(Point { x: 1, y: 0 }, Point { x: 2, y: 2 });
+        let mut framebuffer = Framebuffer::new();
+        framebuffer.flip(Size { width: 12, height: 4 });
+        text.render(
+            Point::default(),
+            Rect { left: 0, top: 0, right: 12, bottom: 4 },
+            true,
+            &mut framebuffer,
+        );
+        let back = &framebuffer.buffers[framebuffer.frame_counter & 1];
+        for cell in [1, 13, 25] {
+            assert_ne!(back.bg_bitmap.data[cell], back.bg_bitmap.data[cell + 1]);
+            assert!(!back.attributes.data[cell].is(Attributes::Underlined));
+        }
+        assert_eq!(text.selection_ranges(), vec![(1, 2), (5, 6), (9, 10)]);
+    }
+
+    #[test]
+    fn secondary_end_of_line_cursors_keep_empty_cells_unselected() {
+        let mut text = TextBuffer::new(true).unwrap();
+        text.set_crlf(false);
+        text.write_raw(b"ab\nc");
+        text.set_width(12);
+        text.select_rectangle(Point { x: 8, y: 0 }, Point { x: 8, y: 1 });
+        let mut framebuffer = Framebuffer::new();
+        framebuffer.flip(Size { width: 12, height: 3 });
+        text.render(
+            Point::default(),
+            Rect { left: 0, top: 0, right: 12, bottom: 3 },
+            true,
+            &mut framebuffer,
+        );
+        let back = &framebuffer.buffers[framebuffer.frame_counter & 1];
+        assert!(back.attributes.data[2].is(Attributes::Underlined));
+        assert_eq!(back.bg_bitmap.data[2], back.bg_bitmap.data[3]);
+        assert_eq!(text.selection_ranges(), vec![(2, 2), (4, 4)]);
+    }
+
+    #[test]
+    fn secondary_cursor_underlines_whole_wide_grapheme_without_changing_colors() {
+        let mut text = TextBuffer::new(true).unwrap();
+        text.set_crlf(false);
+        text.write_raw("界x\nlast".as_bytes());
+        text.set_width(12);
+        text.set_selection_ranges(&[(0, 0), (5, 5)]);
+        let mut framebuffer = Framebuffer::new();
+        framebuffer.flip(Size { width: 12, height: 3 });
+        text.render(
+            Point::default(),
+            Rect { left: 0, top: 0, right: 12, bottom: 3 },
+            true,
+            &mut framebuffer,
+        );
+        let back = &framebuffer.buffers[framebuffer.frame_counter & 1];
+        assert!(back.attributes.data[0].is(Attributes::Underlined));
+        assert!(back.attributes.data[1].is(Attributes::Underlined));
+        assert!(!back.attributes.data[2].is(Attributes::Underlined));
+        assert_eq!(back.bg_bitmap.data[0], back.bg_bitmap.data[2]);
+        assert_eq!(back.fg_bitmap.data[0], back.fg_bitmap.data[2]);
+        let arena = crate::arena::scratch_arena(None);
+        let output = framebuffer.render(&arena);
+        assert!(output.contains("\x1b[4m界\x1b[24m"));
+    }
+}
+
+#[cfg(test)]
+mod upstream_regression_tests {
+    use super::*;
+
+    #[test]
+    fn markup_attributes_toggle_independently_and_respect_masks() {
+        let mut frame = Framebuffer::new();
+        frame.flip(Size { width: 6, height: 1 });
+        frame.replace_text(0, 0, 6, "ABCDEF");
+        let cell = |x| Rect { left: x, top: 0, right: x + 1, bottom: 1 };
+        frame.replace_attr(cell(0), Attributes::All, Attributes::All);
+        frame.replace_attr(cell(1), Attributes::All, Attributes::All);
+        frame.replace_attr(cell(1), Attributes::Bold | Attributes::Strikethrough, Attributes::None);
+        frame.replace_attr(cell(3), Attributes::All, Attributes::Strikethrough);
+        frame.replace_attr(cell(4), Attributes::All, Attributes::Bold);
+        let back = &frame.buffers[frame.frame_counter & 1];
+        assert_eq!(back.attributes.data[1], Attributes::Italic | Attributes::Underlined);
+        assert_eq!(back.attributes.data[2], Attributes::None);
+        let arena = Arena::new(1024 * 1024).unwrap();
+        let output = frame.render(&arena);
+        assert!(output.contains("\x1b[1m\x1b[3m\x1b[4m\x1b[9mA"));
+        assert!(output.contains("\x1b[22m\x1b[29mB"));
+        assert!(output.contains("\x1b[23m\x1b[24mC"));
+        assert!(output.contains("\x1b[9mD\x1b[1m\x1b[29mE\x1b[22mF"));
+        // Rendering an unchanged frame emits no content or style transitions.
+        frame.flip(Size { width: 6, height: 1 });
+        frame.replace_text(0, 0, 6, "ABCDEF");
+        frame.replace_attr(cell(0), Attributes::All, Attributes::All);
+        frame.replace_attr(cell(1), Attributes::All, Attributes::Italic | Attributes::Underlined);
+        frame.replace_attr(cell(3), Attributes::All, Attributes::Strikethrough);
+        frame.replace_attr(cell(4), Attributes::All, Attributes::Bold);
+        assert!(frame.render(&arena).is_empty());
+    }
+
+    #[test]
+    fn hostile_text_is_visualized_before_emitting_terminal_output() {
+        let mut frame = Framebuffer::new();
+        frame.flip(Size { width: 60, height: 2 });
+        frame.replace_text(0, 0, 60, b"bad\x1b]52;c;payload\x07\xff");
+        let back = &frame.buffers[frame.frame_counter & 1];
+        assert!(back.text.lines[0].starts_with("bad␛]52;c;payload␇�"));
+        assert!(back.text.lines[0].chars().all(|ch| !ch.is_control()));
+        let arena = Arena::new(1024 * 1024).unwrap();
+        let output = frame.render(&arena);
+        assert!(!output.contains("\x1b]52;c;payload"));
+        assert!(output.contains("payload"));
+    }
+
+    #[test]
+    fn empty_frame_sizes_do_not_panic_and_keep_previous_viewport() {
+        let mut frame = Framebuffer::new();
+        let arena = Arena::new(1024 * 1024).unwrap();
+        for size in [Size::default(), Size { width: 0, height: 10 }, Size { width: 10, height: 0 }]
+        {
+            frame.flip(size);
+            _ = frame.render(&arena);
+        }
+        frame.flip(Size { width: 10, height: 2 });
+        frame.replace_text(0, 0, 10, "alive");
+        for size in [Size { width: 0, height: 10 }, Size { width: 10, height: 0 }] {
+            frame.flip(size);
+            assert_eq!(frame.buffers[0].text.size, Size { width: 10, height: 2 });
+            _ = frame.render(&arena);
+        }
+    }
+
+    #[test]
+    fn contrast_uses_palette_midpoint_and_invalidates_cached_colors() {
+        let mut frame = Framebuffer::new();
+        let probe = StraightRgba::from_rgba(0x43698aff);
+        let old = frame.contrasted(probe);
+        let mut palette = DEFAULT_THEME;
+        palette[IndexedColor::Black as usize] = StraightRgba::from_rgba(0x35424cff);
+        palette[IndexedColor::BrightWhite as usize] = StraightRgba::from_rgba(0xe5eff5ff);
+        frame.set_indexed_colors(palette);
+        assert_eq!(frame.contrasted(probe), palette[IndexedColor::BrightWhite as usize]);
+        assert_ne!(frame.contrasted(probe), old);
+        palette.swap(IndexedColor::Black as usize, IndexedColor::BrightWhite as usize);
+        frame.set_indexed_colors(palette);
+        assert_eq!(frame.contrasted(probe), StraightRgba::from_rgba(0xe5eff5ff));
     }
 }

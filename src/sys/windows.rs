@@ -2,12 +2,12 @@
 // Licensed under the MIT License.
 
 use std::ffi::{OsString, c_char, c_void};
-use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::mem::MaybeUninit;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr::{self, NonNull, null, null_mut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{mem, time};
 
 use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
@@ -84,8 +84,6 @@ struct State {
     stdin_mode_old: u32,
     stdout_mode_old: u32,
     leading_surrogate: u16,
-    inject_resize: bool,
-    wants_exit: bool,
 }
 
 static mut STATE: State = State {
@@ -97,13 +95,13 @@ static mut STATE: State = State {
     stdin_mode_old: INVALID_CONSOLE_MODE,
     stdout_mode_old: INVALID_CONSOLE_MODE,
     leading_surrogate: 0,
-    inject_resize: false,
-    wants_exit: false,
 };
+
+static WANTS_EXIT: AtomicBool = AtomicBool::new(false);
 
 extern "system" fn console_ctrl_handler(_ctrl_type: u32) -> Foundation::BOOL {
     unsafe {
-        STATE.wants_exit = true;
+        WANTS_EXIT.store(true, Ordering::Relaxed);
         IO::CancelIoEx(STATE.stdin, null());
     }
     1
@@ -144,20 +142,6 @@ pub fn switch_modes() -> apperr::Result<()> {
             },
         };
 
-        // Reopen stdin if it's redirected (= piped input).
-        if ptr::eq(STATE.stdin, Foundation::INVALID_HANDLE_VALUE)
-            || !matches!(FileSystem::GetFileType(STATE.stdin), FileSystem::FILE_TYPE_CHAR)
-        {
-            STATE.stdin = FileSystem::CreateFileW(
-                w!("CONIN$"),
-                Foundation::GENERIC_READ | Foundation::GENERIC_WRITE,
-                FileSystem::FILE_SHARE_READ | FileSystem::FILE_SHARE_WRITE,
-                null_mut(),
-                FileSystem::OPEN_EXISTING,
-                0,
-                null_mut(),
-            );
-        }
         if ptr::eq(STATE.stdin, Foundation::INVALID_HANDLE_VALUE)
             || ptr::eq(STATE.stdout, Foundation::INVALID_HANDLE_VALUE)
         {
@@ -223,27 +207,21 @@ impl Drop for Deinit {
     }
 }
 
-/// During startup we need to get the window size from the terminal.
-/// Because I didn't want to type a bunch of code, this function tells
-/// [`read_stdin`] to inject a fake sequence, which gets picked up by
-/// the input parser and provided to the TUI code.
-pub fn inject_window_size_into_stdin() {
-    unsafe {
-        STATE.inject_resize = true;
-    }
-}
-
-fn get_console_size() -> Option<Size> {
+pub fn get_window_size() -> apperr::Result<Size> {
     unsafe {
         let mut info: Console::CONSOLE_SCREEN_BUFFER_INFOEX = mem::zeroed();
         info.cbSize = mem::size_of::<Console::CONSOLE_SCREEN_BUFFER_INFOEX>() as u32;
         if Console::GetConsoleScreenBufferInfoEx(STATE.stdout, &mut info) == 0 {
-            return None;
+            return Err(get_last_error());
         }
 
-        let w = (info.srWindow.Right - info.srWindow.Left + 1).max(1) as CoordType;
-        let h = (info.srWindow.Bottom - info.srWindow.Top + 1).max(1) as CoordType;
-        Some(Size { width: w, height: h })
+        let width = info.srWindow.Right as CoordType - info.srWindow.Left as CoordType + 1;
+        let height = info.srWindow.Bottom as CoordType - info.srWindow.Top as CoordType + 1;
+        if width <= 0 || height <= 0 {
+            Err(gle_to_apperr(Foundation::ERROR_INVALID_DATA))
+        } else {
+            Ok(Size { width, height })
+        }
     }
 }
 
@@ -252,19 +230,15 @@ fn get_console_size() -> Option<Size> {
 /// # Returns
 ///
 /// * `None` if there was an error reading from stdin.
-/// * `Some("")` if the given timeout was reached.
-/// * Otherwise, it returns the read, non-empty string.
-pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaString<'_>> {
+/// * `Some((resize, ""))` if the given timeout was reached.
+/// * Otherwise, the pending native resize and decoded input text.
+pub fn read_stdin(
+    arena: &Arena,
+    mut timeout: time::Duration,
+) -> Option<(Option<Size>, ArenaString<'_>)> {
     let scratch = scratch_arena(Some(arena));
 
-    // On startup we're asked to inject a window size so that the UI system can layout the elements.
-    // --> Inject a fake sequence for our input parser.
     let mut resize_event = None;
-    if unsafe { STATE.inject_resize } {
-        unsafe { STATE.inject_resize = false };
-        timeout = time::Duration::ZERO;
-        resize_event = get_console_size();
-    }
 
     let read_poll = timeout != time::Duration::MAX; // there is a timeout -> don't block in read()
     let input_buf = scratch.alloc_uninit_slice(4 * KIBI);
@@ -300,8 +274,7 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
 
         // Read from stdin.
         let input = unsafe {
-            // If we had a `inject_resize`, we don't want to block indefinitely for other pending input on startup,
-            // but are still interested in any other pending input that may be waiting for us.
+            // Polling reads must not block after the readiness check.
             let flags = if read_poll { CONSOLE_READ_NOWAIT } else { 0 };
             let mut read = 0;
             let ok = (STATE.read_console_input_ex)(
@@ -311,7 +284,7 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
                 &mut read,
                 flags,
             );
-            if ok == 0 || STATE.wants_exit {
+            if ok == 0 || WANTS_EXIT.load(Ordering::Relaxed) {
                 return None;
             }
             input_buf[..read as usize].assume_init_ref()
@@ -323,7 +296,8 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
                 Console::KEY_EVENT => {
                     let event = unsafe { &inp.Event.KeyEvent };
                     let ch = unsafe { event.uChar.UnicodeChar };
-                    if event.bKeyDown != 0 && ch != 0 {
+                    let sc = event.wVirtualScanCode;
+                    if event.bKeyDown != 0 && (ch != 0 || sc == 0) {
                         utf16_buf[utf16_buf_len] = MaybeUninit::new(ch);
                         utf16_buf_len += 1;
                     }
@@ -347,20 +321,10 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
         }
     }
 
-    const RESIZE_EVENT_FMT_MAX_LEN: usize = 16; // "\x1b[8;65535;65535t"
-    let resize_event_len = if resize_event.is_some() { RESIZE_EVENT_FMT_MAX_LEN } else { 0 };
-    // +1 to account for a potential `STATE.leading_surrogate`.
+    // +1 accounts for a leading surrogate carried from the previous read.
     let utf8_max_len = (utf16_buf_len + 1) * 3;
     let mut text = ArenaString::new_in(arena);
-    text.reserve(utf8_max_len + resize_event_len);
-
-    // Now prepend our previously extracted resize event.
-    if let Some(resize_event) = resize_event {
-        // If I read xterm's documentation correctly, CSI 18 t reports the window size in characters.
-        // CSI 8 ; height ; width t is the response. Of course, we didn't send the request,
-        // but we can use this fake response to trigger the editor to resize itself.
-        _ = write!(text, "\x1b[8;{};{}t", resize_event.height, resize_event.width);
-    }
+    text.reserve(utf8_max_len);
 
     // If the input ends with a lone lead surrogate, we need to remember it for the next read.
     if utf16_buf_len > 0 {
@@ -397,7 +361,7 @@ pub fn read_stdin(arena: &Arena, mut timeout: time::Duration) -> Option<ArenaStr
     }
 
     text.shrink_to_fit();
-    Some(text)
+    Some((resize_event, text))
 }
 
 /// Writes a string to stdout.
@@ -421,17 +385,37 @@ pub fn write_stdout(text: &str) {
     }
 }
 
-/// Check if the stdin handle is redirected to a file, etc.
-///
-/// # Returns
-///
-/// * `Some(file)` if stdin is redirected.
-/// * Otherwise, `None`.
-pub fn open_stdin_if_redirected() -> Option<File> {
+/// Reopen stdin if it's redirected (= piped input).
+pub fn reopen_stdin_if_redirected() -> apperr::Result<Option<File>> {
     unsafe {
-        let handle = Console::GetStdHandle(Console::STD_INPUT_HANDLE);
-        // Did we reopen stdin during `init()`?
-        if !std::ptr::eq(STATE.stdin, handle) { Some(File::from_raw_handle(handle)) } else { None }
+        let stdin = STATE.stdin;
+
+        if !stdin.is_null()
+            && stdin != Foundation::INVALID_HANDLE_VALUE
+            && FileSystem::GetFileType(stdin) == FileSystem::FILE_TYPE_CHAR
+        {
+            return Ok(None); // stdin refers to a TTY
+        }
+
+        let terminal = FileSystem::CreateFileW(
+            w!("CONIN$"),
+            Foundation::GENERIC_READ | Foundation::GENERIC_WRITE,
+            FileSystem::FILE_SHARE_READ | FileSystem::FILE_SHARE_WRITE,
+            null_mut(),
+            FileSystem::OPEN_EXISTING,
+            0,
+            null_mut(),
+        );
+        if terminal == Foundation::INVALID_HANDLE_VALUE {
+            return Err(get_last_error());
+        }
+        STATE.stdin = terminal;
+
+        if !stdin.is_null() && stdin != Foundation::INVALID_HANDLE_VALUE {
+            Ok(Some(File::from_raw_handle(stdin)))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -533,17 +517,20 @@ pub unsafe fn virtual_reserve(size: usize) -> apperr::Result<NonNull<u8>> {
         // Makes it possible to immediately tell which address space a pointer belongs to.
         #[cfg(all(debug_assertions, not(target_pointer_width = "32")))]
         {
-            static mut S_BASE_GEN: usize = 0x0000100000000000; // 16 TiB
-            S_BASE_GEN += 0x0000001000000000; // 64 GiB
-            base = S_BASE_GEN as *mut _;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            const STEP: usize = 0x0000001000000000; // 64 GiB
+            static S_BASE_GEN: AtomicUsize = AtomicUsize::new(0x0000100000000000); // 16 TiB
+            base = S_BASE_GEN.fetch_add(STEP, Ordering::Relaxed).wrapping_add(STEP) as *mut _;
         }
 
-        check_ptr_return(Memory::VirtualAlloc(
-            base,
-            size,
-            Memory::MEM_RESERVE,
-            Memory::PAGE_READWRITE,
-        ) as *mut u8)
+        let mut ptr = Memory::VirtualAlloc(base, size, Memory::MEM_RESERVE, Memory::PAGE_READWRITE);
+        // Debug address hints can collide or exhaust their range in long stress runs.
+        // They must not turn an otherwise valid allocation into an artificial OOM.
+        if ptr.is_null() && !base.is_null() {
+            ptr =
+                Memory::VirtualAlloc(null_mut(), size, Memory::MEM_RESERVE, Memory::PAGE_READWRITE);
+        }
+        check_ptr_return(ptr as *mut u8)
     }
 }
 
@@ -699,13 +686,15 @@ fn wide_to_utf8<'a>(arena: &'a Arena, wide: &[u16]) -> ArenaString<'a> {
     res.reserve(wide.len() * 3);
 
     let len = unsafe {
+        let vec = res.as_mut_vec();
+        let spare = vec.spare_capacity_mut();
         Globalization::WideCharToMultiByte(
             Globalization::CP_UTF8,
             0,
             wide.as_ptr(),
             wide.len() as i32,
-            res.as_mut_ptr() as *mut _,
-            res.capacity() as i32,
+            spare.as_mut_ptr() as *mut _,
+            spare.len() as i32,
             null(),
             null_mut(),
         )
@@ -771,6 +760,7 @@ pub fn apperr_format(f: &mut std::fmt::Formatter<'_>, code: u32) -> std::fmt::Re
 /// Checks if the given error is a "file not found" error.
 pub fn apperr_is_not_found(err: apperr::Error) -> bool {
     err == gle_to_apperr(Foundation::ERROR_FILE_NOT_FOUND)
+        || err == gle_to_apperr(Foundation::ERROR_PATH_NOT_FOUND)
 }
 
 fn check_bool_return(ret: Foundation::BOOL) -> apperr::Result<()> {
@@ -779,4 +769,40 @@ fn check_bool_return(ret: Foundation::BOOL) -> apperr::Result<()> {
 
 fn check_ptr_return<T>(ret: *mut T) -> apperr::Result<NonNull<T>> {
     NonNull::new(ret).ok_or_else(get_last_error)
+}
+
+#[cfg(test)]
+pub fn memfd() -> std::io::Result<File> {
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_DELETE_ON_CLOSE,
+    };
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "ogedit-memfd-{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    ));
+
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .custom_flags(FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE)
+        .open(&path)
+}
+
+#[cfg(test)]
+mod upstream_error_tests {
+    use super::*;
+    #[test]
+    fn missing_parent_and_missing_file_share_not_found_classification() {
+        assert!(apperr_is_not_found(gle_to_apperr(Foundation::ERROR_FILE_NOT_FOUND)));
+        assert!(apperr_is_not_found(gle_to_apperr(Foundation::ERROR_PATH_NOT_FOUND)));
+        assert!(!apperr_is_not_found(gle_to_apperr(Foundation::ERROR_ACCESS_DENIED)));
+    }
 }

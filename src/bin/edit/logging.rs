@@ -56,16 +56,9 @@ impl Logger {
             fs::create_dir_all(parent).ok()?;
         }
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .ok()?;
+        let file = OpenOptions::new().create(true).append(true).open(&path).ok()?;
 
-        Some(Self {
-            file,
-            current_date: date,
-        })
+        Some(Self { file, current_date: date })
     }
 
     fn ensure_current_date(&mut self) -> bool {
@@ -80,11 +73,7 @@ impl Logger {
                 if let Some(parent) = path.parent() {
                     let _ = fs::create_dir_all(parent);
                 }
-                if let Ok(file) = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path)
-                {
+                if let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) {
                     self.file = file;
                     self.current_date = date;
                     return true;
@@ -133,25 +122,13 @@ fn sanitize_path_for_filename(path: &str) -> String {
 
     // Trim leading/trailing dashes
     let trimmed = result.trim_matches('-');
-    if trimmed.is_empty() {
-        "unknown".to_string()
-    } else {
-        trimmed.to_string()
-    }
+    if trimmed.is_empty() { "unknown".to_string() } else { trimmed.to_string() }
 }
 
 /// Get the path to the log file
 /// Format: ~/.ogedit/logs/{sanitized_cwd}_{yyyymmdd}_{pid}.log
 fn get_log_path(sanitized_cwd: &str, date: &str, pid: u32) -> Option<PathBuf> {
-    let home = if cfg!(windows) {
-        std::env::var_os("USERPROFILE")?
-    } else {
-        std::env::var_os("HOME")?
-    };
-
-    let mut path = PathBuf::from(home);
-    path.push(".ogedit");
-    path.push("logs");
+    let mut path = crate::config::Config::data_dir()?.join("logs");
 
     // Compact date format: YYYYMMDD instead of YYYY-MM-DD
     let compact_date = date.replace('-', "");
@@ -161,9 +138,7 @@ fn get_log_path(sanitized_cwd: &str, date: &str, pid: u32) -> Option<PathBuf> {
 
 /// Get current date and time as (YYYY-MM-DD, HH:MM:SS.mmm)
 fn get_datetime() -> (String, String) {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
 
     let total_secs = now.as_secs();
     let millis = now.subsec_millis();
@@ -207,17 +182,21 @@ fn days_to_ymd(days: i64) -> (i32, u32, u32) {
 ///
 /// Also installs a panic hook to capture panics to the log.
 /// Note: In release builds with `panic = "abort"`, the hook may not run.
+pub fn enabled() -> bool {
+    SESSION_INFO.get().is_some()
+}
+
 pub fn init() {
+    if std::env::var_os("OGEDIT_LOG").as_deref() != Some(std::ffi::OsStr::new("1")) {
+        return;
+    }
     // Capture session info (cwd and pid) - only done once
     let _ = SESSION_INFO.get_or_init(|| {
         let cwd = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
 
-        SessionInfo {
-            sanitized_cwd: sanitize_path_for_filename(&cwd),
-            pid: process::id(),
-        }
+        SessionInfo { sanitized_cwd: sanitize_path_for_filename(&cwd), pid: process::id() }
     });
 
     // Initialize the thread-local logger
@@ -263,9 +242,11 @@ fn install_panic_hook() {
         write_log("=== Application crashed ===");
 
         // Ensure log is flushed
-        LOGGER.with(|logger| {
-            if let Some(ref mut l) = *logger.borrow_mut() {
-                let _ = l.file.flush();
+        let _ = LOGGER.try_with(|logger| {
+            if let Ok(mut logger) = logger.try_borrow_mut()
+                && let Some(ref mut logger) = *logger
+            {
+                let _ = logger.file.flush();
             }
         });
 
@@ -276,9 +257,13 @@ fn install_panic_hook() {
 
 /// Write a log message
 fn write_log(message: &str) {
-    LOGGER.with(|logger| {
-        if let Some(ref mut l) = *logger.borrow_mut() {
-            l.write_log(message);
+    // A panic may arrive while the logger is borrowed or during TLS teardown.
+    // Diagnostics must not turn that into a second panic and skip terminal cleanup.
+    let _ = LOGGER.try_with(|logger| {
+        if let Ok(mut logger) = logger.try_borrow_mut()
+            && let Some(ref mut logger) = *logger
+        {
+            logger.write_log(message);
         }
     });
 }
@@ -314,6 +299,9 @@ fn escape_bytes(bytes: &[u8]) -> String {
             for &b in bytes {
                 if b == b'\r' {
                     // Strip carriage returns
+                } else if b == b'\\' || b == b'"' {
+                    result.push('\\');
+                    result.push(b as char);
                 } else if b.is_ascii_graphic() || b == b' ' {
                     result.push(b as char);
                 } else {
@@ -369,7 +357,11 @@ fn format_with_line_numbers(text: &str) -> String {
         let escaped_line = escape_text(line);
         // Truncate very long lines for readability
         let display_line = if escaped_line.len() > 200 {
-            format!("{}...", &escaped_line[..200])
+            let mut end = 200;
+            while !escaped_line.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &escaped_line[..end])
         } else {
             escaped_line
         };
@@ -420,71 +412,7 @@ fn format_hex_with_offset(bytes: &[u8]) -> String {
 
 /// Format a keyboard shortcut for logging
 fn format_shortcut(key: InputKey) -> String {
-    use ogedit::input::{kbmod, vk};
-
-    // Match common shortcuts directly
-    let shortcut_str = match key {
-        k if k == kbmod::CTRL | vk::A => "Ctrl+A",
-        k if k == kbmod::CTRL | vk::B => "Ctrl+B",
-        k if k == kbmod::CTRL | vk::C => "Ctrl+C",
-        k if k == kbmod::CTRL | vk::D => "Ctrl+D",
-        k if k == kbmod::CTRL | vk::E => "Ctrl+E",
-        k if k == kbmod::CTRL | vk::F => "Ctrl+F",
-        k if k == kbmod::CTRL | vk::G => "Ctrl+G",
-        k if k == kbmod::CTRL | vk::H => "Ctrl+H",
-        k if k == kbmod::CTRL | vk::I => "Ctrl+I",
-        k if k == kbmod::CTRL | vk::J => "Ctrl+J",
-        k if k == kbmod::CTRL | vk::K => "Ctrl+K",
-        k if k == kbmod::CTRL | vk::L => "Ctrl+L",
-        k if k == kbmod::CTRL | vk::M => "Ctrl+M",
-        k if k == kbmod::CTRL | vk::N => "Ctrl+N",
-        k if k == kbmod::CTRL | vk::O => "Ctrl+O",
-        k if k == kbmod::CTRL | vk::P => "Ctrl+P",
-        k if k == kbmod::CTRL | vk::Q => "Ctrl+Q",
-        k if k == kbmod::CTRL | vk::R => "Ctrl+R",
-        k if k == kbmod::CTRL | vk::S => "Ctrl+S",
-        k if k == kbmod::CTRL | vk::T => "Ctrl+T",
-        k if k == kbmod::CTRL | vk::U => "Ctrl+U",
-        k if k == kbmod::CTRL | vk::V => "Ctrl+V",
-        k if k == kbmod::CTRL | vk::W => "Ctrl+W",
-        k if k == kbmod::CTRL | vk::X => "Ctrl+X",
-        k if k == kbmod::CTRL | vk::Y => "Ctrl+Y",
-        k if k == kbmod::CTRL | vk::Z => "Ctrl+Z",
-        k if k == kbmod::CTRL_SHIFT | vk::S => "Ctrl+Shift+S",
-        k if k == kbmod::ALT | vk::Z => "Alt+Z",
-        k if k == vk::F1 => "F1",
-        k if k == vk::F2 => "F2",
-        k if k == vk::F3 => "F3",
-        k if k == vk::F4 => "F4",
-        k if k == vk::F5 => "F5",
-        k if k == vk::F6 => "F6",
-        k if k == vk::F7 => "F7",
-        k if k == vk::F8 => "F8",
-        k if k == vk::F9 => "F9",
-        k if k == vk::F10 => "F10",
-        k if k == vk::F11 => "F11",
-        k if k == vk::F12 => "F12",
-        k if k == vk::RETURN => "Enter",
-        k if k == vk::ESCAPE => "Escape",
-        k if k == vk::BACK => "Backspace",
-        k if k == vk::TAB => "Tab",
-        k if k == vk::SPACE => "Space",
-        k if k == vk::DELETE => "Delete",
-        k if k == vk::INSERT => "Insert",
-        k if k == vk::HOME => "Home",
-        k if k == vk::END => "End",
-        k if k == vk::PRIOR => "PageUp",
-        k if k == vk::NEXT => "PageDown",
-        k if k == vk::LEFT => "Left",
-        k if k == vk::RIGHT => "Right",
-        k if k == vk::UP => "Up",
-        k if k == vk::DOWN => "Down",
-        _ => {
-            return "Unknown".to_string();
-        }
-    };
-
-    shortcut_str.to_string()
+    crate::config::Hotkeys::hotkey_to_string(key)
 }
 
 // ============================================================================
@@ -493,6 +421,9 @@ fn format_shortcut(key: InputKey) -> String {
 
 /// Log that the application started
 pub fn log_app_start() {
+    if !self::enabled() {
+        return;
+    }
     write_log("=== Application started ===");
     if let Some(session) = SESSION_INFO.get() {
         let cwd = std::env::current_dir()
@@ -504,23 +435,35 @@ pub fn log_app_start() {
 
 /// Log that the application is exiting
 pub fn log_app_exit() {
+    if !self::enabled() {
+        return;
+    }
     write_log("=== Application exiting ===");
 }
 
 /// Log text input from the user
 pub fn log_text_input(text: &str) {
+    if !self::enabled() {
+        return;
+    }
     let formatted = format_content(text);
     write_log(&format!("TEXT_INPUT: {}", formatted));
 }
 
 /// Log text input from paste
 pub fn log_paste(text: &[u8]) {
+    if !self::enabled() {
+        return;
+    }
     let formatted = format_content_bytes(text);
     write_log(&format!("PASTE: {}", formatted));
 }
 
 /// Log a keyboard shortcut
 pub fn log_shortcut(key: InputKey, action: &str) {
+    if !self::enabled() {
+        return;
+    }
     let shortcut = format_shortcut(key);
     write_log(&format!("SHORTCUT: {} -> {}", shortcut, action));
 }
@@ -529,13 +472,10 @@ pub fn log_shortcut(key: InputKey, action: &str) {
 /// - from/to: logical (column, line) positions
 /// - from_offset/to_offset: byte offsets in buffer
 /// - method: what caused the movement (e.g., "arrow_left", "arrow_up", "click", "navigation")
-pub fn log_cursor_move(
-    from: Point,
-    to: Point,
-    from_offset: usize,
-    to_offset: usize,
-    method: &str,
-) {
+pub fn log_cursor_move(from: Point, to: Point, from_offset: usize, to_offset: usize, method: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!(
         "CURSOR_MOVE: Ln {}, Col {} (offset {}) -> Ln {}, Col {} (offset {}) [{}]",
         from.y + 1,
@@ -559,6 +499,9 @@ pub fn log_selection(
     end_offset: usize,
     content: Option<&[u8]>,
 ) {
+    if !self::enabled() {
+        return;
+    }
     let range_info = format!(
         "Ln {}, Col {} (offset {}) to Ln {}, Col {} (offset {})",
         start.y + 1,
@@ -579,54 +522,84 @@ pub fn log_selection(
 
 /// Log selection cleared
 pub fn log_selection_clear() {
+    if !self::enabled() {
+        return;
+    }
     write_log("SELECTION_CLEAR");
 }
 
 /// Log menu opened
 pub fn log_menu_open(menu_name: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("MENU_OPEN: \"{}\"", menu_name));
 }
 
 /// Log menu item clicked
 pub fn log_menu_click(menu_path: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("MENU_CLICK: \"{}\"", menu_path));
 }
 
 /// Log menu checkbox toggled
 pub fn log_menu_checkbox(menu_path: &str, checked: bool) {
+    if !self::enabled() {
+        return;
+    }
     let state = if checked { "checked" } else { "unchecked" };
     write_log(&format!("MENU_CHECKBOX: \"{}\" -> {}", menu_path, state));
 }
 
 /// Log file opened
 pub fn log_file_open(path: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("FILE_OPEN: \"{}\"", escape_text(path)));
 }
 
 /// Log file saved
 pub fn log_file_save(path: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("FILE_SAVE: \"{}\"", escape_text(path)));
 }
 
 /// Log new file created
 pub fn log_file_new(name: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("FILE_NEW: \"{}\"", escape_text(name)));
 }
 
 /// Log file closed
 pub fn log_file_close(name: &str, was_dirty: bool) {
+    if !self::enabled() {
+        return;
+    }
     let dirty_str = if was_dirty { " (unsaved changes discarded)" } else { "" };
-    write_log(&format!("FILE_CLOSE: \"{}\"{}",  escape_text(name), dirty_str));
+    write_log(&format!("FILE_CLOSE: \"{}\"{}", escape_text(name), dirty_str));
 }
 
 /// Log search operation
 pub fn log_search(needle: &str, found: bool) {
+    if !self::enabled() {
+        return;
+    }
     let result = if found { "found" } else { "not found" };
     write_log(&format!("SEARCH: \"{}\" -> {}", escape_text(needle), result));
 }
 
 /// Log replace operation
 pub fn log_replace(needle: &str, replacement: &str, count: usize) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!(
         "REPLACE: \"{}\" -> \"{}\" ({} occurrences)",
         escape_text(needle),
@@ -637,94 +610,189 @@ pub fn log_replace(needle: &str, replacement: &str, count: usize) {
 
 /// Log undo operation
 pub fn log_undo() {
+    if !self::enabled() {
+        return;
+    }
     write_log("UNDO");
 }
 
 /// Log redo operation
 pub fn log_redo() {
+    if !self::enabled() {
+        return;
+    }
     write_log("REDO");
 }
 
 /// Log goto line operation
 pub fn log_goto(target: Point) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("GOTO: line {}, column {}", target.y + 1, target.x + 1));
 }
 
 /// Log word wrap toggle
 pub fn log_word_wrap_toggle(enabled: bool) {
+    if !self::enabled() {
+        return;
+    }
     let state = if enabled { "enabled" } else { "disabled" };
     write_log(&format!("WORD_WRAP: {}", state));
 }
 
 /// Log encoding change
 pub fn log_encoding_change(from: &str, to: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("ENCODING: \"{}\" -> \"{}\"", from, to));
 }
 
 /// Log delete operation
 pub fn log_delete(deleted_text: &str, method: &str) {
+    if !self::enabled() {
+        return;
+    }
     let formatted = format_content(deleted_text);
     write_log(&format!("DELETE: {} [{}]", formatted, method));
 }
 
 /// Log cut operation
 pub fn log_cut(text: &[u8]) {
+    if !self::enabled() {
+        return;
+    }
     let formatted = format_content_bytes(text);
     write_log(&format!("CUT: {}", formatted));
 }
 
 /// Log copy operation
 pub fn log_copy(text: &[u8]) {
+    if !self::enabled() {
+        return;
+    }
     let formatted = format_content_bytes(text);
     write_log(&format!("COPY: {}", formatted));
 }
 
 /// Log duplicate line operation
 pub fn log_duplicate_line() {
+    if !self::enabled() {
+        return;
+    }
     write_log("DUPLICATE_LINE");
 }
 
 /// Log select all operation
 pub fn log_select_all() {
+    if !self::enabled() {
+        return;
+    }
     write_log("SELECT_ALL");
 }
 
 /// Log mouse click with screen position and target area
 pub fn log_mouse_click(pos: Point, button: &str, target: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("MOUSE_CLICK: ({},{}) [{}] -> {}", pos.x, pos.y, button, target));
 }
 
 /// Log mouse drag
 pub fn log_mouse_drag(from: Point, to: Point) {
-    write_log(&format!(
-        "MOUSE_DRAG: ({},{}) -> ({},{})",
-        from.x, from.y, to.x, to.y
-    ));
+    if !self::enabled() {
+        return;
+    }
+    write_log(&format!("MOUSE_DRAG: ({},{}) -> ({},{})", from.x, from.y, to.x, to.y));
 }
 
 /// Log dialog opened
 pub fn log_dialog_open(dialog_name: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("DIALOG_OPEN: \"{}\"", dialog_name));
 }
 
 /// Log dialog closed
 pub fn log_dialog_close(dialog_name: &str, result: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("DIALOG_CLOSE: \"{}\" -> {}", dialog_name, result));
 }
 
 /// Log generic action with custom message
 pub fn log_action(action: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("ACTION: {}", action));
 }
 
 /// Log error
 pub fn log_error(error: &str) {
+    if !self::enabled() {
+        return;
+    }
     write_log(&format!("ERROR: {}", error));
 }
 
 /// Log content snapshot (periodic idle logging)
 /// Uses the 256-byte threshold: short content is one-liner, long content gets line numbers
 pub fn log_content_snapshot(content: &str, doc_name: &str) {
+    if !self::enabled() {
+        return;
+    }
     let formatted = format_content(content);
     write_log(&format!("CONTENT_SNAPSHOT: doc=\"{}\" {}", escape_text(doc_name), formatted));
+}
+
+#[cfg(test)]
+mod tests {
+    use ogedit::input::{kbmod, vk};
+
+    use super::*;
+
+    #[test]
+    fn long_unicode_log_lines_truncate_at_character_boundaries() {
+        for prefix in [197, 198, 199, 200] {
+            let text = format!("{}🚀{}", "a".repeat(prefix), "tail".repeat(30));
+            let formatted = format_content(&text);
+            assert!(formatted.starts_with("[CONTENT:"));
+            assert!(formatted.contains("..."));
+            assert!(!formatted.contains('�'));
+        }
+        let formatted = format_content(&"界".repeat(100));
+        assert!(formatted.ends_with("..."));
+    }
+
+    #[test]
+    fn binary_log_escaping_distinguishes_literal_escapes_and_quotes() {
+        assert_eq!(escape_bytes(b"\\xff\"\xff"), "\\\\xff\\\"\\xff");
+    }
+
+    #[test]
+    fn configurable_shortcuts_have_complete_log_labels() {
+        assert_eq!(format_shortcut(kbmod::CTRL_ALT_SHIFT | vk::S), "Ctrl+Alt+Shift+S");
+        assert_eq!(format_shortcut(InputKey::new(0x87)), "F24");
+    }
+
+    #[test]
+    fn logging_while_logger_is_borrowed_does_not_panic() {
+        LOGGER.with(|logger| {
+            let _borrow = logger.borrow_mut();
+            write_log("nested panic diagnostic");
+        });
+    }
+
+    #[test]
+    fn calendar_conversion_handles_leap_year_and_century_boundaries() {
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+        assert_eq!(days_to_ymd(11016), (2000, 2, 29));
+        assert_eq!(days_to_ymd(19782), (2024, 2, 29));
+        assert_eq!(days_to_ymd(47541), (2100, 3, 1));
+    }
 }

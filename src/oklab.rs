@@ -24,12 +24,12 @@ impl StraightRgba {
 
     #[inline]
     pub const fn from_le(color: u32) -> Self {
-        StraightRgba(u32::from_le(color))
+        StraightRgba(color)
     }
 
     #[inline]
     pub const fn from_be(color: u32) -> Self {
-        StraightRgba(u32::from_be(color))
+        StraightRgba(color.swap_bytes())
     }
 
     #[inline]
@@ -39,12 +39,22 @@ impl StraightRgba {
 
     #[inline]
     pub const fn to_le(self) -> u32 {
-        self.0.to_le()
+        self.0
     }
 
     #[inline]
     pub const fn to_be(self) -> u32 {
-        self.0.to_be()
+        self.0.swap_bytes()
+    }
+
+    /// Constructs a packed CSS-style 0xRRGGBBAA color independent of host endianness.
+    pub const fn from_rgba(color: u32) -> Self {
+        Self::from_be(color)
+    }
+
+    /// Returns a packed CSS-style 0xRRGGBBAA color independent of host endianness.
+    pub const fn to_rgba(self) -> u32 {
+        self.to_be()
     }
 
     #[inline]
@@ -98,7 +108,7 @@ impl StraightRgba {
 
 impl Debug for StraightRgba {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{:08x}", self.0.to_be()) // Display as a hex color
+        write!(f, "#{:08x}", self.0.swap_bytes()) // Display as a hex color
     }
 }
 
@@ -230,6 +240,16 @@ const SRGB_TO_RGB_LUT: [f32; 256] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_color_channels_are_independent_of_host_endianness() {
+        let c = StraightRgba::from_rgba(0xaabbccdd);
+        assert_eq!((c.red(), c.green(), c.blue(), c.alpha()), (0xaa, 0xbb, 0xcc, 0xdd));
+        assert_eq!(c.to_rgba(), 0xaabbccdd);
+        assert_eq!(StraightRgba::from_le(0xddccbbaa), c);
+        assert_eq!(StraightRgba::from_be(0xaabbccdd), c);
+        assert_eq!(format!("{c:?}"), "#aabbccdd");
+    }
 
     #[test]
     fn test_blending() {

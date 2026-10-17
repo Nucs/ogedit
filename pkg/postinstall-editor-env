@@ -1,38 +1,43 @@
 #!/bin/bash
-# Post-install script to set EDITOR environment variable
-# This runs as root, so we need to find the actual user
+# The optional component runs as root. All shell-profile writes run as the
+# console user, so symlinks or a changed home directory cannot grant root writes.
+set -euo pipefail
 
-# Get the console user (the real user, not root)
-CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "$USER")
-USER_HOME=$(eval echo "~$CONSOLE_USER")
+CONSOLE_USER=$(/usr/bin/stat -f '%Su' /dev/console)
+case "$CONSOLE_USER" in
+    ''|root|loginwindow|_mbsetupuser)
+        echo 'No interactive user found. Set EDITOR=/usr/local/bin/ogedit in your shell profile manually.'
+        exit 0
+        ;;
+esac
 
-# Determine which shell config file to use
-if [ -f "$USER_HOME/.zshrc" ]; then
-    SHELL_RC="$USER_HOME/.zshrc"
-elif [ -f "$USER_HOME/.bash_profile" ]; then
-    SHELL_RC="$USER_HOME/.bash_profile"
-elif [ -f "$USER_HOME/.bashrc" ]; then
-    SHELL_RC="$USER_HOME/.bashrc"
-else
-    # Default to zsh on modern macOS
-    SHELL_RC="$USER_HOME/.zshrc"
+USER_ID=$(/usr/bin/id -u "$CONSOLE_USER")
+if [ "$USER_ID" -eq 0 ]; then
+    echo 'Refusing to modify the root shell profile.' >&2
+    exit 1
 fi
+USER_HOME=$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | /usr/bin/sed 's/^NFSHomeDirectory: //')
+case "$USER_HOME" in
+    /*) ;;
+    *) echo 'Could not determine the console user home directory.' >&2; exit 1 ;;
+esac
 
-# Check if EDITOR is already set to ogedit
-if grep -q 'export EDITOR.*ogedit' "$SHELL_RC" 2>/dev/null; then
-    echo "EDITOR already set to ogedit in $SHELL_RC"
+/usr/bin/sudo -u "$CONSOLE_USER" -H -- /bin/sh -s -- "$USER_HOME" <<'OGEDIT_USER_SCRIPT'
+set -eu
+user_home=$1
+if [ -f "$user_home/.zshrc" ]; then
+    shell_rc="$user_home/.zshrc"
+elif [ -f "$user_home/.bash_profile" ]; then
+    shell_rc="$user_home/.bash_profile"
+elif [ -f "$user_home/.bashrc" ]; then
+    shell_rc="$user_home/.bashrc"
+else
+    shell_rc="$user_home/.zshrc"
+fi
+if grep -Fqx 'export EDITOR="/usr/local/bin/ogedit"' "$shell_rc" 2>/dev/null; then
+    echo "EDITOR already set to ogedit in $shell_rc"
     exit 0
 fi
-
-# Add EDITOR export to shell config
-echo "" >> "$SHELL_RC"
-echo "# Set by OGEdit installer" >> "$SHELL_RC"
-echo 'export EDITOR="/usr/local/bin/ogedit"' >> "$SHELL_RC"
-
-# Fix ownership if we're running as root
-if [ "$(id -u)" = "0" ] && [ -n "$CONSOLE_USER" ]; then
-    chown "$CONSOLE_USER" "$SHELL_RC" 2>/dev/null || true
-fi
-
-echo "EDITOR set to ogedit in $SHELL_RC"
-exit 0
+printf '\n# Set by OGEdit installer\nexport EDITOR="/usr/local/bin/ogedit"\n' >> "$shell_rc"
+echo "EDITOR set to ogedit in $shell_rc"
+OGEDIT_USER_SCRIPT

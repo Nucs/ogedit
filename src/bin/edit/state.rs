@@ -31,6 +31,11 @@ impl std::fmt::Display for FormatApperr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             apperr::APP_ICU_MISSING => f.write_str(loc(LocId::ErrorIcuMissing)),
+            apperr::Error::App(1001) => f.write_str("The file changed on disk. Compare it before saving, or use Save As."),
+            apperr::Error::App(1002) => f.write_str("This file has hard links. Use Save As to preserve the linked files."),
+            apperr::Error::App(1003) => f.write_str("This operation cannot safely preserve this file. Use Save As or a smaller comparison."),
+            apperr::Error::App(1004) => f.write_str("The recovery snapshot is damaged and was not restored."),
+            apperr::Error::App(1005) => f.write_str("That file is already open in another buffer. Switch to it or choose another name."),
             apperr::Error::App(code) => write!(f, "Unknown app error code: {code}"),
             apperr::Error::Icu(code) => icu::apperr_format(f, code),
             apperr::Error::Sys(code) => sys::apperr_format(f, code),
@@ -185,10 +190,15 @@ pub struct LoggingTracker {
 }
 
 pub struct State {
+    pub workbench: crate::workbench::Workbench,
+    pub macros: Option<crate::macros::MacroStore>,
+    pub last_macro: Option<String>,
+    pub editor_focused: bool,
     pub menubar_color_bg: StraightRgba,
     pub menubar_color_fg: StraightRgba,
 
     pub config: Config,
+    pub settings: crate::settings::Settings,
     pub documents: DocumentManager,
 
     /// The working directory when the editor was started (for per-project settings)
@@ -200,9 +210,12 @@ pub struct State {
     pub error_log_count: usize,
 
     pub wants_file_picker: StateFilePicker,
+    pub wants_native_browse: bool,
+    pub native_file_picker: Option<crate::native_dialog::NativeFilePicker>,
     pub file_picker_pending_dir: DisplayablePathBuf,
     pub file_picker_pending_dir_revision: u64, // Bumped every time `file_picker_pending_dir` changes.
     pub file_picker_pending_name: PathBuf,
+    pub file_picker_preview: crate::draw_filepicker::FilePickerPreview,
     pub file_picker_entries: Option<[Vec<DisplayablePathBuf>; 3]>, // ["..", directories, files]
     pub file_picker_overwrite_warning: Option<PathBuf>,            // The path the warning is about.
     pub file_picker_autocomplete: Vec<DisplayablePathBuf>,
@@ -214,6 +227,7 @@ pub struct State {
     pub search_success: bool,
 
     pub wants_encoding_picker: bool,
+    pub wants_language_picker: bool,
     pub wants_encoding_change: StateEncodingChange,
     pub encoding_picker_needle: String,
     pub encoding_picker_results: Option<Vec<icu::Encoding>>,
@@ -246,27 +260,47 @@ pub struct State {
 
 impl State {
     pub fn new() -> apperr::Result<Self> {
-        let startup_cwd = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let startup_cwd =
+            std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
 
+        let (macros, macro_error) = match crate::macros::MacroStore::load() {
+            Ok(macros) => (Some(macros), String::new()),
+            Err(error) => (None, error),
+        };
+        let last_macro =
+            macros.as_ref().and_then(|store| store.names().next_back().map(str::to_owned));
+        let mut workbench = crate::workbench::Workbench::default();
+        workbench.message = macro_error;
+        let mut settings = crate::settings::Settings::new();
+        let settings_error =
+            settings.reload().err().map(|error| format!("{}{error}", loc(LocId::SettingsInvalid)));
         Ok(Self {
+            workbench,
+            macros,
+            last_macro,
+            editor_focused: false,
             menubar_color_bg: StraightRgba::zero(),
             menubar_color_fg: StraightRgba::zero(),
 
             config: Config::load(),
+            settings,
             documents: Default::default(),
 
             startup_cwd,
 
-            error_log: [const { String::new() }; 10],
-            error_log_index: 0,
-            error_log_count: 0,
+            error_log: std::array::from_fn(|i| {
+                if i == 0 { settings_error.clone().unwrap_or_default() } else { String::new() }
+            }),
+            error_log_index: usize::from(settings_error.is_some()),
+            error_log_count: usize::from(settings_error.is_some()),
 
             wants_file_picker: StateFilePicker::None,
+            wants_native_browse: false,
+            native_file_picker: None,
             file_picker_pending_dir: Default::default(),
             file_picker_pending_dir_revision: 0,
             file_picker_pending_name: Default::default(),
+            file_picker_preview: Default::default(),
             file_picker_entries: None,
             file_picker_overwrite_warning: None,
             file_picker_autocomplete: Vec::new(),
@@ -278,6 +312,7 @@ impl State {
             search_success: true,
 
             wants_encoding_picker: false,
+            wants_language_picker: false,
             encoding_picker_needle: Default::default(),
             encoding_picker_results: Default::default(),
 
@@ -321,6 +356,10 @@ pub fn draw_add_untitled_document(ctx: &mut Context, state: &mut State) {
 
 pub fn error_log_add(ctx: &mut Context, state: &mut State, err: apperr::Error) {
     let msg = format!("{}", FormatApperr::from(err));
+    error_log_add_message(ctx, state, msg);
+}
+
+pub fn error_log_add_message(ctx: &mut Context, state: &mut State, msg: String) {
     if !msg.is_empty() {
         logging::log_error(&msg);
         logging::log_dialog_open("Error");
@@ -370,6 +409,9 @@ pub fn draw_error_log(ctx: &mut Context, state: &mut State) {
 /// Check for state changes and log them
 /// Call this at the end of each frame
 pub fn log_state_changes(state: &mut State) {
+    if !logging::enabled() {
+        return;
+    }
     let Some(doc) = state.documents.active() else {
         return;
     };
@@ -428,7 +470,8 @@ pub fn log_state_changes(state: &mut State) {
     if current_selection != tracker.selection {
         if current_selection.has_selection {
             // Selection exists - get content and log it
-            let content = tb.extract_bytes(current_selection.start_offset..current_selection.end_offset);
+            let content =
+                tb.extract_bytes(current_selection.start_offset..current_selection.end_offset);
             logging::log_selection(
                 current_selection.start,
                 current_selection.end,
@@ -454,6 +497,9 @@ pub fn log_state_changes(state: &mut State) {
 /// Check if we should log a content snapshot (1 second of idle after last change)
 /// Call this at the end of each frame with the current timestamp in milliseconds
 pub fn log_periodic_content_snapshot(state: &mut State, now_ms: u64) {
+    if !logging::enabled() {
+        return;
+    }
     let Some(doc) = state.documents.active_mut() else {
         return;
     };
@@ -489,7 +535,7 @@ pub fn log_periodic_content_snapshot(state: &mut State, now_ms: u64) {
 pub fn reload_file_from_disk(state: &mut State) -> apperr::Result<()> {
     if let Some(doc) = state.documents.active_mut() {
         // Reload the file with current encoding
-        doc.reread(None)?;
+        doc.reload()?;
         logging::log_action(&format!("FILE_RELOADED: {}", doc.filename));
 
         // Re-watch the file to update the watcher's baseline timestamp

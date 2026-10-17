@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+> Current documentation: [latest upstream integration and validation](docs/upstream-integration.md),
+> [workbench behavior](docs/workbench.md), [memory safety audit](docs/memory-audit.md),
+> [legacy fork audit](docs/legacy-audit.md), and [commit provenance](docs/legacy-commit-map.md).
+> The detailed notes below record the original fork; historical watcher, logging,
+> toolchain, installed-build and test-count claims are superseded by those documents.
+> Preserve the operational intent.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview

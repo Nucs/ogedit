@@ -1,0 +1,129 @@
+{
+  "date": "2026-10-17",
+  "units": "bytes unless count or seconds",
+  "baseline_sha256": "F632F6FB834AADF28B3494538721565229E97BA53DB05AD32B739BDAA2B2A0C2",
+  "fixed_sha256": "0F1954699EDCC99150BF9FFEE5D2585E13B36BAEC2FF3C713540B55544357BE2",
+  "workload": {
+    "large_document_cycles": 12,
+    "data_panels": 8,
+    "file_palettes": 20,
+    "save_as_directories": 16
+  },
+  "before": {
+    "pid": 99036,
+    "sample_count": 87,
+    "metrics": {
+      "private_bytes": {
+        "first10_median": 2109440.0,
+        "last10_median": 7530496.0,
+        "median_delta": 5421056.0,
+        "peak": 14901248
+      },
+      "rss": {
+        "first10_median": 9981952.0,
+        "last10_median": 15636480.0,
+        "median_delta": 5654528.0,
+        "peak": 22949888
+      },
+      "handles": {
+        "first10_median": 115.0,
+        "last10_median": 149.0,
+        "median_delta": 34.0,
+        "peak": 149
+      },
+      "threads": {
+        "first10_median": 5.0,
+        "last10_median": 3.0,
+        "median_delta": -2.0,
+        "peak": 8
+      }
+    }
+  },
+  "fixed_matched": {
+    "pid": 74024,
+    "sample_count": 124,
+    "metrics": {
+      "private_bytes": {
+        "first10_median": 2109440.0,
+        "last10_median": 2899968.0,
+        "median_delta": 790528.0,
+        "peak": 11358208
+      },
+      "rss": {
+        "first10_median": 9977856.0,
+        "last10_median": 11984896.0,
+        "median_delta": 2007040.0,
+        "peak": 19845120
+      },
+      "handles": {
+        "first10_median": 115.0,
+        "last10_median": 119.0,
+        "median_delta": 4.0,
+        "peak": 123
+      },
+      "threads": {
+        "first10_median": 5.0,
+        "last10_median": 3.0,
+        "median_delta": -2.0,
+        "peak": 5
+      }
+    }
+  },
+  "fixed_additional_rounds": {
+    "rounds": 5,
+    "large_document_cycles": 30,
+    "data_panels": 20,
+    "file_palettes": 100,
+    "settled": {
+      "phase": "release-churn-settled",
+      "episodes": 1,
+      "sample_count": 107,
+      "first_time": 1792252459.7908406,
+      "last_time": 1792252531.0866086,
+      "span_seconds": 71.29576802253723,
+      "median_window_samples": 10,
+      "median_windows_overlap": false,
+      "metrics": {
+        "private_bytes": {
+          "first10_median": 2899968.0,
+          "last10_median": 2969600.0,
+          "median_delta": 69632.0,
+          "peak": 2977792
+        },
+        "rss": {
+          "first10_median": 11997184.0,
+          "last10_median": 12177408.0,
+          "median_delta": 180224.0,
+          "peak": 12185600
+        },
+        "handles": {
+          "first10_median": 119.0,
+          "last10_median": 119.0,
+          "median_delta": 0.0,
+          "peak": 119
+        },
+        "threads": {
+          "first10_median": 3.0,
+          "last10_median": 5.0,
+          "median_delta": 2.0,
+          "peak": 5
+        }
+      }
+    }
+  },
+  "installation": {
+    "path": "%LOCALAPPDATA%\\Programs\\OGEdit\\ogedit.exe",
+    "sha256": "0F1954699EDCC99150BF9FFEE5D2585E13B36BAEC2FF3C713540B55544357BE2",
+    "size": 2594304,
+    "backup": "%LOCALAPPDATA%\\Programs\\OGEdit\\ogedit.previous-20261017-185521.exe",
+    "version": "ogedit version 1.2.4",
+    "installedAt": "2026-10-17T18:55:21.4467137+03:00"
+  },
+  "notes": [
+    "Half-second requested sampling; actual intervals vary. Peaks are sampled, not exhaustive maxima.",
+    "Start/end values are medians of ten samples; workloads begin and end with only small.txt open.",
+    "Baseline warm phase label overlaps early work; whole-run and explicitly settled values are used.",
+    "Windows vms is commit/pagefile accounting, not reserved virtual address space.",
+    "No LeakSanitizer run; ASAN coverage does not include every native or intra-arena access."
+  ]
+}

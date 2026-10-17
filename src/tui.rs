@@ -89,10 +89,10 @@
 //! # Example
 //!
 //! ```
-//! use edit::helpers::Size;
-//! use edit::input::Input;
-//! use edit::tui::*;
-//! use edit::{arena, arena_format};
+//! use ogedit::helpers::Size;
+//! use ogedit::input::Input;
+//! use ogedit::tui::*;
+//! use ogedit::{arena, arena_format};
 //!
 //! struct State {
 //!     counter: i32,
@@ -143,7 +143,6 @@
 //! }
 //! ```
 
-use std::arch::breakpoint;
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -169,6 +168,536 @@ const KBMOD_FOR_WORD_NAV: InputKeyMod =
 type Input<'input> = input::Input<'input>;
 type InputKey = input::InputKey;
 type InputMouseState = input::InputMouseState;
+
+#[cfg(test)]
+mod editing_input_tests {
+    use super::*;
+
+    fn node_rect(tui: &Tui, classname: &str) -> Rect {
+        let mut result = None;
+        for root in tui.prev_tree.iterate_roots_rev() {
+            Tree::visit_all(root, root, true, |node| {
+                let node = node.borrow();
+                if node.classname == classname {
+                    result = Some(node.inner);
+                }
+                VisitControl::Continue
+            });
+        }
+        result.expect("test node exists")
+    }
+
+    fn scroll_position(tui: &Tui, classname: &str) -> Point {
+        let mut result = None;
+        for root in tui.prev_tree.iterate_roots_rev() {
+            Tree::visit_all(root, root, true, |node| {
+                let node = node.borrow();
+                if node.classname == classname {
+                    result = match &node.content {
+                        NodeContent::Textarea(content) => Some(content.scroll_offset),
+                        NodeContent::Scrollarea(content) => Some(content.scroll_offset),
+                        _ => None,
+                    };
+                }
+                VisitControl::Continue
+            });
+        }
+        result.expect("test scroll node exists")
+    }
+
+    #[test]
+    fn startup_and_zero_size_reports_keep_a_renderable_viewport() {
+        let mut tui = Tui::new().unwrap();
+        assert_eq!(tui.size(), Size { width: 80, height: 24 });
+        assert_eq!(tui.read_timeout(), time::Duration::ZERO);
+        {
+            let mut ctx = tui.create_context(Some(Input::Resize(Size { width: 0, height: 0 })));
+            ctx.label("startup", "ready");
+        }
+        assert_eq!(tui.size(), Size { width: 80, height: 24 });
+        let scratch = scratch_arena(None);
+        assert!(!tui.render(&scratch).is_empty());
+    }
+
+    #[test]
+    fn clicking_the_same_menu_button_toggles_it_closed() {
+        fn draw(tui: &mut Tui, event: Option<Input<'_>>) -> bool {
+            let mut event = event;
+            for _ in 0..10 {
+                let open;
+                {
+                    let mut ctx = tui.create_context(event.take());
+                    ctx.menubar_begin();
+                    open = ctx.menubar_menu_begin("File", 'F');
+                    if open {
+                        ctx.menubar_menu_button("Open", 'O', vk::NULL);
+                        ctx.menubar_menu_end();
+                    }
+                    ctx.menubar_end();
+                }
+                if !tui.needs_settling() {
+                    return open;
+                }
+            }
+            panic!("menu did not settle");
+        }
+        let mut tui = Tui::new().unwrap();
+        assert!(!draw(&mut tui, Some(Input::Resize(Size { width: 40, height: 10 }))));
+        let rect = node_rect(&tui, "menu_button");
+        let mouse = |state| {
+            Some(Input::Mouse(input::InputMouse {
+                position: Point { x: rect.left, y: rect.top },
+                state,
+                modifiers: kbmod::NONE,
+                scroll: Point::default(),
+                drag: false,
+            }))
+        };
+        assert!(draw(&mut tui, mouse(InputMouseState::Left)));
+        assert!(draw(&mut tui, mouse(InputMouseState::None)));
+        draw(&mut tui, mouse(InputMouseState::Left));
+        assert!(!draw(&mut tui, mouse(InputMouseState::None)));
+    }
+
+    #[test]
+    fn modal_scroll_does_not_scroll_the_covered_editor() {
+        fn draw(tui: &mut Tui, buffer: &RcTextBuffer, event: Option<Input<'_>>) {
+            let mut event = event;
+            for _ in 0..10 {
+                {
+                    let mut ctx = tui.create_context(event.take());
+                    ctx.textarea("covered-editor", buffer.clone());
+                    ctx.attr_intrinsic_size(Size { width: 60, height: 20 });
+                    ctx.modal_begin("scroll-dialog", "Scroll test");
+                    ctx.scrollarea_begin("modal-scroll", Size { width: 30, height: 5 });
+                    for i in 0..40 {
+                        ctx.next_block_id_mixin(i);
+                        ctx.label("row", "An item");
+                    }
+                    ctx.scrollarea_end();
+                    ctx.modal_end();
+                }
+                if !tui.needs_settling() {
+                    return;
+                }
+            }
+            panic!("modal did not settle");
+        }
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        buffer.borrow_mut().write_raw("line\n".repeat(100).as_bytes());
+        buffer.borrow_mut().cursor_move_to_offset(0);
+        draw(&mut tui, &buffer, Some(Input::Resize(Size { width: 60, height: 20 })));
+        let rect = node_rect(&tui, "modal-scroll");
+        let before = scroll_position(&tui, "covered-editor");
+        draw(
+            &mut tui,
+            &buffer,
+            Some(Input::Mouse(input::InputMouse {
+                position: Point { x: rect.left + 1, y: rect.top + 1 },
+                state: InputMouseState::None,
+                modifiers: kbmod::NONE,
+                scroll: Point { x: 0, y: 1 },
+                drag: false,
+            })),
+        );
+        assert_eq!(scroll_position(&tui, "covered-editor"), before);
+        assert_eq!(scroll_position(&tui, "modal-scroll").y, 3);
+    }
+
+    #[test]
+    fn bracketed_paste_stays_on_one_line_in_edit_fields() {
+        fn draw(tui: &mut Tui, value: &mut String, event: Option<Input<'_>>) {
+            let mut event = event;
+            for _ in 0..10 {
+                {
+                    let mut ctx = tui.create_context(event.take());
+                    ctx.editline("paste-field", value);
+                    ctx.focus_on_first_present();
+                }
+                if !tui.needs_settling() {
+                    return;
+                }
+            }
+            panic!("editline did not settle");
+        }
+        let mut tui = Tui::new().unwrap();
+        let mut value = String::new();
+        draw(&mut tui, &mut value, Some(Input::Resize(Size { width: 40, height: 10 })));
+        draw(&mut tui, &mut value, Some(Input::Paste(b"first\r\nsecond\nthird".to_vec())));
+        assert_eq!(value, "first");
+        assert_eq!(tui.clipboard_ref().read(), b"first\r\nsecond\nthird");
+    }
+
+    #[test]
+    fn horizontal_drag_on_bottom_row_keeps_vertical_scroll_still() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        buffer.borrow_mut().write_raw(("0123456789".repeat(5) + "\n").repeat(40).as_bytes());
+        buffer.borrow_mut().cursor_move_to_offset(0);
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        for x in [10, 20] {
+            frame(
+                &mut tui,
+                &buffer,
+                Some(Input::Mouse(input::InputMouse {
+                    position: Point { x, y: 7 },
+                    state: InputMouseState::Left,
+                    modifiers: kbmod::NONE,
+                    scroll: Point::default(),
+                    drag: x == 20,
+                })),
+            );
+        }
+        assert_eq!(scroll_position(&tui, "editor-test").y, 0);
+    }
+
+    fn frame(tui: &mut Tui, buffer: &RcTextBuffer, event: Option<Input<'_>>) {
+        {
+            let mut ctx = tui.create_context(event);
+            ctx.textarea("editor-test", buffer.clone());
+            ctx.attr_intrinsic_size(Size { width: 40, height: 8 });
+            ctx.focus_on_first_present();
+        }
+        let mut passes = 0;
+        while tui.needs_settling() {
+            let mut ctx = tui.create_context(None);
+            ctx.textarea("editor-test", buffer.clone());
+            ctx.attr_intrinsic_size(Size { width: 40, height: 8 });
+            passes += 1;
+            assert!(passes < 10);
+        }
+    }
+
+    #[test]
+    fn frame_buffer_owners_expire_after_tree_replacement() {
+        let mut tui = Tui::new().unwrap();
+        for _ in 0..200 {
+            let first = TextBuffer::new_rc(true).unwrap();
+            let first_weak = std::rc::Rc::downgrade(&first);
+            frame(&mut tui, &first, Some(Input::Resize(Size { width: 40, height: 10 })));
+            drop(first);
+            let second = TextBuffer::new_rc(true).unwrap();
+            {
+                let mut ctx = tui.create_context(None);
+                ctx.textarea("editor-test", second);
+                // Replacing a cache entry must not invalidate the previous
+                // layout tree while the current frame is being constructed.
+                assert!(first_weak.upgrade().is_some());
+            }
+            drop(tui.create_context(None));
+            drop(tui.create_context(None));
+            assert!(first_weak.upgrade().is_none());
+            assert!(tui.cached_text_buffers.is_empty());
+            assert!(tui.text_buffers_prev.is_empty());
+            assert!(tui.text_buffers_next.is_empty());
+        }
+    }
+
+    #[test]
+    fn disappearing_editlines_release_their_cached_buffers() {
+        let mut tui = Tui::new().unwrap();
+        let mut value = "temporary".to_owned();
+        {
+            let mut ctx = tui.create_context(None);
+            ctx.editline("temporary", &mut value);
+        }
+        let weak = std::rc::Rc::downgrade(&tui.cached_text_buffers[0].editor);
+        drop(tui.create_context(None));
+        assert!(tui.cached_text_buffers.is_empty());
+        drop(tui.create_context(None));
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn shortcuts_dispatch_multicursor_typing_undo_and_rectangle() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_crlf(false);
+            b.write_raw(b"word word\n1234\n5678");
+            b.cursor_move_to_offset(0);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL_ALT | vk::D)));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL_ALT | vk::D)));
+        assert_eq!(buffer.borrow().selection_count(), 2);
+        frame(&mut tui, &buffer, Some(Input::Text("X")));
+        assert_eq!(buffer.borrow().extract_bytes(0..3), b"X X");
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL | vk::Z)));
+        assert_eq!(buffer.borrow().extract_bytes(0..9), b"word word");
+        frame(&mut tui, &buffer, Some(Input::Keyboard(vk::ESCAPE)));
+        assert_eq!(buffer.borrow().selection_count(), 1);
+        buffer.borrow_mut().cursor_move_to_logical(Point { x: 1, y: 1 });
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::ALT_SHIFT | vk::DOWN)));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::ALT_SHIFT | vk::RIGHT)));
+        frame(&mut tui, &buffer, Some(Input::Text("!")));
+        assert_eq!(buffer.borrow().extract_line_content(1).unwrap().0, b"1!34");
+        assert_eq!(buffer.borrow().extract_line_content(2).unwrap().0, b"5!78");
+    }
+
+    #[test]
+    fn rectangle_mouse_anchor_survives_autoscroll_and_idle_frames() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_crlf(false);
+            b.write_raw("abcd\n".repeat(40).as_bytes());
+            b.cursor_move_to_offset(0);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        let mouse = |x, y, state| {
+            Some(Input::Mouse(input::InputMouse {
+                position: Point { x, y },
+                state,
+                modifiers: kbmod::ALT,
+                scroll: Point::default(),
+                drag: false,
+            }))
+        };
+        frame(&mut tui, &buffer, mouse(1, 1, InputMouseState::Left));
+        // Real terminals often pause between mouse-down and the first motion.
+        // Idle frames must preserve both the extra cursor and rectangle mode.
+        for _ in 0..3 {
+            frame(&mut tui, &buffer, None);
+            assert_eq!(buffer.borrow().selection_count(), 2);
+        }
+        frame(&mut tui, &buffer, mouse(3, 9, InputMouseState::Left));
+        for _ in 0..3 {
+            frame(&mut tui, &buffer, None);
+            frame(&mut tui, &buffer, mouse(3, 9, InputMouseState::Left));
+            assert_eq!(buffer.borrow().selection_ranges()[0], (6, 8));
+        }
+        frame(&mut tui, &buffer, mouse(3, 9, InputMouseState::None));
+        assert_eq!(buffer.borrow().selection_ranges()[0], (6, 8));
+        assert!(buffer.borrow().selection_count() > 8);
+    }
+
+    #[test]
+    fn sgr_alt_drag_keeps_three_selections_after_paused_press() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_crlf(false);
+            b.write_raw(b"ab12\ncd34\nef56");
+            b.cursor_move_to_offset(0);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        let mut vt = crate::vt::Parser::new();
+        let mut parser = input::Parser::new();
+        for sequence in ["\x1b[<8;1;1M", "", "", "\x1b[<40;3;3M", "\x1b[<8;3;3m"] {
+            if sequence.is_empty() {
+                frame(&mut tui, &buffer, None);
+            } else {
+                for event in parser.parse(vt.parse(sequence)) {
+                    frame(&mut tui, &buffer, Some(event));
+                }
+            }
+        }
+        assert_eq!(buffer.borrow().selection_count(), 3);
+        frame(&mut tui, &buffer, Some(Input::Text("ZZ")));
+        assert_eq!(buffer.borrow().extract_bytes(0..14), b"ZZ12\nZZ34\nZZ56");
+    }
+
+    #[test]
+    fn alt_click_and_same_column_drag_create_insertion_points_without_selected_cells() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_crlf(false);
+            b.write_raw(b"ab12\ncd34\nef56");
+            b.cursor_move_to_offset(1);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        let mut vt = crate::vt::Parser::new();
+        let mut parser = input::Parser::new();
+        for sequence in ["\x1b[<8;2;2M", "", "\x1b[<8;2;2m"] {
+            if sequence.is_empty() {
+                frame(&mut tui, &buffer, None);
+            } else {
+                for event in parser.parse(vt.parse(sequence)) {
+                    frame(&mut tui, &buffer, Some(event));
+                }
+            }
+        }
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(1, 1), (6, 6)]);
+        assert!(!buffer.borrow().has_selection());
+        frame(&mut tui, &buffer, Some(Input::Text("!")));
+        assert_eq!(buffer.borrow().extract_bytes(0..16), b"a!b12\nc!d34\nef56");
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL | vk::Z)));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(vk::ESCAPE)));
+        for sequence in ["\x1b[<8;2;1M", "", "\x1b[<40;2;3M", "", "\x1b[<8;2;3m"] {
+            if sequence.is_empty() {
+                frame(&mut tui, &buffer, None);
+            } else {
+                for event in parser.parse(vt.parse(sequence)) {
+                    frame(&mut tui, &buffer, Some(event));
+                }
+            }
+        }
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(1, 1), (6, 6), (11, 11)]);
+        assert!(!buffer.borrow().has_selection());
+        frame(&mut tui, &buffer, Some(Input::Text("!")));
+        assert_eq!(buffer.borrow().extract_bytes(0..17), b"a!b12\nc!d34\ne!f56");
+    }
+
+    #[test]
+    fn legacy_gutter_drag_and_shift_click_select_complete_lines_in_both_directions() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_crlf(false);
+            b.write_raw(b"first\nsecond\nthird\nfourth");
+            b.set_margin_enabled(true);
+            b.cursor_move_to_offset(0);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        let mouse = |y, state, modifiers| {
+            Some(Input::Mouse(input::InputMouse {
+                position: Point { x: 1, y },
+                state,
+                modifiers,
+                scroll: Point::default(),
+                drag: false,
+            }))
+        };
+        frame(&mut tui, &buffer, mouse(1, InputMouseState::Left, kbmod::NONE));
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(6, 13)]);
+        frame(&mut tui, &buffer, None);
+        frame(&mut tui, &buffer, mouse(0, InputMouseState::Left, kbmod::NONE));
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(13, 0)]);
+        frame(&mut tui, &buffer, mouse(0, InputMouseState::None, kbmod::NONE));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL | vk::C)));
+        frame(&mut tui, &buffer, mouse(2, InputMouseState::Left, kbmod::SHIFT));
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(6, 19)]);
+        frame(&mut tui, &buffer, mouse(3, InputMouseState::Left, kbmod::SHIFT));
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(6, 25)]);
+        frame(&mut tui, &buffer, mouse(3, InputMouseState::None, kbmod::NONE));
+        frame(&mut tui, &buffer, Some(Input::Text("!")));
+        assert_eq!(buffer.borrow().extract_bytes(0..7), b"first\n!");
+        frame(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL | vk::Z)));
+        assert_eq!(buffer.borrow().extract_bytes(0..25), b"first\nsecond\nthird\nfourth");
+    }
+
+    #[test]
+    fn legacy_gutter_continuation_row_selects_the_whole_logical_line() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        let first = "long wrapped line ".repeat(5);
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_crlf(false);
+            b.write_raw(format!("{first}\nlast").as_bytes());
+            b.set_margin_enabled(true);
+            b.set_word_wrap(true);
+            b.cursor_move_to_offset(0);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 40, height: 10 })));
+        assert_eq!(buffer.borrow().logical_line_at_visual_row(1), 0);
+        frame(
+            &mut tui,
+            &buffer,
+            Some(Input::Mouse(input::InputMouse {
+                position: Point { x: 1, y: 1 },
+                state: InputMouseState::Left,
+                modifiers: kbmod::NONE,
+                scroll: Point::default(),
+                drag: false,
+            })),
+        );
+        assert_eq!(buffer.borrow().selection_ranges(), vec![(0, first.len() + 1)]);
+    }
+
+    #[test]
+    fn legacy_configured_tab_typing_with_wrap_and_final_crlf_remains_responsive() {
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        {
+            let mut b = buffer.borrow_mut();
+            b.set_word_wrap(true);
+            b.set_indent_with_tabs(true);
+            b.set_tab_size(2);
+            b.set_crlf(true);
+            b.set_margin_enabled(false);
+            b.set_line_highlight_enabled(false);
+            b.set_insert_final_newline(true);
+            b.set_ruler(40);
+        }
+        frame(&mut tui, &buffer, Some(Input::Resize(Size { width: 80, height: 26 })));
+        frame(&mut tui, &buffer, Some(Input::Text("abc")));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(vk::TAB)));
+        frame(&mut tui, &buffer, Some(Input::Text("x")));
+        frame(&mut tui, &buffer, Some(Input::Keyboard(vk::RETURN)));
+        frame(&mut tui, &buffer, Some(Input::Text("next")));
+        let b = buffer.borrow();
+        assert_eq!(b.extract_bytes(0..b.text_length()), b"abc\tx\r\nnext\r\n");
+        assert_eq!(b.cursor_logical_pos(), Point { x: 4, y: 1 });
+    }
+
+    #[test]
+    fn application_shortcut_hook_precedes_editor_defaults_but_not_modal_input() {
+        fn render(
+            tui: &mut Tui,
+            buffer: &RcTextBuffer,
+            event: Option<Input<'_>>,
+            modal: bool,
+            handled: &mut usize,
+        ) {
+            let mut draw = |ctx: &mut Context<'_, '_>| {
+                ctx.textarea_with_shortcuts("hook-editor", buffer.clone(), |ctx| {
+                    if ctx.consume_shortcut(kbmod::CTRL | vk::Z) {
+                        *handled += 1;
+                        buffer.borrow_mut().write_raw(b"!");
+                        buffer.borrow_mut().make_cursor_visible();
+                    }
+                });
+                ctx.attr_intrinsic_size(Size { width: 40, height: 8 });
+                ctx.focus_on_first_present();
+                if modal {
+                    ctx.modal_begin("hook-modal", "Input");
+                    let mut text = String::from("field");
+                    ctx.editline("hook-field", &mut text);
+                    ctx.inherit_focus();
+                    ctx.modal_end();
+                }
+            };
+            {
+                let mut ctx = tui.create_context(event);
+                draw(&mut ctx);
+            }
+            let mut passes = 0;
+            while tui.needs_settling() {
+                let mut ctx = tui.create_context(None);
+                draw(&mut ctx);
+                passes += 1;
+                assert!(passes < 10);
+            }
+        }
+        let mut tui = Tui::new().unwrap();
+        let buffer = TextBuffer::new_rc(true).unwrap();
+        buffer.borrow_mut().write_raw(b"original");
+        let mut handled = 0;
+        render(
+            &mut tui,
+            &buffer,
+            Some(Input::Resize(Size { width: 40, height: 10 })),
+            false,
+            &mut handled,
+        );
+        render(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL | vk::Z)), false, &mut handled);
+        assert_eq!(handled, 1);
+        assert_eq!(buffer.borrow().extract_bytes(0..9), b"original!");
+        render(&mut tui, &buffer, None, true, &mut handled);
+        render(&mut tui, &buffer, Some(Input::Keyboard(kbmod::CTRL | vk::Z)), true, &mut handled);
+        assert_eq!(handled, 1);
+        assert_eq!(buffer.borrow().extract_bytes(0..9), b"original!");
+    }
+}
 
 /// Since [`TextBuffer`] creation and management is expensive,
 /// we cache instances of them for reuse between frames.
@@ -275,7 +804,7 @@ impl ButtonStyle {
     pub fn accelerator(self, char: char) -> Self {
         Self { accelerator: Some(char), ..self }
     }
-    /// Draw a checkbox prefix: `[🗹 Example Button]`
+    /// Draw a checkbox prefix: `[◼ Example Button]`
     pub fn checked(self, checked: bool) -> Self {
         Self { checked: Some(checked), ..self }
     }
@@ -345,6 +874,8 @@ pub struct Tui {
     /// The number of clicks that have happened in a row.
     /// Gets reset when the mouse was released for a while.
     mouse_click_counter: CoordType,
+    /// The path to the topmost node currently under the pointer.
+    mouse_hover_node_path: Vec<u64>,
     /// The path to the node that was clicked on.
     mouse_down_node_path: Vec<u64>,
     /// The position of the first click in a double/triple click series.
@@ -359,9 +890,16 @@ pub struct Tui {
     /// This way we can track if the focus changed, because then we
     /// need to scroll the node into view if it's within a scrollarea.
     focused_node_for_scrolling: u64,
+    /// The menu that may be closed by the next click on its button.
+    menubar_toggle_id: u64,
 
     /// A list of cached text buffers used for [`Context::editline()`].
     cached_text_buffers: Vec<CachedTextBuffer>,
+    /// Every textarea reference in an arena tree has an owner for that tree's
+    /// entire lifetime. Cache entries can be replaced while the previous tree
+    /// is still used for input/layout, so the cache alone is not an owner.
+    text_buffers_prev: Vec<RcTextBuffer>,
+    text_buffers_next: Vec<RcTextBuffer>,
 
     /// The clipboard contents.
     clipboard: Clipboard,
@@ -397,7 +935,7 @@ impl Tui {
             modal_default_bg: StraightRgba::zero(),
             modal_default_fg: StraightRgba::zero(),
 
-            size: Size { width: 0, height: 0 },
+            size: Size { width: 80, height: 24 },
             mouse_position: Point::MIN,
             mouse_down_position: Point::MIN,
             left_mouse_down_target: 0,
@@ -405,21 +943,26 @@ impl Tui {
             mouse_state: InputMouseState::None,
             mouse_is_drag: false,
             mouse_click_counter: 0,
+            mouse_hover_node_path: Vec::with_capacity(16),
             mouse_down_node_path: Vec::with_capacity(16),
             first_click_position: Point::MIN,
             first_click_target: 0,
 
             focused_node_path: Vec::with_capacity(16),
             focused_node_for_scrolling: ROOT_ID,
+            menubar_toggle_id: 0,
 
             cached_text_buffers: Vec::with_capacity(16),
+            text_buffers_prev: Vec::with_capacity(16),
+            text_buffers_next: Vec::with_capacity(16),
 
             clipboard: Default::default(),
 
             settling_have: 0,
             settling_want: 0,
-            read_timeout: time::Duration::MAX,
+            read_timeout: time::Duration::ZERO,
         };
+        Self::clean_node_path(&mut tui.mouse_hover_node_path);
         Self::clean_node_path(&mut tui.mouse_down_node_path);
         Self::clean_node_path(&mut tui.focused_node_path);
         Ok(tui)
@@ -468,6 +1011,13 @@ impl Tui {
         self.size
     }
 
+    /// Keep a usable viewport while a terminal is minimized or reports zero.
+    pub fn set_size(&mut self, size: Size) {
+        if !size.is_empty() {
+            self.size = Size { width: size.width.min(32767), height: size.height.min(32767) };
+        }
+    }
+
     /// Returns an indexed color from the framebuffer.
     #[inline]
     pub fn indexed(&self, index: IndexedColor) -> StraightRgba {
@@ -511,6 +1061,11 @@ impl Tui {
         // which will become `arena_next` and get reset. It's safe to reset and reuse its memory.
         mem::swap(&mut self.arena_prev, &mut self.arena_next);
         unsafe { self.arena_next.reset(0) };
+        mem::swap(&mut self.text_buffers_prev, &mut self.text_buffers_next);
+        self.text_buffers_next.clear();
+        for cached in &mut self.cached_text_buffers {
+            cached.seen = false;
+        }
 
         // In the input handler below we transformed a mouse up into a release event.
         // Now, a frame later, we must reset it back to none, to stop it from triggering things.
@@ -528,6 +1083,7 @@ impl Tui {
         let mut input_keyboard = None;
         let mut input_mouse_modifiers = kbmod::NONE;
         let mut input_mouse_click = 0;
+        let mut input_mouse_down = false;
         let mut input_scroll_delta = Point { x: 0, y: 0 };
         // `input_consumed` should be `true` if we're in the settling phase which is indicated by
         // `self.needs_settling() == true`. However, there's a possibility for it being true from
@@ -542,9 +1098,7 @@ impl Tui {
         match input {
             None => {}
             Some(Input::Resize(resize)) => {
-                assert!(resize.width > 0 && resize.height > 0);
-                assert!(resize.width < 32768 && resize.height < 32768);
-                self.size = resize;
+                self.set_size(resize);
             }
             Some(Input::Text(text)) => {
                 input_text = Some(text);
@@ -570,9 +1124,10 @@ impl Tui {
             Some(Input::Mouse(mouse)) => {
                 let mut next_state = mouse.state;
                 let next_position = mouse.position;
-                let next_scroll = mouse.scroll;
+                let mut next_scroll = mouse.scroll;
                 let mouse_down = self.mouse_state == InputMouseState::None
                     && next_state != InputMouseState::None;
+                input_mouse_down = mouse_down;
                 let mouse_up = self.mouse_state != InputMouseState::None
                     && next_state == InputMouseState::None;
                 let is_scroll = next_scroll != Point::default();
@@ -582,7 +1137,7 @@ impl Tui {
 
                 let mut hovered_node = None; // Needed for `mouse_down`
                 let mut focused_node = None; // Needed for `mouse_down` and `is_click`
-                if mouse_down || mouse_up {
+                {
                     // Roots (aka windows) are ordered in Z order, so we iterate
                     // them in reverse order, from topmost to bottommost.
                     for root in self.prev_tree.iterate_roots_rev() {
@@ -614,13 +1169,18 @@ impl Tui {
                     }
                 }
 
+                Self::build_node_path(hovered_node, &mut self.mouse_hover_node_path);
+
                 if is_scroll {
                     next_state = self.mouse_state;
+                    let speed = if mouse.modifiers.contains(kbmod::ALT) { 5 } else { 1 };
+                    next_scroll.x = next_scroll.x.saturating_mul(7 * speed);
+                    next_scroll.y = next_scroll.y.saturating_mul(3 * speed);
                 } else if is_drag {
                     self.mouse_is_drag = true;
                 } else if mouse_down {
                     // Transition from no mouse input to some mouse input --> Record the mouse down position.
-                    Self::build_node_path(hovered_node, &mut self.mouse_down_node_path);
+                    self.mouse_down_node_path.clone_from(&self.mouse_hover_node_path);
 
                     // On left-mouse-down we change focus.
                     let mut target = 0;
@@ -700,6 +1260,7 @@ impl Tui {
             input_keyboard,
             input_mouse_modifiers,
             input_mouse_click,
+            input_mouse_down,
             input_scroll_delta,
             input_consumed,
 
@@ -843,9 +1404,7 @@ impl Tui {
         // If the focus has changed, the new node may need to be re-rendered.
         // Same, every time we encounter a previously unknown node via `get_prev_node`,
         // because that means it likely failed to get crucial information such as the layout size.
-        if cfg!(debug_assertions) && self.settling_have == 15 {
-            breakpoint();
-        }
+        debug_assert!(self.settling_have <= 15, "UI focus/layout did not settle");
         self.settling_want = (self.settling_have + 1).min(20);
     }
 
@@ -1181,12 +1740,12 @@ impl Tui {
                     result.push_str("  bordered:     true\r\n");
                 }
 
-                if node.attributes.bg.to_ne() != 0 {
+                if node.attributes.bg.to_rgba() != 0 {
                     result.push_repeat(' ', depth * 2);
                     _ = write!(result, "  bg:           {:?}\r\n", node.attributes.bg);
                 }
 
-                if node.attributes.fg.to_ne() != 0 {
+                if node.attributes.fg.to_rgba() != 0 {
                     result.push_repeat(' ', depth * 2);
                     _ = write!(result, "  fg:           {:?}\r\n", node.attributes.fg);
                 }
@@ -1219,6 +1778,14 @@ impl Tui {
         }
 
         result
+    }
+
+    fn was_mouse_hover_on_node(&self, id: u64) -> bool {
+        self.mouse_hover_node_path.last() == Some(&id)
+    }
+
+    fn was_mouse_hover_on_subtree(&self, node: &Node) -> bool {
+        self.mouse_hover_node_path.get(node.depth) == Some(&node.id)
     }
 
     fn was_mouse_down_on_node(&self, id: u64) -> bool {
@@ -1328,6 +1895,7 @@ pub struct Context<'a, 'input> {
     input_keyboard: Option<InputKey>,
     input_mouse_modifiers: InputKeyMod,
     input_mouse_click: CoordType,
+    input_mouse_down: bool,
     /// By how much the mouse wheel was scrolled since the last frame.
     input_scroll_delta: Point,
     input_consumed: bool,
@@ -1445,6 +2013,10 @@ impl<'a> Context<'a, '_> {
         // At this point, it's more like "focus_well?" instead of "focus_well!".
         let focus_well = self.tree.last_node;
 
+        if !self.tui.is_subtree_focused(&focus_well.borrow()) {
+            return;
+        }
+
         // Remember the focused node, if any, because once the code below runs,
         // we need it for the `Tree::visit_all` call.
         if self.is_focused() {
@@ -1457,14 +2029,9 @@ impl<'a> Context<'a, '_> {
             return;
         };
 
-        // Filter down to nodes that are focus wells and contain the focus. They're
-        // basically the "tab container". We test for the node depth to ensure that
-        // we don't accidentally pick a focus well next to or inside the focused node.
-        {
-            let n = focus_well.borrow();
-            if !n.attributes.focus_well || n.depth > focused.borrow().depth {
-                return;
-            }
+        // Only ancestors of the focused node may wrap traversal.
+        if !focus_well.borrow().attributes.focus_well {
+            return;
         }
 
         // Filter down to Tab/Shift+Tab inputs.
@@ -1919,8 +2486,8 @@ impl<'a> Context<'a, '_> {
     ///
     /// # Example
     /// ```
-    /// use edit::framebuffer::IndexedColor;
-    /// use edit::tui::Context;
+    /// use ogedit::framebuffer::IndexedColor;
+    /// use ogedit::tui::Context;
     ///
     /// fn draw(ctx: &mut Context) {
     ///     ctx.styled_label_begin("label");
@@ -2027,7 +2594,7 @@ impl<'a> Context<'a, '_> {
         if self.is_focused() {
             self.attr_reverse();
         }
-        self.styled_label_add_text(if *checked { "[🗹 " } else { "[☐ " });
+        self.styled_label_add_text(if *checked { "[◼ " } else { "[◻ " });
         self.styled_label_add_text(text);
         self.styled_label_add_text("]");
         self.styled_label_end();
@@ -2056,17 +2623,39 @@ impl<'a> Context<'a, '_> {
     /// Creates a text input field.
     /// Returns true if the text contents changed.
     pub fn editline(&mut self, classname: &'static str, text: &mut dyn WriteableDocument) -> bool {
-        self.textarea_internal(classname, TextBufferPayload::Editline(text))
+        self.textarea_internal(classname, TextBufferPayload::Editline(text), None)
     }
 
     /// Creates a text area.
     pub fn textarea(&mut self, classname: &'static str, tb: RcTextBuffer) {
-        self.textarea_internal(classname, TextBufferPayload::Textarea(tb));
+        self.textarea_internal(classname, TextBufferPayload::Textarea(tb), None);
     }
 
-    fn textarea_internal(&mut self, classname: &'static str, payload: TextBufferPayload) -> bool {
+    /// Create a text area with application shortcuts taking precedence over its
+    /// built-in bindings. The hook runs only while this editor owns keyboard
+    /// focus, so dialogs and single-line fields keep their normal input handling.
+    pub fn textarea_with_shortcuts(
+        &mut self,
+        classname: &'static str,
+        tb: RcTextBuffer,
+        mut shortcuts: impl FnMut(&mut Self),
+    ) {
+        self.textarea_internal(classname, TextBufferPayload::Textarea(tb), Some(&mut shortcuts));
+    }
+
+    fn textarea_internal(
+        &mut self,
+        classname: &'static str,
+        payload: TextBufferPayload,
+        shortcuts: Option<&mut dyn FnMut(&mut Self)>,
+    ) -> bool {
         self.block_begin(classname);
         self.block_end();
+        if self.is_focused()
+            && let Some(shortcuts) = shortcuts
+        {
+            shortcuts(self);
+        }
 
         let mut node = self.tree.last_node.borrow_mut();
         let node = &mut *node;
@@ -2100,16 +2689,19 @@ impl<'a> Context<'a, '_> {
                 }
             };
 
-            // SAFETY: *Assuming* that there are no duplicate node IDs in the tree that
-            // would cause this cache slot to be overwritten, then this operation is safe.
-            // The text buffer cache will keep the buffer alive for us long enough.
-            unsafe { mem::transmute(&*cached.editor) }
+            self.tui.text_buffers_next.push(cached.editor.clone());
+            // SAFETY: The Rc pointee is stable even if this Vec moves. Its owner
+            // is released only after the matching arena is reset, independently
+            // of cache eviction/replacement and node ID reuse.
+            unsafe { mem::transmute(&**self.tui.text_buffers_next.last().unwrap()) }
         };
 
         node.content = NodeContent::Textarea(TextareaContent {
             buffer,
             scroll_offset: Default::default(),
             scroll_offset_y_drag_start: CoordType::MIN,
+            rectangle_drag_anchor: None,
+            line_selection_anchor: None,
             scroll_offset_x_max: 0,
             thumb_height: 0,
             preferred_column: 0,
@@ -2131,6 +2723,10 @@ impl<'a> Context<'a, '_> {
             if let NodeContent::Textarea(content_prev) = &node_prev.content {
                 content.scroll_offset = content_prev.scroll_offset;
                 content.scroll_offset_y_drag_start = content_prev.scroll_offset_y_drag_start;
+                if ptr::eq(content.buffer, content_prev.buffer) {
+                    content.rectangle_drag_anchor = content_prev.rectangle_drag_anchor;
+                    content.line_selection_anchor = content_prev.line_selection_anchor;
+                }
                 content.scroll_offset_x_max = content_prev.scroll_offset_x_max;
                 content.thumb_height = content_prev.thumb_height;
                 content.preferred_column = content_prev.preferred_column;
@@ -2191,6 +2787,12 @@ impl<'a> Context<'a, '_> {
         node_prev: &Node,
         single_line: bool,
     ) -> bool {
+        // Application shortcuts may consume input before the built-in handler.
+        // They can change selection or switch documents, invalidating a gutter
+        // gesture just as ordinary keyboard navigation does.
+        if self.input_text.is_some() || self.input_keyboard.is_some() {
+            tc.line_selection_anchor = None;
+        }
         if self.input_consumed {
             return false;
         }
@@ -2202,7 +2804,7 @@ impl<'a> Context<'a, '_> {
 
         // Scrolling works even if the node isn't focused.
         if self.input_scroll_delta != Point::default()
-            && node_prev.inner_clipped.contains(self.tui.mouse_position)
+            && self.tui.was_mouse_hover_on_node(node_prev.id)
         {
             tc.scroll_offset.x += self.input_scroll_delta.x;
             tc.scroll_offset.y += self.input_scroll_delta.y;
@@ -2240,46 +2842,61 @@ impl<'a> Context<'a, '_> {
             };
 
             if margin_rect.contains(self.tui.mouse_down_position) && tb.margin_width() > 0 {
-                // Clicking in the margin (line numbers) selects entire lines
-                if self.tui.mouse_is_drag {
-                    // Dragging across line numbers extends selection
-                    if !tb.has_selection() {
-                        tb.start_selection();
-                    }
-                    tb.selection_update_visual(Point { x: CoordType::MAX, y: pos.y });
-                    tc.preferred_column = tb.cursor_visual_pos().x;
-                } else if self.tui.mouse_state == InputMouseState::Left {
-                    // Single click on line number
-                    if self.input_mouse_modifiers.contains(kbmod::SHIFT) {
-                        // Shift+click extends selection to this line
-                        tb.selection_update_visual(Point { x: CoordType::MAX, y: pos.y });
+                let clicked_line = tb.logical_line_at_visual_row(pos.y);
+                if self.tui.mouse_state == InputMouseState::Left && self.input_mouse_down {
+                    let anchor = if self.input_mouse_modifiers.contains(kbmod::SHIFT) {
+                        tc.line_selection_anchor.unwrap_or(tb.selection_anchor_line())
                     } else {
-                        // Regular click selects the entire line
-                        tb.cursor_move_to_visual(Point { x: 0, y: pos.y });
-                        tb.select_line();
+                        clicked_line
+                    };
+                    tc.rectangle_drag_anchor = None;
+                    tc.line_selection_anchor = Some(anchor);
+                    tb.select_lines(anchor, clicked_line);
+                    make_cursor_visible = true;
+                } else if self.tui.mouse_is_drag
+                    && let Some(anchor) = tc.line_selection_anchor
+                {
+                    tb.select_lines(anchor, clicked_line);
+                    make_cursor_visible = true;
+                    // The fixed logical anchor survives viewport scrolling.
+                    // Idle frames continue dragging when the pointer is outside.
+                    if mouse.y < inner.top || mouse.y >= inner.bottom {
+                        self.tui.read_timeout = time::Duration::from_millis(25);
                     }
-                    tc.preferred_column = tb.cursor_visual_pos().x;
                 }
-                make_cursor_visible = true;
+                tc.preferred_column = tb.cursor_visual_pos().x;
                 self.set_input_consumed();
                 return make_cursor_visible;
             } else if text_rect.contains(self.tui.mouse_down_position) {
+                tc.line_selection_anchor = None;
                 if self.tui.mouse_is_drag {
-                    tb.selection_update_visual(pos);
+                    if let Some(anchor) = tc.rectangle_drag_anchor {
+                        // Keep the buffer-space anchor captured on mouse-down.
+                        // Recomputing it from screen coordinates would move the
+                        // anchor whenever dragging causes the viewport to scroll.
+                        tb.select_rectangle(anchor, pos);
+                    } else {
+                        tb.selection_update_visual(pos);
+                    }
                     tc.preferred_column = tb.cursor_visual_pos().x;
 
                     let height = inner.height();
 
                     // If the editor is only 1 line tall we can't possibly scroll up or down.
                     if height >= 2 {
-                        fn calc(min: CoordType, max: CoordType, mouse: CoordType) -> CoordType {
+                        fn calc(
+                            min: CoordType,
+                            max: CoordType,
+                            down: CoordType,
+                            mouse: CoordType,
+                        ) -> CoordType {
                             // Otherwise, the scroll zone is up to 3 lines at the top/bottom.
                             let zone_height = ((max - min) / 2).min(3);
 
                             // The .y positions where the scroll zones begin:
                             // Mouse coordinates above top and below bottom respectively.
-                            let scroll_min = min + zone_height;
-                            let scroll_max = max - zone_height - 1;
+                            let scroll_min = down.min(min + zone_height);
+                            let scroll_max = down.max(max - zone_height - 1);
 
                             // Calculate the delta for scrolling up or down.
                             let delta_min = (mouse - scroll_min).clamp(-zone_height, 0);
@@ -2289,12 +2906,13 @@ impl<'a> Context<'a, '_> {
                             let idx = 3 + delta_min + delta_max;
 
                             const SPEEDS: [CoordType; 7] = [-9, -3, -1, 0, 1, 3, 9];
-                            let idx = idx.clamp(0, SPEEDS.len() as CoordType) as usize;
+                            let idx = idx.clamp(0, SPEEDS.len() as CoordType - 1) as usize;
                             SPEEDS[idx]
                         }
 
-                        let delta_x = calc(text_rect.left, text_rect.right, mouse.x);
-                        let delta_y = calc(text_rect.top, text_rect.bottom, mouse.y);
+                        let down = self.tui.mouse_down_position;
+                        let delta_x = calc(text_rect.left, text_rect.right, down.x, mouse.x);
+                        let delta_y = calc(text_rect.top, text_rect.bottom, down.y, mouse.y);
 
                         tc.scroll_offset.x += delta_x;
                         tc.scroll_offset.y += delta_y;
@@ -2303,18 +2921,31 @@ impl<'a> Context<'a, '_> {
                             self.tui.read_timeout = time::Duration::from_millis(25);
                         }
                     }
-                } else {
-                    match self.input_mouse_click {
+                } else if self.input_mouse_down {
+                    // A held button is carried across idle frames, but a click
+                    // must run only once. Replaying it without its Alt modifier
+                    // would discard added cursors and the rectangle anchor.
+                    let clicks = if self.input_mouse_modifiers.contains(kbmod::ALT) {
+                        0
+                    } else {
+                        self.input_mouse_click
+                    };
+                    match clicks {
                         5.. => {}
                         4 => tb.select_all(),
                         3 => tb.select_line(),
                         2 => tb.select_word(),
                         _ => match self.tui.mouse_state {
                             InputMouseState::Left => {
-                                if self.input_mouse_modifiers.contains(kbmod::SHIFT) {
+                                if self.input_mouse_modifiers.contains(kbmod::ALT) {
+                                    tc.rectangle_drag_anchor = Some(pos);
+                                    tb.add_cursor_visual(pos);
+                                } else if self.input_mouse_modifiers.contains(kbmod::SHIFT) {
+                                    tc.rectangle_drag_anchor = None;
                                     // TODO: Untested because Windows Terminal surprisingly doesn't support Shift+Click.
                                     tb.selection_update_visual(pos);
                                 } else {
+                                    tc.rectangle_drag_anchor = None;
                                     tb.cursor_move_to_visual(pos);
                                 }
                                 tc.preferred_column = tb.cursor_visual_pos().x;
@@ -2323,6 +2954,9 @@ impl<'a> Context<'a, '_> {
                             _ => return false,
                         },
                     }
+                }
+                if self.tui.mouse_state == InputMouseState::Release {
+                    tc.rectangle_drag_anchor = None;
                 }
             } else if track_rect.contains(self.tui.mouse_down_position) {
                 if self.tui.mouse_state == InputMouseState::Release {
@@ -2362,7 +2996,63 @@ impl<'a> Context<'a, '_> {
             let key = input.key();
             let modifiers = input.modifiers();
 
+            if let Some(ch) = input.text_char() {
+                let mut bytes = [0; 4];
+                tb.write_canon(ch.encode_utf8(&mut bytes).as_bytes());
+                tc.preferred_column = tb.cursor_visual_pos().x;
+                self.set_input_consumed();
+                return true;
+            }
+
             make_cursor_visible = true;
+
+            if !single_line
+                && modifiers == kbmod::ALT_SHIFT
+                && matches!(key, vk::LEFT | vk::RIGHT | vk::UP | vk::DOWN)
+            {
+                let (dx, dy) = match key {
+                    vk::LEFT => (-1, 0),
+                    vk::RIGHT => (1, 0),
+                    vk::UP => (0, -1),
+                    _ => (0, 1),
+                };
+                tb.extend_rectangle(dx, dy);
+                self.set_input_consumed();
+                return true;
+            }
+
+            if tb.selection_count() > 1 && !modifiers.contains(kbmod::ALT) {
+                let select = modifiers.contains(kbmod::SHIFT);
+                let handled = match key {
+                    vk::LEFT | vk::RIGHT => {
+                        let granularity = if modifiers.contains(KBMOD_FOR_WORD_NAV) {
+                            CursorMovement::Word
+                        } else {
+                            CursorMovement::Grapheme
+                        };
+                        tb.move_cursors_delta(
+                            granularity,
+                            if key == vk::LEFT { -1 } else { 1 },
+                            select,
+                        );
+                        true
+                    }
+                    vk::UP | vk::DOWN if !modifiers.contains(kbmod::CTRL) => {
+                        tb.move_cursors_vertical(if key == vk::UP { -1 } else { 1 }, select);
+                        true
+                    }
+                    vk::HOME | vk::END if !modifiers.contains(kbmod::CTRL) => {
+                        tb.move_cursors_line_boundary(key == vk::END, select);
+                        true
+                    }
+                    _ => false,
+                };
+                if handled {
+                    tc.preferred_column = tb.cursor_visual_pos().x;
+                    self.set_input_consumed();
+                    return true;
+                }
+            }
 
             match key {
                 vk::BACK => {
@@ -2371,7 +3061,11 @@ impl<'a> Context<'a, '_> {
                     } else {
                         CursorMovement::Grapheme
                     };
-                    tb.delete(granularity, -1);
+                    if single_line {
+                        tb.delete(granularity, -1);
+                    } else {
+                        tb.backspace_with_auto_unindent(granularity);
+                    }
                 }
                 vk::TAB => {
                     if single_line {
@@ -2592,7 +3286,7 @@ impl<'a> Context<'a, '_> {
                         }
                         kbmod::ALT => tb.move_selected_lines(MoveLineDirection::Up),
                         kbmod::CTRL_ALT => {
-                            // TODO: Add cursor above
+                            tb.add_cursor_vertical(-1);
                         }
                         _ => return false,
                     }
@@ -2663,13 +3357,19 @@ impl<'a> Context<'a, '_> {
                         }
                         kbmod::ALT => tb.move_selected_lines(MoveLineDirection::Down),
                         kbmod::CTRL_ALT => {
-                            // TODO: Add cursor above
+                            tb.add_cursor_vertical(1);
                         }
                         _ => return false,
                     }
                 }
                 vk::INSERT => match modifiers {
-                    kbmod::SHIFT => tb.paste(self.clipboard_ref()),
+                    kbmod::SHIFT => {
+                        if single_line {
+                            tb.paste_single_line(self.clipboard_ref());
+                        } else {
+                            tb.paste(self.clipboard_ref());
+                        }
+                    }
                     kbmod::CTRL => tb.copy(self.clipboard_mut()),
                     _ => tb.set_overtype(!tb.is_overtype()),
                 },
@@ -2714,8 +3414,26 @@ impl<'a> Context<'a, '_> {
                     kbmod::CTRL => tb.copy(self.clipboard_mut()),
                     _ => return false,
                 },
+                vk::D => match modifiers {
+                    kbmod::CTRL_ALT if !single_line => {
+                        tb.add_next_occurrence();
+                    }
+                    _ => return false,
+                },
+                vk::CLOSE_BRACKET => match modifiers {
+                    kbmod::CTRL if !single_line => {
+                        tb.jump_to_matching_bracket();
+                    }
+                    _ => return false,
+                },
                 vk::V => match modifiers {
-                    kbmod::CTRL => tb.paste(self.clipboard_ref()),
+                    kbmod::CTRL => {
+                        if single_line {
+                            tb.paste_single_line(self.clipboard_ref());
+                        } else {
+                            tb.paste(self.clipboard_ref());
+                        }
+                    }
                     _ => return false,
                 },
                 vk::Y => match modifiers {
@@ -2856,7 +3574,7 @@ impl<'a> Context<'a, '_> {
             let container_rect = prev_container.inner;
 
             if self.input_scroll_delta != Point::default()
-                && container_rect.contains(self.tui.mouse_position)
+                && self.tui.was_mouse_hover_on_subtree(&prev_container)
             {
                 sc.scroll_offset.x += self.input_scroll_delta.x;
                 sc.scroll_offset.y += self.input_scroll_delta.y;
@@ -3168,7 +3886,17 @@ impl<'a> Context<'a, '_> {
             && !contains_focus
             && self.consume_shortcut(kbmod::ALT | InputKey::new(accelerator as u32));
 
+        let button_id = self.tree.last_node.borrow().id;
+        if self.button_activated() && self.tui.menubar_toggle_id == button_id {
+            self.tui.menubar_toggle_id = 0;
+            self.toss_focus_up();
+            return false;
+        }
+
         if contains_focus || keyboard_focus {
+            if self.tui.mouse_state != InputMouseState::Left {
+                self.tui.menubar_toggle_id = button_id;
+            }
             self.attr_background_rgba(self.tui.floater_default_bg);
             self.attr_foreground_rgba(self.tui.floater_default_fg);
 
@@ -3281,6 +4009,9 @@ impl<'a> Context<'a, '_> {
     /// Ends the current menubar.
     pub fn menubar_end(&mut self) {
         self.table_end();
+        if !self.contains_focus() {
+            self.tui.menubar_toggle_id = 0;
+        }
     }
 
     /// Renders a button label with an optional accelerator character
@@ -3292,7 +4023,7 @@ impl<'a> Context<'a, '_> {
             self.styled_label_add_text("[");
         }
         if let Some(checked) = style.checked {
-            self.styled_label_add_text(if checked { "🗹 " } else { "  " });
+            self.styled_label_add_text(if checked { "◼ " } else { "  " });
         }
         // Label text
         match style.accelerator {
@@ -3725,6 +4456,8 @@ struct TextareaContent<'a> {
     // Carries over between frames.
     scroll_offset: Point,
     scroll_offset_y_drag_start: CoordType,
+    rectangle_drag_anchor: Option<Point>,
+    line_selection_anchor: Option<CoordType>,
     scroll_offset_x_max: CoordType,
     thumb_height: CoordType,
     preferred_column: CoordType,

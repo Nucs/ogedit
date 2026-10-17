@@ -22,10 +22,12 @@
 
 mod gap_buffer;
 mod navigation;
+#[cfg(test)]
+mod upstream_tests;
 
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
-use std::collections::LinkedList;
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{Read as _, Write as _};
@@ -40,11 +42,11 @@ use crate::arena::{Arena, ArenaString, scratch_arena};
 use crate::cell::SemiRefCell;
 use crate::clipboard::Clipboard;
 use crate::document::{ReadableDocument, WriteableDocument};
-use crate::framebuffer::{Framebuffer, IndexedColor};
+use crate::framebuffer::{Attributes, Framebuffer, IndexedColor};
 use crate::helpers::*;
 use crate::oklab::StraightRgba;
 use crate::simd::memchr2;
-use crate::unicode::{self, Cursor, MeasurementConfig, Utf8Chars};
+use crate::unicode::{Cursor, MeasurementConfig, Utf8Chars};
 use crate::{apperr, icu, simd};
 
 /// The margin template is used for line numbers.
@@ -70,7 +72,7 @@ pub struct TextBufferStatistics {
 ///
 /// The two points are not sorted. Instead, `beg` refers to where the selection
 /// started being made and `end` refers to the currently being updated position.
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 struct TextBufferSelection {
     beg: Point,
     end: Point,
@@ -92,15 +94,17 @@ struct HistoryEntry {
     cursor_before: Point,
     /// [`TextBuffer::selection`] before the change was made.
     selection_before: Option<TextBufferSelection>,
+    secondary_before: Vec<(usize, usize)>,
+    newlines_before: bool,
     /// [`TextBuffer::stats`] before the change was made.
     stats_before: TextBufferStatistics,
+    layout_before: (CoordType, CoordType, bool, bool),
     /// [`GapBuffer::generation`] before the change was made.
     ///
     /// **NOTE:** Entries with the same generation are grouped together.
     generation_before: u32,
-    /// Logical cursor position where the change took place.
-    /// The position is at the start of the changed range.
-    cursor: Point,
+    /// Exact replacement offset; the edit may join graphemes around this byte.
+    offset: usize,
     /// Text that was deleted from the buffer.
     deleted: Vec<u8>,
     /// Text that was added to the buffer.
@@ -113,14 +117,13 @@ struct ActiveSearch {
     pattern: String,
     /// The search options.
     options: SearchOptions,
-    /// The ICU `UText` object.
-    text: icu::Text,
-    /// The ICU `URegularExpression` object.
+    // Drop the regex before its backing provider.
     regex: icu::Regex,
+    text: icu::Text,
     /// [`GapBuffer::generation`] when the search was created.
     /// This is used to detect if we need to refresh the
     /// [`ActiveSearch::regex`] object.
-    buffer_generation: u32,
+    buffer_generation: u64,
     /// [`TextBuffer::selection_generation`] when the search was
     /// created. When the user manually selects text, we need to
     /// refresh the [`ActiveSearch::pattern`] with it.
@@ -151,7 +154,6 @@ enum RegexReplacement<'a> {
 /// This helps us avoid having to remeasure the buffer after an edit.
 struct ActiveEditLineInfo {
     /// Points to the start of the currently being edited line.
-    #[allow(dead_code)]
     safe_start: Cursor,
     /// Number of visual rows of the line that starts
     /// at [`ActiveEditLineInfo::safe_start`].
@@ -187,25 +189,23 @@ impl SelectionHighlights {
         }
     }
 
-    /// Check if the selection text should trigger auto-highlight.
-    /// - 1 character: only if NOT an ASCII letter (a-z, A-Z)
-    /// - 2+ characters: always highlight
-    /// - Whitespace-only: no highlight
+    /// Highlight repeated text, excluding whitespace and a lone letter.
+    /// A character here is a grapheme, matching editor selection/navigation.
     fn should_highlight(text: &[u8]) -> bool {
-        if text.is_empty() {
+        let Ok(value) = std::str::from_utf8(text) else {
+            return false;
+        };
+        let Some(first) = value.chars().next() else {
+            return false;
+        };
+        if value.chars().all(char::is_whitespace) {
             return false;
         }
-        // Check if all whitespace
-        if text.iter().all(|&b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r') {
-            return false;
+        if first.is_alphabetic() {
+            let end = MeasurementConfig::new(&text).goto_logical(Point { x: 2, y: 0 });
+            return end.offset < text.len() || end.logical_pos.x > 1;
         }
-        if text.len() == 1 {
-            let ch = text[0];
-            // Single char: only highlight if NOT a letter
-            !ch.is_ascii_alphabetic()
-        } else {
-            true
-        }
+        true
     }
 
     /// Update the cache if the selection or buffer has changed.
@@ -246,38 +246,53 @@ impl SelectionHighlights {
             return;
         }
 
-        // Find all matches in the buffer
-        let text_len = buffer.len();
-        let pattern_len = self.pattern.len();
-        let mut offset = 0;
-
-        while offset + pattern_len <= text_len && self.matches.len() < SELECTION_HIGHLIGHT_MAX_MATCHES {
-            // Read a chunk from the buffer
-            let chunk = buffer.read_forward(offset);
-            if chunk.is_empty() {
-                break;
-            }
-
-            // Search for the pattern in this chunk
-            let mut pos = 0;
-            while pos + pattern_len <= chunk.len() {
-                if &chunk[pos..pos + pattern_len] == self.pattern.as_slice() {
-                    let match_start = offset + pos;
-                    let match_end = match_start + pattern_len;
-                    // Don't highlight the current selection itself
-                    if match_start != range.start || match_end != range.end {
-                        self.matches.push(match_start..match_end);
-                    }
-                    pos += pattern_len; // Skip past this match
-                } else {
-                    pos += 1;
-                }
-            }
-
-            offset += chunk.len().saturating_sub(pattern_len - 1).max(1);
-        }
+        self.matches = find_all_matches(buffer, &self.pattern, SELECTION_HIGHLIGHT_MAX_MATCHES)
+            .into_iter()
+            .filter(|m| *m != range)
+            .collect();
     }
+}
 
+/// Streaming KMP search avoids copying a document and crosses the gap correctly.
+fn find_all_matches(buffer: &GapBuffer, pattern: &[u8], limit: usize) -> Vec<Range<usize>> {
+    if pattern.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut prefix = vec![0; pattern.len()];
+    let mut matched = 0;
+    for i in 1..pattern.len() {
+        while matched > 0 && pattern[i] != pattern[matched] {
+            matched = prefix[matched - 1];
+        }
+        if pattern[i] == pattern[matched] {
+            matched += 1;
+        }
+        prefix[i] = matched;
+    }
+    let mut matches = Vec::new();
+    let mut offset = 0;
+    matched = 0;
+    while offset < buffer.len() {
+        let chunk = buffer.read_forward(offset);
+        for (i, &byte) in chunk.iter().enumerate() {
+            while matched > 0 && byte != pattern[matched] {
+                matched = prefix[matched - 1];
+            }
+            if byte == pattern[matched] {
+                matched += 1;
+            }
+            if matched == pattern.len() {
+                let end = offset + i + 1;
+                matches.push(end - pattern.len()..end);
+                if matches.len() >= limit {
+                    return matches;
+                }
+                matched = 0;
+            }
+        }
+        offset += chunk.len();
+    }
+    matches
 }
 
 /// Undo/redo grouping works by recording a set of "overrides",
@@ -286,12 +301,16 @@ impl SelectionHighlights {
 /// common `generation_before` and can be undone/redone together.
 /// This struct stores those overrides.
 struct ActiveEditGroupInfo {
+    redo_before: VecDeque<SemiRefCell<HistoryEntry>>,
     /// [`TextBuffer::cursor`] position before the change was made.
     cursor_before: Point,
     /// [`TextBuffer::selection`] before the change was made.
     selection_before: Option<TextBufferSelection>,
+    secondary_before: Vec<(usize, usize)>,
+    newlines_before: bool,
     /// [`TextBuffer::stats`] before the change was made.
     stats_before: TextBufferStatistics,
+    layout_before: (CoordType, CoordType, bool, bool),
     /// [`GapBuffer::generation`] before the change was made.
     ///
     /// **NOTE:** Entries with the same generation are grouped together.
@@ -299,12 +318,14 @@ struct ActiveEditGroupInfo {
 }
 
 /// Char- or word-wise navigation? Your choice.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CursorMovement {
     Grapheme,
     Word,
 }
 
 /// See [`TextBuffer::move_selected_lines`].
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MoveLineDirection {
     Up,
     Down,
@@ -327,17 +348,26 @@ pub type RcTextBuffer = Rc<TextBufferCell>;
 
 /// A text buffer for a text editor.
 pub struct TextBuffer {
-    buffer: GapBuffer,
+    // ICU retains a pointer to this provider. A stable allocation keeps safe
+    // moves of TextBuffer from invalidating active searches.
+    buffer: Box<GapBuffer>,
 
-    undo_stack: LinkedList<SemiRefCell<HistoryEntry>>,
-    redo_stack: LinkedList<SemiRefCell<HistoryEntry>>,
+    undo_stack: VecDeque<SemiRefCell<HistoryEntry>>,
+    redo_stack: VecDeque<SemiRefCell<HistoryEntry>>,
     last_history_type: HistoryType,
-    last_save_generation: u32,
+    last_save_generation: Option<u32>,
+    content_revision: u64,
+    syntax: Option<crate::syntax::SyntaxCache>,
+    syntax_path: Option<std::path::PathBuf>,
+    syntax_language: Option<String>,
+    syntax_enabled: bool,
 
     active_edit_group: Option<ActiveEditGroupInfo>,
+    edit_group_depth: usize,
     active_edit_line_info: Option<ActiveEditLineInfo>,
     active_edit_depth: i32,
     active_edit_off: usize,
+    active_edit_needs_reflow: bool,
 
     stats: TextBufferStatistics,
     cursor: Cursor,
@@ -347,6 +377,9 @@ pub struct TextBuffer {
     // Must be cleared on every edit or reflow.
     cursor_for_rendering: Option<Cursor>,
     selection: Option<TextBufferSelection>,
+    secondary_selections: Vec<(usize, usize)>,
+    rectangle: Option<(Point, Point)>,
+    edit_capacity_error: bool,
     selection_generation: u32,
     search: Option<UnsafeCell<ActiveSearch>>,
     selection_highlights: SelectionHighlights,
@@ -368,6 +401,13 @@ pub struct TextBuffer {
     wants_cursor_visibility: bool,
 }
 
+impl Drop for TextBuffer {
+    fn drop(&mut self) {
+        // Native regex/provider objects must close before their backing storage.
+        self.search = None;
+    }
+}
+
 impl TextBuffer {
     /// Creates a new text buffer inside an [`Rc`].
     /// See [`TextBuffer::new()`].
@@ -380,22 +420,32 @@ impl TextBuffer {
     /// if the buffer is optimized for <1MiB contents.
     pub fn new(small: bool) -> apperr::Result<Self> {
         Ok(Self {
-            buffer: GapBuffer::new(small)?,
+            buffer: Box::new(GapBuffer::new(small)?),
 
-            undo_stack: LinkedList::new(),
-            redo_stack: LinkedList::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             last_history_type: HistoryType::Other,
-            last_save_generation: 0,
+            last_save_generation: Some(0),
+            content_revision: 0,
+            syntax: None,
+            syntax_path: None,
+            syntax_language: None,
+            syntax_enabled: true,
 
             active_edit_group: None,
+            edit_group_depth: 0,
             active_edit_line_info: None,
             active_edit_depth: 0,
             active_edit_off: 0,
+            active_edit_needs_reflow: false,
 
             stats: TextBufferStatistics { logical_lines: 1, visual_lines: 1 },
             cursor: Default::default(),
             cursor_for_rendering: None,
             selection: None,
+            secondary_selections: Vec::new(),
+            rectangle: None,
+            edit_capacity_error: false,
             selection_generation: 0,
             search: None,
             selection_highlights: SelectionHighlights::new(),
@@ -437,7 +487,7 @@ impl TextBuffer {
 
     /// Does the buffer need to be saved?
     pub fn is_dirty(&self) -> bool {
-        self.last_save_generation != self.buffer.generation()
+        self.last_save_generation != Some(self.buffer.generation())
     }
 
     /// The buffer generation changes on every edit.
@@ -447,13 +497,20 @@ impl TextBuffer {
         self.buffer.generation()
     }
 
+    /// Monotonic edit revision, including undo/redo and reloads.
+    pub fn content_revision(&self) -> u64 {
+        self.content_revision
+    }
+
     /// Force the buffer to be dirty.
     pub fn mark_as_dirty(&mut self) {
-        self.last_save_generation = self.buffer.generation().wrapping_sub(1);
+        self.last_save_generation = None;
     }
 
     fn mark_as_clean(&mut self) {
-        self.last_save_generation = self.buffer.generation();
+        self.last_save_generation = Some(self.buffer.generation());
+        // Saving must establish a reachable undo boundary.
+        self.last_history_type = HistoryType::Other;
     }
 
     /// The encoding used during reading/writing. "UTF-8" is the default.
@@ -479,73 +536,58 @@ impl TextBuffer {
         self.newlines_are_crlf = crlf;
     }
 
-    /// Changes the newline type used in the document.
-    ///
-    /// NOTE: Cannot be undone.
+    /// Convert line endings as one reversible, capacity-checked edit.
     pub fn normalize_newlines(&mut self, crlf: bool) {
         let newline: &[u8] = if crlf { b"\r\n" } else { b"\n" };
-        let mut off = 0;
-
-        let mut cursor_offset = self.cursor.offset;
-        let mut cursor_for_rendering_offset =
-            self.cursor_for_rendering.map_or(cursor_offset, |c| c.offset);
-
-        #[cfg(debug_assertions)]
-        let mut adjusted_newlines = 0;
-
-        'outer: loop {
-            // Seek to the offset of the next line start.
-            loop {
-                let chunk = self.read_forward(off);
-                if chunk.is_empty() {
-                    break 'outer;
+        let mut edits = Vec::new();
+        let mut offset = 0;
+        while offset < self.text_length() {
+            let chunk = self.read_forward(offset);
+            for (index, &byte) in chunk.iter().enumerate() {
+                if byte != b'\n' {
+                    continue;
                 }
-
-                let (delta, line) = simd::lines_fwd(chunk, 0, 0, 1);
-                off += delta;
-                if line == 1 {
-                    break;
+                let end = offset + index + 1;
+                let has_cr = self.read_backward(end - 1).last() == Some(&b'\r');
+                if has_cr != crlf {
+                    let start = end - if has_cr { 2 } else { 1 };
+                    edits.push((start..end, newline.to_vec()));
                 }
             }
-
-            // Get the preceding newline.
-            let chunk = self.read_backward(off);
-            let chunk_newline_len = if chunk.ends_with(b"\r\n") { 2 } else { 1 };
-            let chunk_newline = &chunk[chunk.len() - chunk_newline_len..];
-
-            if chunk_newline != newline {
-                // If this newline is still before our cursor position, then it still has an effect on its offset.
-                // Any newline adjustments past that cursor position are irrelevant.
-                let delta = newline.len() as isize - chunk_newline_len as isize;
-                if off <= cursor_offset {
-                    cursor_offset = cursor_offset.saturating_add_signed(delta);
-                    #[cfg(debug_assertions)]
-                    {
-                        adjusted_newlines += 1;
+            offset += chunk.len();
+        }
+        if edits.is_empty() {
+            if self.newlines_are_crlf != crlf {
+                self.edit_begin(HistoryType::Other, self.cursor);
+                self.buffer.bump_generation();
+                self.newlines_are_crlf = crlf;
+                self.edit_end();
+            }
+            return;
+        }
+        let selections = self.selection_ranges();
+        let moved: Vec<_> = selections
+            .iter()
+            .map(|&(a, b)| {
+                let map = |offset: usize| {
+                    let mut mapped = offset;
+                    for (range, text) in &edits {
+                        if range.end > offset {
+                            break;
+                        }
+                        mapped = mapped - range.len() + text.len();
                     }
-                }
-                if off <= cursor_for_rendering_offset {
-                    cursor_for_rendering_offset =
-                        cursor_for_rendering_offset.saturating_add_signed(delta);
-                }
-
-                // Replace the newline.
-                off -= chunk_newline_len;
-                self.buffer.replace(off..off + chunk_newline_len, newline);
-                off += newline.len();
-            }
+                    mapped
+                };
+                (map(a), map(b))
+            })
+            .collect();
+        if self.apply_byte_edits(&edits).is_err() {
+            self.edit_capacity_error = true;
+            return;
         }
-
-        // If this fails, the cursor offset calculation above is wrong.
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(adjusted_newlines, self.cursor.logical_pos.y);
-
-        self.cursor.offset = cursor_offset;
-        if let Some(cursor) = &mut self.cursor_for_rendering {
-            cursor.offset = cursor_for_rendering_offset;
-        }
-
         self.newlines_are_crlf = crlf;
+        self.set_selection_ranges(&moved);
     }
 
     /// If enabled, automatically insert a final newline
@@ -715,6 +757,7 @@ impl TextBuffer {
     }
 
     fn recalc_after_content_changed(&mut self) {
+        self.content_revision = self.content_revision.wrapping_add(1);
         self.reflow_internal(false);
     }
 
@@ -745,7 +788,13 @@ impl TextBuffer {
                 if self.word_wrap_column > 0 {
                     Default::default()
                 } else {
-                    self.goto_line_start(self.cursor, self.cursor.logical_pos.y)
+                    // Disabling wrap at a line start can make goto_line_start
+                    // return the cached cursor unchanged. Remove its old wrapped
+                    // row before using it as the unwrapped measurement origin.
+                    let mut cursor = self.cursor;
+                    cursor.visual_pos = Point { x: cursor.column, y: cursor.logical_pos.y };
+                    cursor.wrap_opp = false;
+                    self.goto_line_start(cursor, cursor.logical_pos.y)
                 },
                 self.cursor.logical_pos,
             );
@@ -775,14 +824,29 @@ impl TextBuffer {
     }
 
     fn recalc_after_content_swap(&mut self) {
+        self.content_revision = self.content_revision.wrapping_add(1);
         // If the buffer was changed, nothing we previously saved can be relied upon.
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.last_history_type = HistoryType::Other;
         self.cursor = Default::default();
+        self.secondary_selections.clear();
+        self.rectangle = None;
         self.set_selection(None);
         self.mark_as_clean();
         self.reflow();
+    }
+
+    /// Commit a fully loaded replacement while retaining the current view settings.
+    /// Loading into a temporary buffer keeps a failed reload from damaging edits.
+    pub fn replace_loaded_content(&mut self, mut loaded: TextBuffer) {
+        self.search = None;
+        loaded.search = None;
+        mem::swap(&mut self.buffer, &mut loaded.buffer);
+        self.buffer.advance_revision_from(&loaded.buffer);
+        self.encoding = loaded.encoding;
+        self.newlines_are_crlf = loaded.newlines_are_crlf;
+        self.recalc_after_content_swap();
     }
 
     /// Copies the contents of the buffer into a string and marks the buffer as clean.
@@ -904,7 +968,8 @@ impl TextBuffer {
             }
 
             // We'll assume CRLF if more than half of the lines end in CRLF.
-            let newlines_are_crlf = crlf_count >= lines / 2;
+            let newlines_are_crlf =
+                if lines == 0 { self.newlines_are_crlf } else { crlf_count > lines / 2 };
 
             // We'll assume tabs if there are more lines starting with tabs than with spaces.
             let indent_with_tabs = tab_indentations > space_indentations;
@@ -953,6 +1018,14 @@ impl TextBuffer {
         first_chunk_len: usize,
         done: bool,
     ) -> apperr::Result<()> {
+        let file_len = if done {
+            0
+        } else {
+            file.metadata().ok().and_then(|m| usize::try_from(m.len()).ok()).unwrap_or(0)
+        };
+        if file_len > 0 {
+            self.buffer.reserve_empty(file_len)?;
+        }
         {
             let mut first_chunk = unsafe { buf[..first_chunk_len].assume_init_ref() };
             if first_chunk.starts_with(b"\xEF\xBB\xBF") {
@@ -960,6 +1033,9 @@ impl TextBuffer {
                 self.encoding = "UTF-8 BOM";
             }
 
+            if !self.buffer.reserve_insert(first_chunk.len()) {
+                return Err(std::io::Error::from(std::io::ErrorKind::OutOfMemory).into());
+            }
             self.buffer.replace(0..0, first_chunk);
         }
 
@@ -967,25 +1043,21 @@ impl TextBuffer {
             return Ok(());
         }
 
-        // If we don't have file metadata, the input may be a pipe or a socket.
-        // Every read will have the same size until we hit the end.
-        let mut chunk_size = 128 * KIBI;
-        let mut extra_chunk_size = 128 * KIBI;
-
-        if let Ok(m) = file.metadata() {
-            // Usually the next read of size `chunk_size` will read the entire file,
-            // but if the size has changed for some reason, then `extra_chunk_size`
-            // should be large enough to read the rest of the file.
-            // 4KiB is not too large and not too slow.
-            let len = m.len() as usize;
-            chunk_size = len.saturating_sub(first_chunk_len);
-            extra_chunk_size = 4 * KIBI;
-        }
-
         loop {
+            // Metadata is a hint: streams may report zero, and files can grow.
+            let chunk_size = if file_len > 0 {
+                file_len.saturating_sub(self.text_length()).clamp(4 * KIBI, 8 * MEBI)
+            } else {
+                128 * KIBI
+            };
             let gap = self.buffer.allocate_gap(self.text_length(), chunk_size, 0);
             if gap.is_empty() {
-                break;
+                // Do not present a truncated file as a successful load.
+                let mut probe = [0];
+                if file.read(&mut probe)? == 0 {
+                    break;
+                }
+                return Err(std::io::Error::from(std::io::ErrorKind::OutOfMemory).into());
             }
 
             let read = file.read(gap)?;
@@ -994,7 +1066,6 @@ impl TextBuffer {
             }
 
             self.buffer.commit_gap(read);
-            chunk_size = extra_chunk_size;
         }
 
         Ok(())
@@ -1015,8 +1086,14 @@ impl TextBuffer {
         while !first_chunk.is_empty() {
             let off = self.text_length();
             let gap = self.buffer.allocate_gap(off, 8 * KIBI, 0);
+            if gap.is_empty() {
+                return Err(std::io::Error::from(std::io::ErrorKind::OutOfMemory).into());
+            }
             let (input_advance, mut output_advance) =
                 c.convert(first_chunk, slice_as_uninit_mut(gap))?;
+            if input_advance == 0 && output_advance == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into());
+            }
 
             // Remove the BOM from the file, if this is the first chunk.
             // Our caller ensures to only call us once the BOM has been identified,
@@ -1044,11 +1121,17 @@ impl TextBuffer {
 
             let gap = self.buffer.allocate_gap(self.text_length(), 8 * KIBI, 0);
             if gap.is_empty() {
-                break;
+                if done && buf_len == 0 {
+                    break;
+                }
+                return Err(std::io::Error::from(std::io::ErrorKind::OutOfMemory).into());
             }
 
             let read = unsafe { buf[..buf_len].assume_init_ref() };
             let (input_advance, output_advance) = c.convert(read, slice_as_uninit_mut(gap))?;
+            if !read.is_empty() && input_advance == 0 && output_advance == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into());
+            }
 
             self.buffer.commit_gap(output_advance);
 
@@ -1056,7 +1139,7 @@ impl TextBuffer {
             buf_len -= input_advance;
             buf.copy_within(input_advance.., 0);
 
-            if flush {
+            if flush && output_advance == 0 {
                 break;
             }
         }
@@ -1066,6 +1149,13 @@ impl TextBuffer {
 
     /// Writes the text buffer contents to a file, handling BOM and encoding.
     pub fn write_file(&mut self, file: &mut File) -> apperr::Result<()> {
+        self.write_file_staged(file)?;
+        self.mark_saved();
+        Ok(())
+    }
+
+    /// Serialize without declaring the document saved before its atomic commit.
+    pub fn write_file_staged(&mut self, file: &mut File) -> apperr::Result<()> {
         let mut offset = 0;
 
         if self.encoding.starts_with("UTF-8") {
@@ -1084,11 +1174,17 @@ impl TextBuffer {
             self.write_file_with_icu(file)?;
         }
 
-        self.mark_as_clean();
         Ok(())
     }
 
+    /// Mark a successfully committed save as the clean document generation.
+    pub fn mark_saved(&mut self) {
+        self.mark_as_clean();
+    }
+
     fn write_file_with_icu(&mut self, file: &mut File) -> apperr::Result<()> {
+        // Keep conversion chunks small without issuing one OS write per chunk.
+        let mut file = std::io::BufWriter::with_capacity(128 * KIBI, file);
         let scratch = scratch_arena(None);
         let pivot_buffer = scratch.alloc_uninit_slice(4 * KIBI);
         let buf = scratch.alloc_uninit_slice(4 * KIBI);
@@ -1106,24 +1202,439 @@ impl TextBuffer {
         }
 
         loop {
-            let chunk = self.read_forward(offset);
-            let (input_advance, output_advance) = c.convert(chunk, buf)?;
+            let input = self.read_forward(offset);
+            let (input_advance, output_advance) = c.convert(input, buf)?;
             let chunk = unsafe { buf[..output_advance].assume_init_ref() };
 
             file.write_all(chunk)?;
             offset += input_advance;
 
-            if chunk.is_empty() {
+            if input.is_empty() && output_advance == 0 {
                 break;
             }
+            if !input.is_empty() && input_advance == 0 && output_advance == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into());
+            }
         }
-
+        file.flush()?;
         Ok(())
     }
 
     /// Returns the current selection.
     pub fn has_selection(&self) -> bool {
         self.selection.is_some()
+    }
+
+    /// Number of active selections, including empty cursors.
+    pub fn selection_count(&self) -> usize {
+        self.secondary_selections.len() + 1
+    }
+
+    pub fn set_syntax_path(&mut self, path: &std::path::Path) {
+        self.set_syntax_path_with_language(path, None);
+    }
+
+    pub fn set_syntax_path_with_language(
+        &mut self,
+        path: &std::path::Path,
+        language: Option<&str>,
+    ) {
+        if self.syntax_path.as_deref() == Some(path) && self.syntax_language.as_deref() == language
+        {
+            return;
+        }
+        self.syntax_path = Some(path.to_owned());
+        self.syntax_language = language.map(str::to_owned);
+        self.syntax = match language {
+            Some(language) => crate::syntax::SyntaxCache::from_language(language),
+            None => crate::syntax::SyntaxCache::for_path(path),
+        };
+    }
+
+    pub fn set_syntax_enabled(&mut self, enabled: bool) {
+        self.syntax_enabled = enabled;
+    }
+
+    pub fn jump_to_matching_bracket(&mut self) -> bool {
+        let Some(mut syntax) = self.syntax.take() else {
+            return false;
+        };
+        let target =
+            syntax.matching_bracket(&*self.buffer, self.content_revision, self.cursor.offset);
+        self.syntax = Some(syntax);
+        if let Some(target) = target {
+            self.cursor_move_to_offset(target);
+            self.make_cursor_visible();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn clear_secondary_cursors(&mut self) -> bool {
+        let changed = !self.secondary_selections.is_empty();
+        self.secondary_selections.clear();
+        self.rectangle = None;
+        changed
+    }
+
+    /// Current byte anchors, sorted by document order. Reversed selections retain
+    /// their direction. Empty selections represent insertion cursors.
+    pub fn selection_ranges(&self) -> Vec<(usize, usize)> {
+        let mut ranges = self.secondary_selections.clone();
+        ranges.push(match self.selection {
+            Some(s) => (
+                self.cursor_move_to_logical_internal(self.cursor, s.beg).offset,
+                self.cursor_move_to_logical_internal(self.cursor, s.end).offset,
+            ),
+            None => (self.cursor.offset, self.cursor.offset),
+        });
+        ranges.sort_by_key(|&(a, b)| (a.min(b), a.max(b)));
+        ranges
+    }
+
+    /// Install selections, clamping to grapheme boundaries and coalescing
+    /// overlaps so no byte can be replaced twice in a single transaction.
+    pub fn set_selection_ranges(&mut self, ranges: &[(usize, usize)]) {
+        let mut normalized: Vec<(usize, usize)> = ranges
+            .iter()
+            .map(|&(a, b)| {
+                (
+                    self.cursor_move_to_offset_internal(self.cursor, a).offset,
+                    self.cursor_move_to_offset_internal(self.cursor, b).offset,
+                )
+            })
+            .collect();
+        normalized.sort_by_key(|&(a, b)| (a.min(b), a.max(b)));
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in normalized {
+            let start = a.min(b);
+            let end = a.max(b);
+            if let Some(last) = merged.last_mut() {
+                let last_start = last.0.min(last.1);
+                let last_end = last.0.max(last.1);
+                if start < last_end || (start == last_end && (a == b || last.0 == last.1)) {
+                    let new_end = end.max(last_end);
+                    *last =
+                        if last.0 > last.1 { (new_end, last_start) } else { (last_start, new_end) };
+                    continue;
+                }
+            }
+            merged.push((a, b));
+        }
+        let Some((a, b)) = merged.pop() else {
+            return;
+        };
+        let anchor = self.cursor_move_to_offset_internal(self.cursor, a);
+        let head = self.cursor_move_to_offset_internal(anchor, b);
+        self.set_cursor_internal(head);
+        self.set_selection(Some(TextBufferSelection {
+            beg: anchor.logical_pos,
+            end: head.logical_pos,
+        }));
+        self.secondary_selections = merged;
+        self.last_history_type = HistoryType::Other;
+        self.wants_cursor_visibility = true;
+    }
+
+    /// Select the current word, or add the next literal occurrence with wraparound.
+    /// Existing ranges are skipped; repeated calls stop when every match is selected.
+    pub fn add_next_occurrence(&mut self) -> bool {
+        if self.selection.is_none() {
+            self.select_word();
+            return self.selection.is_some();
+        }
+        let Some((beg, end)) = self.selection_range() else {
+            return false;
+        };
+        let pattern = self.extract_bytes(beg.offset..end.offset);
+        let mut ranges = self.selection_ranges();
+        let matches = find_all_matches(&self.buffer, &pattern, usize::MAX);
+        let next = matches
+            .iter()
+            .filter(|r| r.start >= end.offset)
+            .chain(matches.iter().filter(|r| r.start < end.offset))
+            .find(|r| !ranges.iter().any(|&(a, b)| r.start < a.max(b) && r.end > a.min(b)));
+        if let Some(range) = next {
+            ranges.push((range.start, range.end));
+            self.set_selection_ranges(&ranges);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Add an insertion cursor on an adjacent visual row. The latest cursor is
+    /// the one used for the next addition; short lines clamp at their end.
+    pub fn add_cursor_vertical(&mut self, delta: CoordType) {
+        let ranges = self.selection_ranges();
+        let &(a, b) = if delta < 0 { ranges.first().unwrap() } else { ranges.last().unwrap() };
+        let cursor = self.cursor_move_to_offset_internal(self.cursor, b.max(a));
+        let y = cursor.visual_pos.y + delta;
+        if y < 0 || y >= self.stats.visual_lines {
+            return;
+        }
+        let target =
+            self.cursor_move_to_visual_internal(cursor, Point { x: cursor.visual_pos.x, y });
+        let mut ranges = ranges;
+        ranges.push((target.offset, target.offset));
+        self.set_selection_ranges(&ranges);
+    }
+
+    pub fn add_cursor_visual(&mut self, pos: Point) {
+        let mut ranges = self.selection_ranges();
+        let target = self.cursor_move_to_visual_internal(self.cursor, pos);
+        ranges.push((target.offset, target.offset));
+        self.set_selection_ranges(&ranges);
+    }
+
+    /// Select a rectangle in terminal display columns (tabs and wide Unicode
+    /// characters remain whole). Rows beyond EOF are never manufactured.
+    pub fn select_rectangle(&mut self, anchor: Point, head: Point) {
+        let top = anchor.y.min(head.y).max(0);
+        let bottom = anchor.y.max(head.y).min(self.stats.visual_lines - 1);
+        let mut ranges = Vec::new();
+        let mut cursor = self.cursor;
+        for y in top..=bottom {
+            let a = self.cursor_move_to_visual_internal(cursor, Point { x: anchor.x, y });
+            let b = self.cursor_move_to_visual_internal(a, Point { x: head.x, y });
+            ranges.push((a.offset, b.offset));
+            cursor = b;
+        }
+        self.set_selection_ranges(&ranges);
+        self.rectangle = Some((anchor, head));
+    }
+
+    pub fn extend_rectangle(&mut self, dx: CoordType, dy: CoordType) {
+        let (anchor, head) =
+            self.rectangle.unwrap_or((self.cursor.visual_pos, self.cursor.visual_pos));
+        let head = Point {
+            x: (head.x + dx).max(0),
+            y: (head.y + dy).clamp(0, self.stats.visual_lines - 1),
+        };
+        self.select_rectangle(anchor, head);
+    }
+
+    pub fn move_cursors_delta(
+        &mut self,
+        granularity: CursorMovement,
+        delta: CoordType,
+        select: bool,
+    ) {
+        let ranges: Vec<_> = self
+            .selection_ranges()
+            .into_iter()
+            .map(|(a, b)| {
+                if !select && a != b {
+                    let end = if delta < 0 { a.min(b) } else { a.max(b) };
+                    return (end, end);
+                }
+                let head = self.cursor_move_to_offset_internal(self.cursor, b);
+                let end = self.cursor_move_delta_internal(head, granularity, delta).offset;
+                (if select { a } else { end }, end)
+            })
+            .collect();
+        self.set_selection_ranges(&ranges);
+        self.rectangle = None;
+    }
+
+    pub fn move_cursors_vertical(&mut self, delta: CoordType, select: bool) {
+        let ranges: Vec<_> = self
+            .selection_ranges()
+            .into_iter()
+            .map(|(a, b)| {
+                let head = self.cursor_move_to_offset_internal(self.cursor, b);
+                let end = self
+                    .cursor_move_to_visual_internal(
+                        head,
+                        Point { x: head.visual_pos.x, y: head.visual_pos.y + delta },
+                    )
+                    .offset;
+                (if select { a } else { end }, end)
+            })
+            .collect();
+        self.set_selection_ranges(&ranges);
+        self.rectangle = None;
+    }
+
+    pub fn move_cursors_line_boundary(&mut self, to_end: bool, select: bool) {
+        let ranges: Vec<_> = self
+            .selection_ranges()
+            .into_iter()
+            .map(|(a, b)| {
+                let head = self.cursor_move_to_offset_internal(self.cursor, b);
+                let end = self
+                    .cursor_move_to_logical_internal(
+                        head,
+                        Point { x: if to_end { CoordType::MAX } else { 0 }, y: head.logical_pos.y },
+                    )
+                    .offset;
+                (if select { a } else { end }, end)
+            })
+            .collect();
+        self.set_selection_ranges(&ranges);
+        self.rectangle = None;
+    }
+
+    /// Group logical commands (for macro playback) into one undo operation.
+    /// Groups may nest; pair every begin with an end, including on errors.
+    pub fn begin_undo_group(&mut self) {
+        self.edit_begin_grouping();
+    }
+    pub fn end_undo_group(&mut self) {
+        self.edit_end_grouping();
+        self.last_history_type = HistoryType::Other;
+    }
+
+    /// Roll back the outermost command transaction, including its cursor state.
+    /// Used when a macro hits the capacity limit partway through playback.
+    pub fn abort_undo_group(&mut self) {
+        let Some(info) = self.active_edit_group.take() else {
+            return;
+        };
+        self.edit_group_depth = 0;
+        if self.buffer.generation() != info.generation_before {
+            self.undo();
+        }
+        self.redo_stack = info.redo_before;
+        self.cursor = self.cursor_move_to_logical_internal(self.cursor, info.cursor_before);
+        self.set_selection(info.selection_before);
+        self.secondary_selections = info.secondary_before;
+        self.rectangle = None;
+        self.last_history_type = HistoryType::Other;
+    }
+
+    pub fn take_edit_capacity_error(&mut self) -> bool {
+        mem::take(&mut self.edit_capacity_error)
+    }
+
+    /// Apply validated, disjoint byte replacements as one all-or-nothing undo step.
+    /// Source bytes are preserved exactly, including line-ending style.
+    pub fn apply_byte_edits(
+        &mut self,
+        edits: &[(Range<usize>, Vec<u8>)],
+    ) -> Result<(), &'static str> {
+        let mut edits: Vec<_> = edits.iter().collect();
+        edits.sort_by_key(|(range, _)| (range.start, range.end));
+        let mut end = 0;
+        let mut previous_start = None;
+        let mut validation_cursor = Cursor::default();
+        for (range, _) in &edits {
+            if range.start > range.end
+                || range.end > self.text_length()
+                || range.start < end
+                || previous_start == Some(range.start)
+            {
+                return Err("Edits overlap or fall outside the document");
+            }
+            let start_cursor = self.cursor_move_to_offset_internal(validation_cursor, range.start);
+            let end_cursor = self.cursor_move_to_offset_internal(start_cursor, range.end);
+            if start_cursor.offset != range.start || end_cursor.offset != range.end {
+                return Err("Edit splits a character or line ending");
+            }
+            validation_cursor = end_cursor;
+            end = range.end;
+            previous_start = Some(range.start);
+        }
+        let mut length = self.text_length();
+        let mut maximum = length;
+        for (range, replacement) in edits.iter().rev() {
+            length = (length - range.len())
+                .checked_add(replacement.len())
+                .ok_or("Edit exceeds buffer capacity")?;
+            maximum = maximum.max(length);
+        }
+        let needed = maximum - self.text_length();
+        if !self.buffer.reserve_insert(needed) {
+            return Err("Edit exceeds buffer capacity");
+        }
+        self.edit_begin_grouping();
+        self.secondary_selections.clear();
+        for (range, replacement) in edits.into_iter().rev() {
+            if range.is_empty() && replacement.is_empty() {
+                continue;
+            }
+            let beg = self.cursor_move_to_offset_internal(self.cursor, range.start);
+            let end = self.cursor_move_to_offset_internal(beg, range.end);
+            self.edit_begin(HistoryType::Other, beg);
+            self.edit_delete(end);
+            self.edit_write(replacement);
+            self.edit_end();
+        }
+        self.set_selection(None);
+        self.rectangle = None;
+        self.edit_end_grouping();
+        Ok(())
+    }
+
+    // Upper bound includes canonical tab expansion and indentation copied at
+    // every newline. Reserving before deletion makes capacity failures atomic.
+    fn write_capacity_bound(&self, text: &[u8], raw: bool, at: Cursor) -> usize {
+        if text.is_empty() {
+            return 0;
+        }
+        let newlines = text.iter().filter(|&&b| b == b'\n' || b == b'\r').count();
+        if raw {
+            return text.len().saturating_add(newlines).saturating_add(2);
+        }
+        let expanded = text.len().saturating_mul(self.tab_size as usize);
+        let indent = at.column.max(0) as usize;
+        expanded
+            .saturating_add(
+                newlines.saturating_mul(indent.saturating_add(expanded).saturating_add(2)),
+            )
+            .saturating_add(2)
+    }
+
+    fn write_multiple(&mut self, text: &[u8], raw: bool) {
+        let texts = vec![text; self.selection_count()];
+        self.write_multiple_texts(&texts, raw);
+    }
+
+    fn write_multiple_fragments(&mut self, fragments: &[Vec<u8>]) {
+        let texts: Vec<_> = fragments.iter().map(Vec::as_slice).collect();
+        self.write_multiple_texts(&texts, true);
+    }
+
+    fn write_multiple_texts(&mut self, texts: &[&[u8]], raw: bool) {
+        let ranges = self.selection_ranges();
+        let mut length = self.text_length();
+        let mut maximum = length;
+        for (&(a, b), text) in ranges.iter().zip(texts).rev() {
+            let at = self.cursor_move_to_offset_internal(self.cursor, a.min(b));
+            length =
+                (length - a.abs_diff(b)).saturating_add(self.write_capacity_bound(text, raw, at));
+            maximum = maximum.max(length);
+        }
+        let needed = maximum - self.text_length();
+        if !self.buffer.reserve_insert(needed) {
+            self.edit_capacity_error = true;
+            return;
+        }
+        self.edit_begin_grouping();
+        self.secondary_selections.clear();
+        self.rectangle = None;
+        let mut cursors: Vec<(usize, usize)> = Vec::new();
+        for ((a, b), text) in ranges.into_iter().zip(texts).rev() {
+            let anchor = self.cursor_move_to_offset_internal(self.cursor, a);
+            let head = self.cursor_move_to_offset_internal(anchor, b);
+            self.set_cursor_internal(head);
+            self.set_selection(Some(TextBufferSelection {
+                beg: anchor.logical_pos,
+                end: head.logical_pos,
+            }));
+            self.last_history_type = HistoryType::Other;
+            let before = self.text_length();
+            self.write(text, head, raw);
+            let after = self.text_length();
+            for (a, b) in &mut cursors {
+                *a = if after >= before { *a + after - before } else { *a - (before - after) };
+                *b = *a;
+            }
+            cursors.push((self.cursor.offset, self.cursor.offset));
+        }
+        self.set_selection_ranges(&cursors);
+        self.edit_end_grouping();
     }
 
     fn set_selection(&mut self, selection: Option<TextBufferSelection>) -> u32 {
@@ -1160,7 +1671,7 @@ impl TextBuffer {
 
     /// Select the current word.
     pub fn select_word(&mut self) {
-        let Range { start, end } = navigation::word_select(&self.buffer, self.cursor.offset);
+        let Range { start, end } = navigation::word_select(&*self.buffer, self.cursor.offset);
         let beg = self.cursor_move_to_offset_internal(self.cursor, start);
         let end = self.cursor_move_to_offset_internal(beg, end);
         unsafe { self.set_cursor(end) };
@@ -1183,6 +1694,38 @@ impl TextBuffer {
             beg: beg.logical_pos,
             end: end.logical_pos,
         }));
+    }
+
+    /// Logical line under a visual row, including wrapped continuation rows.
+    pub fn logical_line_at_visual_row(&self, row: CoordType) -> CoordType {
+        self.cursor_move_to_visual_internal(self.cursor, Point { x: 0, y: row }).logical_pos.y
+    }
+
+    /// Select inclusive logical lines, retaining the drag direction and their
+    /// terminators. The final unterminated line naturally ends at EOF.
+    pub fn select_lines(&mut self, anchor: CoordType, head: CoordType) {
+        let last = self.logical_line_count() - 1;
+        let anchor = anchor.clamp(0, last);
+        let head = head.clamp(0, last);
+        let first = self.goto_line_start(self.cursor, anchor.min(head));
+        let end =
+            self.cursor_move_to_logical_internal(first, Point { x: 0, y: anchor.max(head) + 1 });
+        let (beg, end) = if head < anchor { (end, first) } else { (first, end) };
+        self.clear_secondary_cursors();
+        self.set_cursor_internal(end);
+        self.set_selection(Some(TextBufferSelection {
+            beg: beg.logical_pos,
+            end: end.logical_pos,
+        }));
+        self.last_history_type = HistoryType::Other;
+    }
+
+    /// The fixed line for extending a selection through the gutter. A reverse
+    /// range anchored at the next line's start ends on the preceding line.
+    pub fn selection_anchor_line(&self) -> CoordType {
+        self.selection.map_or(self.cursor.logical_pos.y, |selection| {
+            selection.beg.y - CoordType::from(selection.beg.x == 0 && selection.beg > selection.end)
+        })
     }
 
     /// Select the entire document.
@@ -1208,13 +1751,15 @@ impl TextBuffer {
 
     /// Destroy the current selection.
     pub fn clear_selection(&mut self) -> bool {
-        let had_selection = self.selection.is_some();
+        let had_selection = self.selection.is_some() || !self.secondary_selections.is_empty();
+        self.clear_secondary_cursors();
         self.set_selection(None);
         had_selection
     }
 
     /// Find the next occurrence of the given `pattern` and select it.
     pub fn find_and_select(&mut self, pattern: &str, options: SearchOptions) -> apperr::Result<()> {
+        self.clear_secondary_cursors();
         if let Some(search) = &mut self.search {
             let search = search.get_mut();
             // When the search input changes we must reset the search.
@@ -1245,21 +1790,21 @@ impl TextBuffer {
 
         // If we previously searched through the entire document and found 0 matches,
         // then we can avoid searching again.
-        if search.no_matches {
+        if search.no_matches && search.buffer_generation == self.content_revision {
             return Ok(());
         }
 
         // If the user moved the cursor since the last search, but the needle remained the same,
         // we still need to move the start of the search to the new cursor position.
-        let next_search_offset = match self.selection {
-            Some(TextBufferSelection { beg, end }) => {
-                if self.selection_generation == search.selection_generation {
-                    search.next_search_offset
-                } else {
+        let next_search_offset = if self.selection_generation == search.selection_generation {
+            search.next_search_offset
+        } else {
+            match self.selection {
+                Some(TextBufferSelection { beg, end }) => {
                     self.cursor_move_to_logical_internal(self.cursor, beg.min(end)).offset
                 }
+                _ => self.cursor.offset,
             }
-            _ => self.cursor.offset,
         };
 
         self.find_select_next(search, next_search_offset, true);
@@ -1274,15 +1819,29 @@ impl TextBuffer {
         replacement: &[u8],
     ) -> apperr::Result<()> {
         // Editors traditionally replace the previous search hit, not the next possible one.
-        if let (Some(search), Some(..)) = (&self.search, &self.selection) {
+        if let Some(search) = &self.search {
             let search = unsafe { &mut *search.get() };
-            if search.selection_generation == self.selection_generation {
+            if search.selection_generation == self.selection_generation
+                && !search.no_matches
+                && search.pattern == pattern
+                && search.options == options
+            {
                 let scratch = scratch_arena(None);
+                let zero_width = self.selection_range().is_none();
                 let parsed_replacements =
                     Self::find_parse_replacement(&scratch, &mut *search, replacement);
                 let replacement =
                     self.find_fill_replacement(&mut *search, replacement, &parsed_replacements);
                 self.write(&replacement, self.cursor, true);
+                if zero_width {
+                    let offset = if replacement.is_empty() {
+                        self.cursor.offset
+                    } else {
+                        self.active_edit_off
+                    };
+                    search.next_search_offset =
+                        self.find_advance_past_zero_width(offset).unwrap_or(0);
+                }
             }
         }
 
@@ -1300,20 +1859,38 @@ impl TextBuffer {
         let mut search = self.find_construct_search(pattern, options)?;
         let mut offset = 0;
         let parsed_replacements = Self::find_parse_replacement(&scratch, &mut search, replacement);
-
-        loop {
-            self.find_select_next(&mut search, offset, false);
-            if !self.has_selection() {
-                break;
-            }
-
+        // Construct the regex before grouping so a bad pattern cannot leave an
+        // unfinished transaction behind.
+        self.edit_begin_grouping();
+        while let Some(range) = self.find_select_next(&mut search, offset, false) {
             let replacement =
                 self.find_fill_replacement(&mut search, replacement, &parsed_replacements);
             self.write(&replacement, self.cursor, true);
-            offset = self.cursor.offset;
+            // An empty replacement of an empty match is a no-op, so write()
+            // does not update active_edit_off. Advance from the actual match.
+            offset = if range.is_empty() && replacement.is_empty() {
+                range.end
+            } else {
+                self.active_edit_off
+            };
+            if self.edit_capacity_error {
+                break;
+            }
+            if range.is_empty() {
+                let Some(next) = self.find_advance_past_zero_width(offset) else {
+                    break;
+                };
+                offset = next;
+            }
         }
-
+        self.edit_end_grouping();
         Ok(())
+    }
+
+    fn find_advance_past_zero_width(&self, offset: usize) -> Option<usize> {
+        let cursor = self.cursor_move_to_offset_internal(self.cursor, offset);
+        let next = self.cursor_move_delta_internal(cursor, CursorMovement::Grapheme, 1);
+        (next.offset > offset).then_some(next.offset)
     }
 
     fn find_construct_search(
@@ -1361,7 +1938,7 @@ impl TextBuffer {
         // Move the start of the search to the start of the selection,
         // or otherwise to the current cursor position.
 
-        let text = unsafe { icu::Text::new(self)? };
+        let text = unsafe { icu::Text::new(&self.buffer)? };
         let regex = unsafe { icu::Regex::new(&sanitized_pattern, flags, &text)? };
 
         Ok(ActiveSearch {
@@ -1369,17 +1946,23 @@ impl TextBuffer {
             options,
             text,
             regex,
-            buffer_generation: self.buffer.generation(),
+            buffer_generation: self.content_revision,
             selection_generation: 0,
             next_search_offset: 0,
             no_matches: false,
         })
     }
 
-    fn find_select_next(&mut self, search: &mut ActiveSearch, offset: usize, wrap: bool) {
-        if search.buffer_generation != self.buffer.generation() {
+    fn find_select_next(
+        &mut self,
+        search: &mut ActiveSearch,
+        offset: usize,
+        wrap: bool,
+    ) -> Option<Range<usize>> {
+        if search.buffer_generation != self.content_revision {
             unsafe { search.regex.set_text(&mut search.text, offset) };
-            search.buffer_generation = self.buffer.generation();
+            search.buffer_generation = self.content_revision;
+            search.no_matches = false;
             search.next_search_offset = offset;
         } else if search.next_search_offset != offset {
             search.next_search_offset = offset;
@@ -1396,7 +1979,7 @@ impl TextBuffer {
             hit = search.regex.next();
         }
 
-        search.selection_generation = if let Some(range) = hit {
+        search.selection_generation = if let Some(range) = &hit {
             // Now the search offset is no more at the start of the buffer.
             search.next_search_offset = range.end;
 
@@ -1415,6 +1998,7 @@ impl TextBuffer {
             search.no_matches = true;
             self.set_selection(None)
         };
+        hit
     }
 
     fn find_parse_replacement<'a>(
@@ -1542,7 +2126,7 @@ impl TextBuffer {
     }
 
     fn measurement_config(&self) -> MeasurementConfig<'_> {
-        MeasurementConfig::new(&self.buffer)
+        MeasurementConfig::new(&*self.buffer)
             .with_word_wrap_column(self.word_wrap_column)
             .with_tab_size(self.tab_size)
     }
@@ -1756,8 +2340,8 @@ impl TextBuffer {
                 }
             }
             CursorMovement::Word => {
-                let doc = &self.buffer as &dyn ReadableDocument;
-                let mut offset = self.cursor.offset;
+                let doc = &*self.buffer as &dyn ReadableDocument;
+                let mut offset = cursor.offset;
 
                 while delta != 0 {
                     if delta < 0 {
@@ -1802,12 +2386,14 @@ impl TextBuffer {
     /// This function performs no checks that the cursor is valid. "Valid" in this case means
     /// that the TextBuffer has not been modified since you received the cursor from this class.
     pub unsafe fn set_cursor(&mut self, cursor: Cursor) {
+        self.clear_secondary_cursors();
         self.set_cursor_internal(cursor);
         self.last_history_type = HistoryType::Other;
         self.set_selection(None);
     }
 
     fn set_cursor_for_selection(&mut self, cursor: Cursor) {
+        self.clear_secondary_cursors();
         let beg = match self.selection {
             Some(TextBufferSelection { beg, .. }) => beg,
             None => self.cursor.logical_pos,
@@ -1829,7 +2415,12 @@ impl TextBuffer {
                 && cursor.visual_pos.x >= 0
                 && (self.word_wrap_column <= 0 || cursor.visual_pos.x <= self.word_wrap_column)
                 && cursor.visual_pos.y >= 0
-                && cursor.visual_pos.y <= self.stats.visual_lines
+                && cursor.visual_pos.y <= self.stats.visual_lines,
+            "cursor {cursor:?}, len {}, lines {}/{}, wrap {}",
+            self.text_length(),
+            self.stats.logical_lines,
+            self.stats.visual_lines,
+            self.word_wrap_column
         );
         self.cursor = cursor;
     }
@@ -1848,13 +2439,11 @@ impl TextBuffer {
             return None;
         }
 
-        let scratch = scratch_arena(None);
         let width = destination.width();
         let height = destination.height();
         let line_number_width = self.margin_width.max(3) as usize - 3;
         let text_width = width - self.margin_width;
         let mut visualizer_buf = [0xE2, 0x90, 0x80]; // U+2400 in UTF8
-        let mut line = ArenaString::new_in(&scratch);
         let mut visual_pos_x_max = 0;
 
         // Pick the cursor closer to the `origin.y`.
@@ -1885,10 +2474,34 @@ impl TextBuffer {
             &self.buffer,
         );
 
-        line.reserve(width as usize * 2);
+        let syntax_spans = if self.syntax_enabled {
+            if let Some(mut syntax) = self.syntax.take() {
+                let beg = self.cursor_move_to_visual_internal(cursor, origin).offset;
+                let end = self
+                    .cursor_move_to_visual_internal(
+                        cursor,
+                        Point { x: CoordType::MAX, y: origin.y + height },
+                    )
+                    .offset;
+                let spans = syntax.paint(
+                    &*self.buffer,
+                    self.content_revision,
+                    beg..end,
+                    self.cursor.offset,
+                );
+                self.syntax = Some(syntax);
+                spans
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
 
         for y in 0..height {
-            line.clear();
+            let scratch = scratch_arena(None);
+            let mut line = ArenaString::new_in(&scratch);
+            line.reserve(width as usize * 2);
 
             let visual_line = origin.y + y;
             let mut cursor_beg =
@@ -1941,6 +2554,37 @@ impl TextBuffer {
             }
 
             let mut selection_off = 0..0;
+
+            // Colorize only visible text; selections below retain their contrast.
+            for span in &syntax_spans {
+                let start = span.range.start.max(cursor_beg.offset);
+                let end = span.range.end.min(cursor_end.offset);
+                if start >= end || cursor_beg.visual_pos.y != visual_line {
+                    continue;
+                }
+                let a = self.cursor_move_to_offset_internal(cursor_beg, start);
+                let b = self.cursor_move_to_offset_internal(a, end);
+                let left = destination.left + self.margin_width - origin.x;
+                let rect = Rect {
+                    left: (left + a.visual_pos.x).max(destination.left + self.margin_width),
+                    top: destination.top + y,
+                    right: if b.visual_pos.y > a.visual_pos.y {
+                        destination.right
+                    } else {
+                        (left + b.visual_pos.x).min(destination.right)
+                    },
+                    bottom: destination.top + y + 1,
+                };
+                if let Some(color) = span.foreground {
+                    fb.blend_fg(rect, fb.indexed(color));
+                }
+                if let Some(attributes) = span.attributes {
+                    fb.replace_attr(rect, attributes, attributes);
+                }
+                if span.bracket {
+                    fb.blend_bg(rect, fb.indexed_alpha(IndexedColor::Cyan, 1, 2));
+                }
+            }
 
             // Figure out the selection range on this line, if any.
             if cursor_beg.visual_pos.y == visual_line
@@ -1996,10 +2640,14 @@ impl TextBuffer {
             }
 
             // Highlight auto-highlight matches on this line
-            if cursor_beg.visual_pos.y == visual_line && !self.selection_highlights.matches.is_empty() {
+            if cursor_beg.visual_pos.y == visual_line
+                && !self.selection_highlights.matches.is_empty()
+            {
                 for match_range in &self.selection_highlights.matches {
                     // Check if this match overlaps with the visible line range
-                    if match_range.end <= cursor_beg.offset || match_range.start >= cursor_end.offset {
+                    if match_range.end <= cursor_beg.offset
+                        || match_range.start >= cursor_end.offset
+                    {
                         continue;
                     }
 
@@ -2029,10 +2677,78 @@ impl TextBuffer {
                     };
 
                     // Use a subtle yellow/orange background for auto-highlights
-                    let bg = fb.indexed(IndexedColor::Yellow).oklab_blend(
-                        fb.indexed_alpha(IndexedColor::Background, 1, 2)
-                    );
+                    let bg = fb.indexed(IndexedColor::Yellow).oklab_blend(fb.indexed_alpha(
+                        IndexedColor::Background,
+                        1,
+                        2,
+                    ));
                     fb.blend_bg(rect, bg);
+                }
+            }
+
+            for &(anchor, head) in &self.secondary_selections {
+                let start = anchor.min(head);
+                let end = anchor.max(head);
+                if start == end {
+                    if head < cursor_beg.offset || head > cursor_end.offset {
+                        continue;
+                    }
+                    let caret = self.cursor_move_to_offset_internal(cursor_beg, head);
+                    if focused && caret.visual_pos.y == visual_line {
+                        let left =
+                            destination.left + self.margin_width + caret.visual_pos.x - origin.x;
+                        if left >= destination.left + self.margin_width && left < destination.right
+                        {
+                            // A wide grapheme must share one attribute run or the
+                            // terminal cannot draw it underlined. Tabs are expanded
+                            // into individual spaces, so mark only their first cell.
+                            let next =
+                                self.cursor_move_delta_internal(caret, CursorMovement::Grapheme, 1);
+                            let caret_width = if next.visual_pos.y == caret.visual_pos.y
+                                && self.read_forward(head).first() != Some(&b'\t')
+                            {
+                                (next.visual_pos.x - caret.visual_pos.x).max(1)
+                            } else {
+                                1
+                            };
+                            let rect = Rect {
+                                left,
+                                top: destination.top + y,
+                                right: (left + caret_width).min(destination.right),
+                                bottom: destination.top + y + 1,
+                            };
+                            // Terminals expose one hardware cursor. Mark additional
+                            // insertion points with an underline, preserving the
+                            // character's colors so it never looks selected.
+                            fb.replace_attr(rect, Attributes::Underlined, Attributes::Underlined);
+                        }
+                    }
+                } else if start <= cursor_end.offset
+                    && end > cursor_beg.offset
+                    && cursor_beg.visual_pos.y == visual_line
+                {
+                    let a = self
+                        .cursor_move_to_offset_internal(cursor_beg, start.max(cursor_beg.offset));
+                    let b = self.cursor_move_to_offset_internal(a, end.min(cursor_end.offset));
+                    let left = destination.left + self.margin_width - origin.x;
+                    let rect = Rect {
+                        left: (left + a.visual_pos.x).max(destination.left + self.margin_width),
+                        top: destination.top + y,
+                        right: if end > cursor_end.offset {
+                            destination.right
+                        } else {
+                            (left + b.visual_pos.x).min(destination.right)
+                        },
+                        bottom: destination.top + y + 1,
+                    };
+                    let mut bg = fb
+                        .indexed(IndexedColor::Foreground)
+                        .oklab_blend(fb.indexed_alpha(IndexedColor::BrightBlue, 1, 2));
+                    if !focused {
+                        bg = bg.oklab_blend(fb.indexed_alpha(IndexedColor::Background, 1, 2));
+                    }
+                    fb.blend_bg(rect, bg);
+                    fb.blend_fg(rect, fb.contrasted(bg));
                 }
             }
 
@@ -2231,6 +2947,33 @@ impl TextBuffer {
     }
 
     fn cut_copy(&mut self, clipboard: &mut Clipboard, cut: bool) {
+        if !self.secondary_selections.is_empty() {
+            let original_ranges = self.selection_ranges();
+            if cut {
+                self.edit_begin_grouping();
+            }
+            let mut ranges = self.selection_ranges();
+            if ranges.iter().all(|&(a, b)| a == b) {
+                for (a, b) in &mut ranges {
+                    let cursor = self.cursor_move_to_offset_internal(self.cursor, *a);
+                    *a = self.goto_line_start(cursor, cursor.logical_pos.y).offset;
+                    *b = self.goto_line_start(cursor, cursor.logical_pos.y + 1).offset;
+                }
+                self.set_selection_ranges(&ranges);
+                ranges = self.selection_ranges();
+            }
+            let fragments =
+                ranges.iter().map(|&(a, b)| self.extract_bytes(a.min(b)..a.max(b))).collect();
+            clipboard
+                .write_fragments(fragments, if self.newlines_are_crlf { b"\r\n" } else { b"\n" });
+            if cut {
+                self.write_multiple(b"", true);
+                self.edit_end_grouping();
+            } else {
+                self.set_selection_ranges(&original_ranges);
+            }
+            return;
+        }
         let line_copy = !self.has_selection();
         let selection = self.extract_selection(cut);
         clipboard.write(selection);
@@ -2240,6 +2983,27 @@ impl TextBuffer {
     pub fn paste(&mut self, clipboard: &Clipboard) {
         let data = clipboard.read();
         if data.is_empty() {
+            return;
+        }
+
+        if !self.secondary_selections.is_empty() {
+            if let Some(fragments) = clipboard.fragments()
+                && fragments.len() == self.selection_count()
+            {
+                self.write_multiple_fragments(fragments);
+            } else {
+                // External rectangular text naturally distributes one row per
+                // cursor. Other text is repeated at every cursor.
+                let rows: Vec<Vec<u8>> = data
+                    .split(|&b| b == b'\n')
+                    .map(|row| row.strip_suffix(b"\r").unwrap_or(row).to_vec())
+                    .collect();
+                if rows.len() == self.selection_count() {
+                    self.write_multiple_fragments(&rows);
+                } else {
+                    self.write_multiple(data, true);
+                }
+            }
             return;
         }
 
@@ -2257,188 +3021,97 @@ impl TextBuffer {
         }
     }
 
-    /// Duplicates the current line or selection.
-    ///
-    /// Behavior follows Rider/VS Code conventions:
-    /// - No selection: duplicate entire line below
-    /// - Full line selection (col 0 to end of line, or col 0 to col 0 of later line): duplicate lines
-    /// - Partial selection: duplicate selection inline
+    /// Paste only the first line into a path, search, or other single-line field.
+    pub fn paste_single_line(&mut self, clipboard: &Clipboard) {
+        let data = clipboard.read();
+        let end = memchr2(b'\r', b'\n', data, 0);
+        if end > 0 {
+            self.write(&data[..end], self.cursor, true);
+        }
+    }
+
+    /// Duplicate whole lines or an exact partial selection, selecting the copy.
+    /// Keep the original bytes (including mixed line endings) and make the
+    /// insertion one undo step without temporarily changing the wrap layout.
     pub fn duplicate_line_or_selection(&mut self) {
-        // Determine if this is "line mode" or "inline mode"
-        // Line mode: no selection, OR selection covers full line(s)
-        // Full line = starts at column 0 AND (ends at column 0 of later line OR covers to end of line)
-        let line_mode = if let Some((beg, end)) = self.selection_range() {
-            if beg.logical_pos.x != 0 {
-                // Doesn't start at column 0 - inline mode
-                false
-            } else if end.logical_pos.x == 0 && end.logical_pos.y > beg.logical_pos.y {
-                // Starts at col 0, ends at col 0 of a later line - full line selection
-                true
-            } else if beg.logical_pos.y == end.logical_pos.y {
-                // Same line selection starting at col 0 - check if it covers the whole line
-                // Get the end of line position
-                let eol = self.cursor_move_to_logical_internal(
-                    end,
-                    Point { x: CoordType::MAX, y: end.logical_pos.y },
-                );
-                // If selection end matches end of line, it's a full line selection
-                end.logical_pos.x == eol.logical_pos.x
-            } else {
-                // Multi-line selection starting at col 0 but not ending at col 0 - line mode
-                true
-            }
-        } else {
-            // No selection - line mode
-            true
-        };
+        let selected = self.selection_range();
+        let line_mode = selected.is_none_or(|(beg, end)| {
+            beg.logical_pos.x == 0
+                && (end.logical_pos.x == 0
+                    || end.offset
+                        == self
+                            .cursor_move_to_logical_internal(
+                                end,
+                                Point { x: CoordType::MAX, y: end.logical_pos.y },
+                            )
+                            .offset)
+        });
 
-        let newline: &[u8] = if self.newlines_are_crlf { b"\r\n" } else { b"\n" };
-
-        // Temporarily disable word wrap to avoid cursor state issues during edit
-        let saved_word_wrap_column = self.word_wrap_column;
-        if self.word_wrap_column > 0 {
-            self.word_wrap_column = 0;
-        }
-
-        if self.has_selection() && !line_mode {
-            // Inline mode: duplicate selection immediately after itself
-            if let Some((beg, end)) = self.selection_range() {
-                let mut text = Vec::new();
-                self.buffer.extract_raw(beg.offset..end.offset, &mut text, 0);
-
-                self.clear_selection();
-                self.cursor_move_to_logical(end.logical_pos);
-
-                let insert_start = self.cursor_logical_pos();
-                self.write_raw(&text);
-
-                let insert_end = self.cursor_logical_pos();
-                self.cursor_move_to_logical(insert_start);
-                self.start_selection();
-                self.selection_update_logical(insert_end);
-            }
-        } else if let Some((beg, end)) = self.selection_range() {
-            // Line mode with selection: duplicate all selected lines below
-            let first_line = beg.logical_pos.y;
-            let last_line = if end.logical_pos.x == 0 && end.logical_pos.y > first_line {
-                end.logical_pos.y - 1
-            } else {
+        let (at, mut bytes, selection_start) = if line_mode {
+            let first_line =
+                selected.map_or(self.cursor.logical_pos.y, |(beg, _)| beg.logical_pos.y);
+            let last_line = selected.map_or(first_line, |(_, end)| {
                 end.logical_pos.y
-            };
-            let num_lines = last_line - first_line + 1;
-
-            self.clear_selection();
-
-            let start_cursor = self.cursor_move_to_logical_internal(self.cursor, Point { x: 0, y: first_line });
-            let start_offset = start_cursor.offset;
-            let end_cursor = self.cursor_move_to_logical_internal(start_cursor, Point { x: CoordType::MAX, y: last_line });
-            let end_offset = end_cursor.offset;
-
-            let mut text = Vec::new();
-            self.buffer.extract_raw(start_offset..end_offset, &mut text, 0);
-
-            let content = if text.ends_with(b"\r\n") {
-                &text[..text.len() - 2]
-            } else if text.ends_with(b"\n") {
-                &text[..text.len() - 1]
+                    - CoordType::from(end.logical_pos.x == 0 && end.logical_pos.y > first_line)
+            });
+            let beg = self.goto_line_start(self.cursor, first_line);
+            let end = self
+                .cursor_move_to_logical_internal(beg, Point { x: CoordType::MAX, y: last_line });
+            let next = self.cursor_move_to_logical_internal(end, Point { x: 0, y: last_line + 1 });
+            let mut bytes = Vec::new();
+            // Prefer this line's terminator, preserving mixed-newline files.
+            // At EOF there is no terminator; use the document's chosen style.
+            if next.offset > end.offset {
+                self.buffer.extract_raw(end.offset..next.offset, &mut bytes, 0);
             } else {
-                &text[..]
-            };
-
-            let mut to_insert = Vec::new();
-            to_insert.extend_from_slice(newline);
-            to_insert.extend_from_slice(content);
-
-            self.cursor_move_to_logical(Point { x: CoordType::MAX, y: last_line });
-            let insert_line = last_line;
-
-            self.write_raw(&to_insert);
-
-            // Re-enable word wrap before setting selection
-            if saved_word_wrap_column > 0 {
-                self.word_wrap_column = saved_word_wrap_column;
-                let saved_width = self.width;
-                self.width = 0;
-                self.set_width(saved_width);
+                bytes.extend_from_slice(if self.newlines_are_crlf { b"\r\n" } else { b"\n" });
             }
-
-            self.cursor_move_to_logical(Point { x: 0, y: insert_line + 1 });
-            self.start_selection();
-            self.selection_update_logical(Point { x: CoordType::MAX, y: insert_line + num_lines });
-            return;
+            let selection_start = end.offset + bytes.len();
+            self.buffer.extract_raw(beg.offset..end.offset, &mut bytes, usize::MAX);
+            (end.offset, bytes, selection_start)
         } else {
-            // No selection - duplicate current line
-            let current_line = self.cursor_logical_pos().y;
-
-            let start_cursor = self.cursor_move_to_logical_internal(self.cursor, Point { x: 0, y: current_line });
-            let start_offset = start_cursor.offset;
-            let end_cursor = self.cursor_move_to_logical_internal(start_cursor, Point { x: 0, y: current_line + 1 });
-            let end_offset = end_cursor.offset;
-
-            let mut text = Vec::new();
-            self.buffer.extract_raw(start_offset..end_offset, &mut text, 0);
-
-            if text.is_empty() && start_offset == end_offset {
-                // Re-enable word wrap
-                if saved_word_wrap_column > 0 {
-                    self.word_wrap_column = saved_word_wrap_column;
-                }
-                return;
-            }
-
-            let line_content = if text.ends_with(b"\r\n") {
-                &text[..text.len() - 2]
-            } else if text.ends_with(b"\n") {
-                &text[..text.len() - 1]
-            } else {
-                &text[..]
-            };
-
-            self.cursor_move_to_logical(Point { x: CoordType::MAX, y: current_line });
-
-            let mut to_insert = Vec::new();
-            to_insert.extend_from_slice(newline);
-            to_insert.extend_from_slice(line_content);
-
-            let insert_pos = self.cursor_logical_pos();
-            self.write_raw(&to_insert);
-
-            // Re-enable word wrap before setting selection
-            if saved_word_wrap_column > 0 {
-                self.word_wrap_column = saved_word_wrap_column;
-                let saved_width = self.width;
-                self.width = 0;
-                self.set_width(saved_width);
-            }
-
-            self.cursor_move_to_logical(Point { x: 0, y: insert_pos.y + 1 });
-            self.start_selection();
-            self.selection_update_logical(Point { x: CoordType::MAX, y: insert_pos.y + 1 });
+            let (beg, end) = selected.unwrap();
+            (end.offset, self.extract_bytes(beg.offset..end.offset), end.offset)
+        };
+        let selection_end = at + bytes.len();
+        if self.insert_final_newline && at == self.text_length() && !bytes.ends_with(b"\n") {
+            bytes.extend_from_slice(if self.newlines_are_crlf { b"\r\n" } else { b"\n" });
+        }
+        if self.apply_byte_edits(&[(at..at, bytes)]).is_err() {
+            self.edit_capacity_error = true;
             return;
         }
-
-        // Re-enable word wrap if we didn't return early
-        if saved_word_wrap_column > 0 {
-            self.word_wrap_column = saved_word_wrap_column;
-            let saved_width = self.width;
-            self.width = 0;
-            self.set_width(saved_width);
-        }
+        self.set_selection_ranges(&[(selection_start, selection_end)]);
     }
 
     /// Inserts the user input `text` at the current cursor position.
     /// Replaces tabs with whitespace if needed, etc.
     pub fn write_canon(&mut self, text: &[u8]) {
+        if !self.secondary_selections.is_empty() {
+            self.write_multiple(text, false);
+            return;
+        }
         self.write(text, self.cursor, false);
     }
 
     /// Inserts `text` as-is at the current cursor position.
     /// The only transformation applied is that newlines are normalized.
     pub fn write_raw(&mut self, text: &[u8]) {
+        if !self.secondary_selections.is_empty() {
+            self.write_multiple(text, true);
+            return;
+        }
         self.write(text, self.cursor, true);
     }
 
     fn write(&mut self, text: &[u8], at: Cursor, raw: bool) {
+        let start = self.selection_range().map_or(at, |(beg, _)| beg);
+        let capacity = self.write_capacity_bound(text, raw, start);
+        let deleted = self.selection_range().map_or(0, |(beg, end)| end.offset - beg.offset);
+        if !self.buffer.reserve_insert(capacity.saturating_sub(deleted)) {
+            self.edit_capacity_error = true;
+            return;
+        }
         let history_type = if raw { HistoryType::Other } else { HistoryType::Write };
         let mut edit_begun = false;
 
@@ -2589,7 +3262,8 @@ impl TextBuffer {
         {
             let cursor = self.cursor;
             self.edit_write(if self.newlines_are_crlf { b"\r\n" } else { b"\n" });
-            self.set_cursor_internal(cursor);
+            // The visual line count is finalized by edit_end below.
+            self.cursor = cursor;
         }
 
         self.edit_end();
@@ -2602,6 +3276,26 @@ impl TextBuffer {
     /// Deletes characters from the buffer based on a delta from the cursor.
     pub fn delete(&mut self, granularity: CursorMovement, delta: CoordType) {
         if delta == 0 {
+            return;
+        }
+
+        if !self.secondary_selections.is_empty() {
+            self.edit_begin_grouping();
+            let ranges: Vec<_> = self
+                .selection_ranges()
+                .into_iter()
+                .map(|(a, b)| {
+                    if a != b {
+                        return (a, b);
+                    }
+                    let cursor = self.cursor_move_to_offset_internal(self.cursor, a);
+                    let next = self.cursor_move_delta_internal(cursor, granularity, delta);
+                    (a, next.offset)
+                })
+                .collect();
+            self.set_selection_ranges(&ranges);
+            self.write_multiple(b"", true);
+            self.edit_end_grouping();
             return;
         }
 
@@ -2645,6 +3339,69 @@ impl TextBuffer {
 
     /// Indents/unindents the current selection or line.
     pub fn indent_change(&mut self, direction: CoordType) {
+        if !self.secondary_selections.is_empty() {
+            if direction >= 0 && self.selection_ranges().iter().all(|&(a, b)| a == b) {
+                self.write_multiple(b"\t", false);
+                return;
+            }
+            let ranges = self.selection_ranges();
+            let mut lines = std::collections::BTreeSet::new();
+            for &(a, b) in &ranges {
+                let beg = self.cursor_move_to_offset_internal(self.cursor, a.min(b));
+                let end = self.cursor_move_to_offset_internal(beg, a.max(b));
+                let last = end.logical_pos.y
+                    - if end.logical_pos.x == 0 && end.offset > beg.offset { 1 } else { 0 };
+                lines.extend(beg.logical_pos.y..=last);
+            }
+            let mut edits = Vec::new();
+            for y in lines {
+                let start = self.goto_line_start(self.cursor, y);
+                let (chars, columns) = self.measure_indent_internal(start.offset, CoordType::MAX);
+                if direction < 0 {
+                    if columns == 0 {
+                        continue;
+                    }
+                    let (prev_chars, _) = self
+                        .measure_indent_internal(start.offset, self.tab_size_prev_column(columns));
+                    let beg = self
+                        .cursor_move_to_logical_internal(start, Point { x: prev_chars, y })
+                        .offset;
+                    let end =
+                        self.cursor_move_to_logical_internal(start, Point { x: chars, y }).offset;
+                    edits.push((beg..end, Vec::new()));
+                } else {
+                    let end =
+                        self.cursor_move_to_logical_internal(start, Point { x: chars, y }).offset;
+                    let text = if self.indent_with_tabs {
+                        vec![b'\t']
+                    } else {
+                        vec![b' '; self.tab_size_eval(columns) as usize]
+                    };
+                    edits.push((end..end, text));
+                }
+            }
+            if edits.is_empty() {
+                return;
+            }
+            let map = |offset: usize| {
+                let mut mapped = offset;
+                for (range, text) in edits.iter().rev() {
+                    if offset >= range.end {
+                        mapped = mapped - range.len() + text.len();
+                    } else if offset > range.start {
+                        mapped = range.start + text.len();
+                    }
+                }
+                mapped
+            };
+            let moved: Vec<_> = ranges.iter().map(|&(a, b)| (map(a), map(b))).collect();
+            if self.apply_byte_edits(&edits).is_ok() {
+                self.set_selection_ranges(&moved);
+            } else {
+                self.edit_capacity_error = true;
+            }
+            return;
+        }
         let selection = self.selection;
         let mut selection_beg = self.cursor.logical_pos;
         let mut selection_end = selection_beg;
@@ -2661,7 +3418,10 @@ impl TextBuffer {
 
         self.edit_begin_grouping();
 
-        for y in selection_beg.y.min(selection_end.y)..=selection_beg.y.max(selection_end.y) {
+        let [first, last] = minmax(selection_beg, selection_end);
+        // A selection ending at column zero excludes that final line.
+        let last_y = if last.x == 0 && last.y > first.y { last.y - 1 } else { last.y };
+        for y in first.y..=last_y {
             self.cursor_move_to_logical(Point { x: 0, y });
 
             let line_start_offset = self.cursor.offset;
@@ -2719,7 +3479,7 @@ impl TextBuffer {
         let mut chars = 0;
         let mut columns = 0;
 
-        'outer: loop {
+        'outer: while columns < max_columns {
             let chunk = self.read_forward(offset);
             if chunk.is_empty() {
                 break;
@@ -2739,19 +3499,71 @@ impl TextBuffer {
             }
 
             offset += chunk.len();
-
-            // No need to do another round if we
-            // already got the exact right amount.
-            if columns >= max_columns {
-                break;
-            }
         }
 
         (chars, columns)
     }
 
+    /// Backspace to the previous tab stop while inside leading indentation.
+    /// Ctrl+Backspace removes indentation back to the start of the line.
+    pub fn backspace_with_auto_unindent(&mut self, granularity: CursorMovement) {
+        if !self.secondary_selections.is_empty() {
+            let ranges: Vec<_> = self
+                .selection_ranges()
+                .into_iter()
+                .map(|(a, b)| {
+                    if a != b {
+                        return (a, b);
+                    }
+                    let cursor = self.cursor_move_to_offset_internal(self.cursor, a);
+                    (a, self.backspace_target(cursor, granularity).offset)
+                })
+                .collect();
+            self.edit_begin_grouping();
+            self.set_selection_ranges(&ranges);
+            self.write_multiple(b"", true);
+            self.edit_end_grouping();
+            return;
+        }
+        if self.has_selection() {
+            self.delete(granularity, -1);
+            return;
+        }
+        let to = self.cursor;
+        let from = self.backspace_target(to, granularity);
+        if from.offset != to.offset {
+            self.edit_begin(HistoryType::Delete, from);
+            self.edit_delete(to);
+            self.edit_end();
+        }
+    }
+
+    fn backspace_target(&self, cursor: Cursor, granularity: CursorMovement) -> Cursor {
+        if cursor.logical_pos.x > 0 {
+            let start = self.goto_line_start(cursor, cursor.logical_pos.y);
+            let previous_column = if granularity == CursorMovement::Grapheme {
+                self.tab_size_prev_column(cursor.column)
+            } else {
+                0
+            };
+            let (from_pos, from_col) = self.measure_indent_internal(start.offset, previous_column);
+            let (delta, _) = self.measure_indent_internal(
+                start.offset + from_pos as usize,
+                cursor.column - from_col,
+            );
+            if delta + from_pos >= cursor.logical_pos.x {
+                return self.cursor_move_to_logical_internal(
+                    start,
+                    Point { x: from_pos, y: start.logical_pos.y },
+                );
+            }
+        }
+        self.cursor_move_delta_internal(cursor, granularity, -1)
+    }
+
     /// Displaces the current, cursor or the selection, line(s) in the given direction.
     pub fn move_selected_lines(&mut self, direction: MoveLineDirection) {
+        self.clear_secondary_cursors();
         let selection = self.selection;
         let cursor = self.cursor;
 
@@ -2890,16 +3702,57 @@ impl TextBuffer {
     }
 
     fn edit_begin_grouping(&mut self) {
+        self.edit_group_depth += 1;
+        if self.edit_group_depth > 1 {
+            return;
+        }
+        self.last_history_type = HistoryType::Other;
         self.active_edit_group = Some(ActiveEditGroupInfo {
+            redo_before: mem::take(&mut self.redo_stack),
             cursor_before: self.cursor.logical_pos,
             selection_before: self.selection,
+            secondary_before: self.secondary_selections.clone(),
+            newlines_before: self.newlines_are_crlf,
             stats_before: self.stats,
+            layout_before: self.layout_configuration(),
             generation_before: self.buffer.generation(),
         });
     }
 
     fn edit_end_grouping(&mut self) {
-        self.active_edit_group = None;
+        self.edit_group_depth = self.edit_group_depth.saturating_sub(1);
+        if self.edit_group_depth != 0 {
+            return;
+        }
+        if let Some(info) = self.active_edit_group.take()
+            && self.buffer.generation() == info.generation_before
+        {
+            self.redo_stack = info.redo_before;
+        }
+        self.last_history_type = HistoryType::Other;
+        self.trim_history();
+    }
+
+    // Never split an undo transaction. A single large macro may exceed the
+    // entry limit; retain it intact and discard it as a whole when superseded.
+    fn trim_history(&mut self) {
+        if self.active_edit_group.is_some() {
+            return;
+        }
+        while self.undo_stack.len() > 1000 {
+            let oldest = self.undo_stack.front().unwrap().borrow().generation_before;
+            let newest = self.undo_stack.back().unwrap().borrow().generation_before;
+            if oldest == newest {
+                break;
+            }
+            while self
+                .undo_stack
+                .front()
+                .is_some_and(|entry| entry.borrow().generation_before == oldest)
+            {
+                self.undo_stack.pop_front();
+            }
+        }
     }
 
     /// Starts a new edit operation.
@@ -2912,34 +3765,63 @@ impl TextBuffer {
 
         let cursor_before = self.cursor;
         self.set_cursor_internal(cursor);
+        self.redo_stack.clear();
+        self.active_edit_needs_reflow = false;
 
-        // If both the last and this are a Write/Delete operation, we skip allocating a new undo history item.
-        if history_type != self.last_history_type
-            || !matches!(history_type, HistoryType::Write | HistoryType::Delete)
+        // Adjacent edits can share their byte replacement. Nonadjacent typed
+        // edits (for example before an automatic final newline) need separate
+        // replacements but still belong to the same user-visible undo group.
+        let (coalesces, previous_group) = if history_type != HistoryType::Other
+            && history_type == self.last_history_type
+            && let Some(entry) = self.undo_stack.back()
         {
-            self.redo_stack.clear();
-            while self.undo_stack.len() > 1000 {
-                self.undo_stack.pop_front();
-            }
-
+            let entry = entry.borrow();
+            let coalesces = match history_type {
+                HistoryType::Other => false,
+                HistoryType::Write => cursor.offset == entry.offset + entry.added.len(),
+                HistoryType::Delete => entry.added.is_empty() && cursor.offset == entry.offset,
+            };
+            (
+                coalesces,
+                (!coalesces).then(|| ActiveEditGroupInfo {
+                    redo_before: VecDeque::new(),
+                    cursor_before: entry.cursor_before,
+                    selection_before: entry.selection_before,
+                    secondary_before: entry.secondary_before.clone(),
+                    newlines_before: entry.newlines_before,
+                    stats_before: entry.stats_before,
+                    layout_before: entry.layout_before,
+                    generation_before: entry.generation_before,
+                }),
+            )
+        } else {
+            (false, None)
+        };
+        if !coalesces {
             self.last_history_type = history_type;
             self.undo_stack.push_back(SemiRefCell::new(HistoryEntry {
                 cursor_before: cursor_before.logical_pos,
                 selection_before: self.selection,
+                secondary_before: self.secondary_selections.clone(),
+                newlines_before: self.newlines_are_crlf,
                 stats_before: self.stats,
+                layout_before: self.layout_configuration(),
                 generation_before: self.buffer.generation(),
-                cursor: cursor.logical_pos,
+                offset: cursor.offset,
                 deleted: Vec::new(),
                 added: Vec::new(),
             }));
 
-            if let Some(info) = &self.active_edit_group
+            if let Some(info) = self.active_edit_group.as_ref().or(previous_group.as_ref())
                 && let Some(entry) = self.undo_stack.back()
             {
                 let mut entry = entry.borrow_mut();
                 entry.cursor_before = info.cursor_before;
                 entry.selection_before = info.selection_before;
+                entry.secondary_before.clone_from(&info.secondary_before);
+                entry.newlines_before = info.newlines_before;
                 entry.stats_before = info.stats_before;
+                entry.layout_before = info.layout_before;
                 entry.generation_before = info.generation_before;
             }
         }
@@ -2951,11 +3833,12 @@ impl TextBuffer {
         // start, because this write may have joined with a word before the initial cursor.
         // See other uses of `word_wrap_cursor_next_line` in this function.
         if self.word_wrap_column > 0 {
-            let safe_start = self.goto_line_start(cursor, cursor.logical_pos.y);
-            let next_line = self.cursor_move_to_logical_internal(
-                cursor,
-                Point { x: 0, y: cursor.logical_pos.y + 1 },
-            );
+            let safe_start =
+                self.measurement_config().goto_logical(Point { x: 0, y: cursor.logical_pos.y });
+            let next_line = self
+                .measurement_config()
+                .with_cursor(safe_start)
+                .goto_logical(Point { x: 0, y: cursor.logical_pos.y + 1 });
             self.active_edit_line_info = Some(ActiveEditLineInfo {
                 safe_start,
                 line_height_in_rows: next_line.visual_pos.y - safe_start.visual_pos.y,
@@ -2967,7 +3850,14 @@ impl TextBuffer {
     /// Writes `text` into the buffer at the current cursor position.
     /// It records the change in the undo stack.
     fn edit_write(&mut self, text: &[u8]) {
-        let logical_y_before = self.cursor.logical_pos.y;
+        if text.is_empty() {
+            return;
+        }
+        if !self.buffer.reserve_insert(text.len()) {
+            self.edit_capacity_error = true;
+            return;
+        }
+        let anchor = self.edit_anchor(self.active_edit_off, text);
 
         // Copy the written portion into the undo entry.
         {
@@ -2981,37 +3871,54 @@ impl TextBuffer {
         // Move self.cursor to the end of the newly written text. Can't use `self.set_cursor_internal`,
         // because we're still in the progress of recalculating the line stats.
         self.active_edit_off += text.len();
-        self.cursor = self.cursor_move_to_offset_internal(self.cursor, self.active_edit_off);
-        self.stats.logical_lines += self.cursor.logical_pos.y - logical_y_before;
+        self.cursor = self.cursor_move_to_offset_internal(anchor, self.active_edit_off);
+        self.stats.logical_lines += text.iter().filter(|&&b| b == b'\n').count() as CoordType;
     }
 
     /// Deletes the text between the current cursor position and `to`.
     /// It records the change in the undo stack.
     fn edit_delete(&mut self, to: Cursor) {
         debug_assert!(to.offset >= self.active_edit_off);
-
-        let logical_y_before = self.cursor.logical_pos.y;
-        let off = self.active_edit_off;
-        let mut out_off = usize::MAX;
-
-        let mut undo = self.undo_stack.back_mut().unwrap().borrow_mut();
-
-        // If this is a continued backspace operation,
-        // we need to prepend the deleted portion to the undo entry.
-        if self.cursor.logical_pos < undo.cursor {
-            out_off = 0;
-            undo.cursor = self.cursor.logical_pos;
+        if to.offset == self.active_edit_off {
+            return;
         }
-
-        // Copy the deleted portion into the undo entry.
-        let deleted = &mut undo.deleted;
-        self.buffer.extract_raw(off..to.offset, deleted, out_off);
+        let anchor = self.edit_anchor(to.offset, b"");
+        let off = self.active_edit_off;
+        let removed_lines = {
+            let mut undo = self.undo_stack.back_mut().unwrap().borrow_mut();
+            let start = undo.deleted.len();
+            self.buffer.extract_raw(off..to.offset, &mut undo.deleted, usize::MAX);
+            undo.deleted[start..].iter().filter(|&&b| b == b'\n').count() as CoordType
+        };
 
         // Delete the portion from the buffer by enlarging the gap.
         let count = to.offset - off;
         self.buffer.allocate_gap(off, 0, count);
 
-        self.stats.logical_lines += logical_y_before - to.logical_pos.y;
+        self.stats.logical_lines -= removed_lines;
+        self.cursor = self.cursor_move_to_offset_internal(anchor, self.active_edit_off);
+    }
+
+    /// Re-measure from before an edit when its neighboring codepoints can join
+    /// into a grapheme. The gap and undo history may sit inside that grapheme.
+    fn edit_anchor(&mut self, end: usize, text: &[u8]) -> Cursor {
+        let left = self.read_backward(self.active_edit_off);
+        let right = self.read_forward(end);
+        let joins = if text.is_empty() {
+            crate::unicode::graphemes_may_join(left, right)
+        } else {
+            crate::unicode::graphemes_may_join(left, text)
+                || crate::unicode::graphemes_may_join(text, right)
+        };
+        if joins || self.active_edit_off != self.cursor.offset {
+            self.active_edit_needs_reflow = true;
+            // The rounded cursor can already be on the next line when CRLF
+            // formed at the exact insertion offset. Start from the prior line.
+            self.measurement_config()
+                .goto_logical(Point { x: 0, y: (self.cursor.logical_pos.y - 1).max(0) })
+        } else {
+            self.cursor
+        }
     }
 
     /// Finalizes the current edit operation
@@ -3023,10 +3930,22 @@ impl TextBuffer {
             return;
         }
 
+        if self.active_edit_needs_reflow {
+            self.active_edit_line_info = None;
+            self.reflow();
+            self.recalc_after_content_changed();
+            self.trim_history();
+            return;
+        }
+
         #[cfg(debug_assertions)]
         {
             let entry = self.undo_stack.back_mut().unwrap().borrow_mut();
-            debug_assert!(!entry.deleted.is_empty() || !entry.added.is_empty());
+            debug_assert!(
+                !entry.deleted.is_empty()
+                    || !entry.added.is_empty()
+                    || entry.newlines_before != self.newlines_are_crlf
+            );
         }
 
         if let Some(info) = self.active_edit_line_info.take() {
@@ -3035,8 +3954,10 @@ impl TextBuffer {
 
             // After the edit, info.safe_start has stale visual_pos values because the buffer
             // content has changed. We need to recalculate the safe_start position for the
-            // NEW buffer content by navigating from scratch.
-            let safe_start = self.measurement_config().goto_logical(Point { x: 0, y: target.y });
+            // NEW buffer content by navigating from scratch. Start at the
+            // original edited line, not the final cursor line: an insertion may
+            // have introduced several new logical lines before the cursor.
+            let safe_start = self.measurement_config().goto_logical(info.safe_start.logical_pos);
 
             // From our safe position we can measure the actual visual position of the cursor.
             let new_cursor = self.cursor_move_to_logical_internal(safe_start, target);
@@ -3055,7 +3976,9 @@ impl TextBuffer {
             if deleted_count < info.distance_next_line_start {
                 // Now we can measure how many more visual rows this logical line spans.
                 let next_line = self
-                    .cursor_move_to_logical_internal(new_cursor, Point { x: 0, y: target.y + 1 });
+                    .measurement_config()
+                    .with_cursor(safe_start)
+                    .goto_logical(Point { x: 0, y: target.y + 1 });
                 let lines_before = info.line_height_in_rows;
                 let lines_after = next_line.visual_pos.y - safe_start.visual_pos.y;
                 self.stats.visual_lines += lines_after - lines_before;
@@ -3072,6 +3995,7 @@ impl TextBuffer {
         }
 
         self.recalc_after_content_changed();
+        self.trim_history();
     }
 
     /// Undo the last edit operation.
@@ -3084,7 +4008,15 @@ impl TextBuffer {
         self.undo_redo(false);
     }
 
+    fn layout_configuration(&self) -> (CoordType, CoordType, bool, bool) {
+        (self.width, self.tab_size, self.word_wrap_enabled, self.margin_enabled)
+    }
+
     fn undo_redo(&mut self, undo: bool) {
+        assert_eq!(self.active_edit_depth, 0, "cannot undo/redo during an edit session");
+        self.last_history_type = HistoryType::Other;
+        let layout = self.layout_configuration();
+        let mut remeasure_layout = false;
         let buffer_generation = self.buffer.generation();
         let mut entry_buffer_generation = None;
 
@@ -3103,11 +4035,11 @@ impl TextBuffer {
                     break;
                 }
 
-                let Some(list) = from.cursor_back_mut().remove_current_as_list() else {
+                let Some(entry) = from.pop_back() else {
                     break;
                 };
 
-                to.cursor_back_mut().splice_after(list);
+                to.push_back(entry);
             }
 
             let change = {
@@ -3117,18 +4049,10 @@ impl TextBuffer {
 
             // Remember the buffer generation of the change so we can stop popping undos/redos.
             // Also, move to the point where the modification took place.
-            let cursor = {
+            let offset = {
                 let change = change.borrow();
                 entry_buffer_generation = Some(change.generation_before);
-                self.cursor_move_to_logical_internal(self.cursor, change.cursor)
-            };
-
-            let safe_cursor = if self.word_wrap_column > 0 {
-                // If word-wrap is enabled, we need to move the cursor to the beginning of the line.
-                // This is because the undo/redo operation may have changed the visual position of the cursor.
-                self.goto_line_start(cursor, cursor.logical_pos.y)
-            } else {
-                cursor
+                change.offset
             };
 
             {
@@ -3139,57 +4063,27 @@ impl TextBuffer {
                 mem::swap(&mut change.deleted, &mut change.added);
 
                 // Delete the inserted portion.
-                self.buffer.allocate_gap(cursor.offset, 0, change.deleted.len());
+                self.buffer.allocate_gap(offset, 0, change.deleted.len());
 
-                // Reinsert the deleted portion.
-                {
-                    let added = &change.added[..];
-                    let mut beg = 0;
-                    let mut offset = cursor.offset;
-
-                    while beg < added.len() {
-                        let (end, line) = simd::lines_fwd(added, beg, 0, 1);
-                        let has_newline = line != 0;
-                        let link = &added[beg..end];
-                        let line = unicode::strip_newline(link);
-                        let mut written;
-
-                        {
-                            let gap = self.buffer.allocate_gap(offset, line.len() + 2, 0);
-                            written = slice_copy_safe(gap, line);
-
-                            if has_newline {
-                                if self.newlines_are_crlf && written < gap.len() {
-                                    gap[written] = b'\r';
-                                    written += 1;
-                                }
-                                if written < gap.len() {
-                                    gap[written] = b'\n';
-                                    written += 1;
-                                }
-                            }
-
-                            self.buffer.commit_gap(written);
-                        }
-
-                        beg = end;
-                        offset += written;
-                    }
-                }
+                // Undo restores the exact bytes, including mixed line endings.
+                self.buffer.replace(offset..offset, &change.added);
 
                 // Restore the previous line statistics.
                 mem::swap(&mut self.stats, &mut change.stats_before);
+                remeasure_layout |= change.layout_before != layout;
+                change.layout_before = layout;
 
                 // Restore the previous selection.
                 mem::swap(&mut self.selection, &mut change.selection_before);
+                mem::swap(&mut self.secondary_selections, &mut change.secondary_before);
+                mem::swap(&mut self.newlines_are_crlf, &mut change.newlines_before);
 
                 // Pretend as if the buffer was never modified.
                 self.buffer.set_generation(change.generation_before);
                 change.generation_before = buffer_generation;
 
                 // Restore the previous cursor.
-                let cursor_before =
-                    self.cursor_move_to_logical_internal(safe_cursor, change.cursor_before);
+                let cursor_before = self.measurement_config().goto_logical(change.cursor_before);
                 change.cursor_before = self.cursor.logical_pos;
                 // Can't use `set_cursor_internal` here, because we haven't updated the line stats yet.
                 self.cursor = cursor_before;
@@ -3201,7 +4095,15 @@ impl TextBuffer {
         }
 
         if entry_buffer_generation.is_some() {
+            self.rectangle = None;
+            self.last_history_type = HistoryType::Other;
             self.recalc_after_content_changed();
+            // Historical visual counts belong to the viewport/tab settings at
+            // the time of the edit. Logical positions survive a resize; visual
+            // positions must be measured under the current settings.
+            if remeasure_layout {
+                self.reflow();
+            }
         }
     }
 
@@ -3231,92 +4133,85 @@ impl TextBuffer {
             return None;
         }
 
-        // Navigate to the start of the requested line
-        let mut offset = 0;
-        let mut current_line = 0;
-
-        // Find the start of the line
-        while current_line < line_number {
-            let chunk = self.read_forward(offset);
-            if chunk.is_empty() {
-                return None;
-            }
-
-            let (delta, line) = simd::lines_fwd(chunk, 0, current_line, line_number);
-            offset += delta;
-            current_line = line;
-        }
-
-        let line_start = offset;
-
-        // Find the end of the line (next newline or end of buffer)
-        let chunk = self.read_forward(offset);
-        let mut line_end = offset;
-
-        for (i, &b) in chunk.iter().enumerate() {
-            if b == b'\n' {
-                line_end = offset + i;
-                break;
-            }
-            line_end = offset + i + 1;
-        }
-
-        // If we didn't find a newline in this chunk, we're at the last line
-        if line_end == offset + chunk.len() && !chunk.is_empty() && chunk[chunk.len() - 1] != b'\n' {
-            line_end = offset + chunk.len();
-        }
-
-        // Extract the line content (excluding trailing \r\n or \n)
-        let mut content = self.extract_bytes(line_start..line_end);
-
-        // Remove trailing \r if present (CRLF case)
-        if content.ends_with(b"\r") {
-            content.pop();
-        }
-
-        Some((content, line_start))
+        let beg = self.goto_line_start(self.cursor, line_number);
+        let end =
+            self.cursor_move_to_logical_internal(beg, Point { x: CoordType::MAX, y: line_number });
+        Some((self.extract_bytes(beg.offset..end.offset), beg.offset))
     }
 
-    /// Find all occurrences of a pattern in the buffer.
-    /// Returns a vector of (line_number, byte_offset) pairs.
+    /// Find literal occurrences, including matches spanning the gap.
     pub fn find_line_matches(&self, pattern: &[u8]) -> Vec<(CoordType, usize)> {
         if pattern.is_empty() {
             return Vec::new();
         }
-
-        let mut matches = Vec::new();
-        let text_len = self.buffer.len();
-        let pattern_len = pattern.len();
         let mut offset = 0;
+        let mut line = 0;
+        find_all_matches(&self.buffer, pattern, usize::MAX)
+            .into_iter()
+            .map(|range| {
+                // Matches are ordered. Count intervening newlines only once,
+                // instead of rescanning the document prefix for every match.
+                while offset < range.start {
+                    let chunk = self.read_forward(offset);
+                    let count = chunk.len().min(range.start - offset);
+                    line +=
+                        chunk[..count].iter().filter(|&&byte| byte == b'\n').count() as CoordType;
+                    offset += count;
+                }
+                (line, range.start)
+            })
+            .collect()
+    }
 
-        while offset + pattern_len <= text_len {
+    /// Find the nearest complete line for reload cursor restoration. A matching
+    /// substring in a longer line is not the same source line. Scan once without
+    /// allocating a match list, even in files containing millions of duplicates.
+    pub fn nearest_matching_line(&self, pattern: &[u8], preferred: CoordType) -> Option<CoordType> {
+        if pattern.is_empty() || pattern.contains(&b'\n') {
+            return None;
+        }
+        let mut nearest = None;
+        let mut distance = usize::MAX;
+        let mut line: CoordType = 0;
+        let mut length = 0;
+        let mut last = 0;
+        let mut equal = true;
+        let mut offset = 0;
+        while offset < self.text_length() {
             let chunk = self.read_forward(offset);
-            if chunk.is_empty() {
-                break;
-            }
-
-            // Search for the pattern in this chunk
-            let mut pos = 0;
-            while pos + pattern_len <= chunk.len() {
-                if &chunk[pos..pos + pattern_len] == pattern {
-                    let match_offset = offset + pos;
-                    // Count lines to this position
-                    let line = self.offset_to_line(match_offset);
-                    matches.push((line, match_offset));
-                    pos += pattern_len;
+            for &byte in chunk {
+                if byte == b'\n' {
+                    let content_length = length - usize::from(last == b'\r');
+                    let candidate_distance = line.abs_diff(preferred);
+                    if equal && content_length == pattern.len() && candidate_distance < distance {
+                        nearest = Some(line);
+                        distance = candidate_distance;
+                    }
+                    line += 1;
+                    length = 0;
+                    last = 0;
+                    equal = true;
                 } else {
-                    pos += 1;
+                    equal &= pattern
+                        .get(length)
+                        .map_or(length == pattern.len() && byte == b'\r', |&expected| {
+                            byte == expected
+                        });
+                    length += 1;
+                    last = byte;
                 }
             }
-
-            // Move to next chunk, overlapping by pattern_len - 1 to catch patterns that span chunks
-            offset += chunk.len().saturating_sub(pattern_len - 1).max(1);
+            offset += chunk.len();
         }
-
-        matches
+        // An EOF CR is content, not a CRLF terminator.
+        if equal && length == pattern.len() && line.abs_diff(preferred) < distance {
+            nearest = Some(line);
+        }
+        nearest
     }
 
     /// Convert a byte offset to a logical line number.
+    #[cfg(test)]
     fn offset_to_line(&self, target_offset: usize) -> CoordType {
         let mut offset = 0;
         let mut line = 0;
@@ -3386,6 +4281,551 @@ fn detect_bom(bytes: &[u8]) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn multi_buffer(text: &str) -> TextBuffer {
+        let mut buffer = TextBuffer::new(true).unwrap();
+        buffer.set_crlf(false);
+        buffer.write_raw(text.as_bytes());
+        buffer.cursor_move_to_offset(0);
+        buffer
+    }
+
+    fn contents(buffer: &TextBuffer) -> Vec<u8> {
+        buffer.extract_bytes(0..buffer.text_length())
+    }
+
+    #[test]
+    #[ignore = "requires dynamically loaded ICU"]
+    fn stale_search_miss_is_invalidated_after_edit_and_undo_branch() {
+        icu::init().unwrap();
+        let mut b = multi_buffer("nothing");
+        b.find_and_select("word", SearchOptions::default()).unwrap();
+        assert!(!b.has_selection());
+        b.cursor_move_to_offset(b.text_length());
+        b.write_raw(b" word word");
+        b.find_and_select("word", SearchOptions::default()).unwrap();
+        let first = b.selection_range().unwrap().0.offset;
+        b.find_and_select("word", SearchOptions::default()).unwrap();
+        assert_ne!(b.selection_range().unwrap().0.offset, first);
+        b.undo();
+        b.find_and_select("word", SearchOptions::default()).unwrap();
+        assert!(!b.has_selection());
+        b.cursor_move_to_offset(b.text_length());
+        b.write_raw(b" word");
+        b.find_and_select("word", SearchOptions::default()).unwrap();
+        assert!(b.has_selection());
+    }
+
+    #[test]
+    fn multi_reversed_overlapping_ranges_replace_once_and_undo() {
+        let mut b = multi_buffer("alpha beta gamma");
+        b.set_selection_ranges(&[(5, 0), (2, 7), (11, 16)]);
+        let selections = b.selection_ranges();
+        assert_eq!(b.selection_count(), 2);
+        b.write_raw(b"X");
+        assert_eq!(contents(&b), b"Xeta X");
+        assert_eq!(b.selection_count(), 2);
+        b.undo();
+        assert_eq!(contents(&b), b"alpha beta gamma");
+        assert_eq!(b.selection_ranges(), selections);
+        b.redo();
+        assert_eq!(contents(&b), b"Xeta X");
+        assert_eq!(b.selection_count(), 2);
+    }
+
+    #[test]
+    fn multi_unicode_grapheme_delete_is_atomic() {
+        let mut b = multi_buffer("e\u{301}🙂\nx🙂");
+        let len = b.text_length();
+        b.set_selection_ranges(&[(7, 7), (len, len)]);
+        let selections = b.selection_ranges();
+        b.delete(CursorMovement::Grapheme, -1);
+        assert_eq!(contents(&b), "e\u{301}\nx".as_bytes());
+        b.undo();
+        assert_eq!(contents(&b), "e\u{301}🙂\nx🙂".as_bytes());
+        assert_eq!(b.selection_ranges(), selections);
+    }
+
+    #[test]
+    fn multi_crlf_delete_and_redo_preserve_exact_bytes() {
+        let mut b = multi_buffer("a\nb\nc");
+        b.normalize_newlines(true);
+        b.set_selection_ranges(&[(1, 1), (4, 4)]);
+        b.delete(CursorMovement::Grapheme, 1);
+        assert_eq!(contents(&b), b"abc");
+        b.undo();
+        assert_eq!(contents(&b), b"a\r\nb\r\nc");
+        b.redo();
+        assert_eq!(contents(&b), b"abc");
+    }
+
+    #[test]
+    fn multi_capacity_failure_preserves_contents_selection_and_history() {
+        let mut b = multi_buffer("abc def");
+        b.set_selection_ranges(&[(0, 3), (4, 7)]);
+        let selections = b.selection_ranges();
+        b.write_raw(&vec![b'x'; 70 * KIBI]);
+        assert!(b.take_edit_capacity_error());
+        assert_eq!(contents(&b), b"abc def");
+        assert_eq!(b.selection_ranges(), selections);
+        b.undo();
+        assert!(contents(&b).is_empty());
+    }
+
+    #[test]
+    fn multi_clipboard_keeps_distinct_fragments() {
+        let mut b = multi_buffer("one two\n___ ___");
+        let mut clipboard = Clipboard::default();
+        b.set_selection_ranges(&[(0, 3), (4, 7)]);
+        b.copy(&mut clipboard);
+        b.set_selection_ranges(&[(8, 11), (12, 15)]);
+        b.paste(&clipboard);
+        assert_eq!(contents(&b), b"one two\none two");
+        b.undo();
+        assert_eq!(contents(&b), b"one two\n___ ___");
+    }
+
+    #[test]
+    fn multi_rectangle_tabs_wide_characters_and_short_lines() {
+        let mut b = multi_buffer("a\tb\n界xyz\nx");
+        b.select_rectangle(Point { x: 1, y: 0 }, Point { x: 4, y: 2 });
+        b.write_raw(b"!");
+        assert_eq!(contents(&b), "a!b\n!z\nx!".as_bytes());
+        b.undo();
+        assert_eq!(contents(&b), "a\tb\n界xyz\nx".as_bytes());
+    }
+
+    #[test]
+    fn multi_occurrences_cross_gap_and_stop_at_exhaustion() {
+        let mut b = multi_buffer("word word word");
+        b.cursor_move_to_offset(2);
+        b.write_raw(b"X");
+        b.delete(CursorMovement::Grapheme, -1);
+        b.cursor_move_to_offset(0);
+        assert!(b.add_next_occurrence());
+        assert!(b.add_next_occurrence());
+        assert!(b.add_next_occurrence());
+        assert!(!b.add_next_occurrence());
+        assert_eq!(b.selection_count(), 3);
+        b.write_raw(b"changed");
+        assert_eq!(contents(&b), b"changed changed changed");
+    }
+
+    #[test]
+    fn multi_byte_edits_validate_before_mutation_and_group_nested_undo() {
+        let mut b = multi_buffer("abc\ndef");
+        assert!(b.apply_byte_edits(&[(0..2, b"a".to_vec()), (1..3, b"b".to_vec())]).is_err());
+        assert_eq!(contents(&b), b"abc\ndef");
+        b.begin_undo_group();
+        b.apply_byte_edits(&[(0..1, b"A\nB".to_vec()), (4..7, b"D".to_vec())]).unwrap();
+        b.cursor_move_to_offset(0);
+        b.write_raw(b"!");
+        b.end_undo_group();
+        assert_eq!(contents(&b), b"!A\nBbc\nD");
+        b.undo();
+        assert_eq!(contents(&b), b"abc\ndef");
+        b.redo();
+        assert_eq!(contents(&b), b"!A\nBbc\nD");
+    }
+
+    #[test]
+    fn multi_line_helpers_cross_gap() {
+        let mut b = multi_buffer("alpha beta\nalpha beta");
+        b.cursor_move_to_offset(4);
+        b.write_raw(b"X");
+        b.delete(CursorMovement::Grapheme, -1);
+        assert_eq!(b.extract_line_content(0).unwrap().0, b"alpha beta");
+        assert_eq!(b.find_line_matches(b"alpha"), vec![(0, 0), (1, 11)]);
+    }
+
+    #[test]
+    fn multi_indent_and_unindent_keep_all_selections() {
+        let mut b = multi_buffer("one\ntwo\nthree");
+        b.set_selection_ranges(&[(0, 3), (4, 7)]);
+        b.indent_change(1);
+        assert_eq!(contents(&b), b"    one\n    two\nthree");
+        assert_eq!(b.selection_count(), 2);
+        b.indent_change(-1);
+        assert_eq!(contents(&b), b"one\ntwo\nthree");
+        b.undo();
+        assert_eq!(contents(&b), b"    one\n    two\nthree");
+    }
+
+    #[test]
+    fn multi_transaction_undo_redo_under_wrap_and_multiline_edits() {
+        for width in [0, 4, 8, 17] {
+            for seed in 0..40usize {
+                let original = "alpha beta\ngamma delta\nepsilon zeta\nlast";
+                let mut b = multi_buffer(original);
+                if width > 0 {
+                    b.set_word_wrap(true);
+                    b.set_width(width);
+                    assert!(b.word_wrap_column > 0);
+                }
+                let a = seed % 7;
+                let c = 15 + seed % 5;
+                let first = if seed % 2 == 0 { b"X\nY".to_vec() } else { Vec::new() };
+                let second = if seed % 3 == 0 { b"\n\n".to_vec() } else { b"Q".to_vec() };
+                let mut expected = original.as_bytes().to_vec();
+                expected.splice(c..c + 2, second.clone());
+                expected.splice(a..a + 2, first.clone());
+                b.apply_byte_edits(&[(a..a + 2, first), (c..c + 2, second)]).unwrap();
+                assert_eq!(contents(&b), expected, "seed {seed}, width {width}");
+                b.undo();
+                assert_eq!(contents(&b), original.as_bytes(), "undo seed {seed}, width {width}");
+                b.redo();
+                assert_eq!(contents(&b), expected, "redo seed {seed}, width {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn multi_reject_partial_grapheme_and_crlf_byte_edits() {
+        let mut b = multi_buffer("e\u{301}🙂");
+        assert!(b.apply_byte_edits(&[(1..2, b"x".to_vec())]).is_err());
+        assert_eq!(contents(&b), "e\u{301}🙂".as_bytes());
+        b.set_crlf(true);
+        b.write_raw(b"\n");
+        let text = contents(&b);
+        let cr = text.iter().position(|&c| c == b'\r').unwrap();
+        assert!(b.apply_byte_edits(&[(cr + 1..cr + 2, b"x".to_vec())]).is_err());
+        assert_eq!(contents(&b), text);
+    }
+
+    #[test]
+    fn multi_render_syntax_selection_and_secondary_carets() {
+        let mut b = multi_buffer("fn main() {\n\tlet 界 = 1;\n}\n");
+        b.set_syntax_path(std::path::Path::new("sample.rs"));
+        b.set_width(30);
+        b.set_selection_ranges(&[(3, 7), (24, 24)]);
+        let mut fb = Framebuffer::new();
+        fb.flip(Size { width: 30, height: 6 });
+        assert!(
+            b.render(
+                Point::default(),
+                Rect { left: 0, top: 0, right: 30, bottom: 6 },
+                true,
+                &mut fb
+            )
+            .is_some()
+        );
+        let arena = scratch_arena(None);
+        let output = fb.render(&arena);
+        assert!(output.contains("main"));
+        assert!(output.contains("界"));
+    }
+
+    #[test]
+    fn newline_conversion_preserves_prior_undo_and_mixed_endings() {
+        let mut b = multi_buffer("");
+        b.apply_byte_edits(&[(0..0, b"a\nb\r\nc\n".to_vec())]).unwrap();
+        b.set_selection_ranges(&[(0, 1), (6, 7)]);
+        let selections = b.selection_ranges();
+        b.normalize_newlines(true);
+        assert_eq!(contents(&b), b"a\r\nb\r\nc\r\n");
+        assert!(b.is_crlf());
+        b.undo();
+        assert_eq!(contents(&b), b"a\nb\r\nc\n");
+        assert!(!b.is_crlf());
+        assert_eq!(b.selection_ranges(), selections);
+        b.redo();
+        assert_eq!(contents(&b), b"a\r\nb\r\nc\r\n");
+        assert!(b.is_crlf());
+        b.undo();
+        b.undo();
+        assert!(contents(&b).is_empty());
+    }
+
+    #[test]
+    fn near_capacity_replacement_and_failed_newline_conversion_are_atomic() {
+        let mut b = multi_buffer("");
+        b.apply_byte_edits(&[(0..0, vec![b'\n'; 128 * KIBI - 8])]).unwrap();
+        let before = contents(&b);
+        b.normalize_newlines(true);
+        assert!(b.take_edit_capacity_error());
+        assert_eq!(contents(&b), before);
+        assert!(!b.is_crlf());
+        b.apply_byte_edits(&[(0..b.text_length(), vec![b'x'; 128 * KIBI - 8])]).unwrap();
+        assert_eq!(b.text_length(), 128 * KIBI - 8);
+        b.undo();
+        assert_eq!(contents(&b), before);
+    }
+
+    struct StressRng(u64);
+
+    impl StressRng {
+        fn next(&mut self, limit: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 as usize % limit
+        }
+    }
+
+    fn stress_assert_model(buffer: &TextBuffer, expected: &[u8], seed: u64, step: usize) {
+        assert_eq!(contents(buffer), expected, "seed {seed:#x}, step {step}");
+        assert_eq!(
+            buffer.logical_line_count() as usize,
+            expected.iter().filter(|&&b| b == b'\n').count() + 1,
+            "line count, seed {seed:#x}, step {step}"
+        );
+        assert!(buffer.cursor_offset() <= expected.len(), "cursor seed {seed:#x}, step {step}");
+        assert!(
+            buffer.cursor.visual_pos.y < buffer.stats.visual_lines,
+            "invalid cursor {:?}, lines {}, seed {seed:#x}, step {step}, text {:?}, layout {:?}, measured {:?}",
+            buffer.cursor,
+            buffer.stats.visual_lines,
+            String::from_utf8_lossy(expected),
+            buffer.layout_configuration(),
+            buffer.measurement_config().goto_offset(usize::MAX)
+        );
+        let measured = buffer.measurement_config().goto_offset(usize::MAX);
+        assert_eq!(
+            buffer.visual_line_count(),
+            measured.visual_pos.y + 1,
+            "visual count, seed {seed:#x}, step {step}"
+        );
+        for (a, b) in buffer.selection_ranges() {
+            assert!(a <= expected.len() && b <= expected.len());
+        }
+    }
+
+    fn randomized_transaction_oracle(seed: u64, steps: usize) {
+        let mut rng = StressRng(seed);
+        let mut b = multi_buffer("alpha\r\n界e\u{301}🙂\nbeta\tomega\n");
+        let mut model = contents(&b);
+        let mut history = vec![model.clone()];
+        let mut position = 0;
+        // Baseline content is outside the modeled history.
+        b.undo_stack.clear();
+        b.redo_stack.clear();
+        let fragments: &[&[u8]] =
+            &[b"", b"x", "界".as_bytes(), "🙂".as_bytes(), b"one\ntwo", b"\r\n", b"\t"];
+        for step in 0..steps {
+            if std::env::var_os("OGEDIT_STRESS_TRACE").is_some() {
+                eprintln!(
+                    "seed {seed:#x} step {step} rng {:#x} model {:?}",
+                    rng.0,
+                    String::from_utf8_lossy(&model)
+                );
+                eprintln!(
+                    "cursor {:?}, wrap {}, width {}, tab {}, nextop {}",
+                    b.cursor,
+                    b.word_wrap_column,
+                    b.width,
+                    b.tab_size,
+                    StressRng(rng.0).next(10)
+                );
+            }
+            match rng.next(10) {
+                0 if position > 0 => {
+                    b.undo();
+                    position -= 1;
+                    model = history[position].clone();
+                }
+                1 if position + 1 < history.len() => {
+                    b.redo();
+                    position += 1;
+                    model = history[position].clone();
+                }
+                2 => {
+                    b.set_word_wrap(rng.next(2) == 0);
+                    b.set_width([1, 2, 4, 9, 25, 80][rng.next(6)]);
+                    b.set_tab_size(1 + rng.next(8) as CoordType);
+                }
+                3 => {
+                    let at = [0, model.len(), usize::MAX, rng.next(model.len() + 1)][rng.next(4)];
+                    b.cursor_move_to_offset(at);
+                    b.clear_selection();
+                    b.clear_secondary_cursors();
+                }
+                _ => {
+                    let before_generation = b.generation();
+                    let mut boundaries = vec![0];
+                    for off in 1..=model.len() {
+                        if b.cursor_move_to_offset_internal(Cursor::default(), off).offset == off {
+                            boundaries.push(off);
+                        }
+                    }
+                    let a = boundaries[rng.next(boundaries.len())];
+                    let c = boundaries[rng.next(boundaries.len())];
+                    let range = a.min(c)..a.max(c);
+                    let insertion = fragments[rng.next(fragments.len())];
+                    b.begin_undo_group();
+                    if rng.next(3) == 0 {
+                        // Exercise normalization of overlapping, reversed and duplicate cursors,
+                        // then independently splice the actual normalized selections in a Vec.
+                        b.set_selection_ranges(&[
+                            (a, c),
+                            (c, a),
+                            (0, 0),
+                            (model.len(), model.len()),
+                        ]);
+                        let ranges = b.selection_ranges();
+                        let fragment = fragments[rng.next(4)];
+                        for &(a, c) in ranges.iter().rev() {
+                            model.splice(a.min(c)..a.max(c), fragment.iter().copied());
+                        }
+                        b.write_raw(fragment);
+                    } else {
+                        b.apply_byte_edits(&[(range.clone(), insertion.to_vec())]).unwrap();
+                        model.splice(range, insertion.iter().copied());
+                    }
+                    b.end_undo_group();
+                    assert!(!b.take_edit_capacity_error());
+                    if b.generation() != before_generation {
+                        history.truncate(position + 1);
+                        history.push(model.clone());
+                        position += 1;
+                    }
+                }
+            }
+            stress_assert_model(&b, &model, seed, step);
+        }
+        // Undo/redo the entire surviving branch, checking every intermediate state.
+        while position > 0 {
+            b.undo();
+            position -= 1;
+            stress_assert_model(&b, &history[position], seed, steps + position);
+        }
+        while position + 1 < history.len() {
+            b.redo();
+            position += 1;
+            stress_assert_model(&b, &history[position], seed, steps * 2 + position);
+        }
+    }
+
+    #[test]
+    fn stress_randomized_transactions_match_byte_vector_oracle() {
+        for seed in [1, 7, 0xdead_beef, 0x5eed_cafe, 0x1234_5678, 0x7fff_ffff, 0xf00d, 0xace] {
+            randomized_transaction_oracle(seed, 400);
+        }
+    }
+
+    #[test]
+    #[ignore = "long deterministic stress run"]
+    fn stress_randomized_transactions_long() {
+        for seed in 1..=128 {
+            randomized_transaction_oracle(seed * 0x9e37_79b9, 1000);
+        }
+    }
+
+    #[test]
+    fn stress_malformed_bytes_render_navigate_replace_and_undo() {
+        let mut rng = StressRng(0xcafe_d00d);
+        let mut buffer = multi_buffer("");
+        buffer.set_syntax_path(std::path::Path::new("stress.rs"));
+        let mut fb = Framebuffer::new();
+        fb.flip(Size { width: 20, height: 5 });
+        for iteration in 0..256 {
+            let before = contents(&buffer);
+            let bytes: Vec<u8> = (0..rng.next(256)).map(|_| rng.next(256) as u8).collect();
+            buffer.apply_byte_edits(&[(0..buffer.text_length(), bytes.clone())]).unwrap();
+            buffer.set_word_wrap(iteration % 2 == 0);
+            buffer.set_width(2 + rng.next(19) as CoordType);
+            buffer.set_tab_size(1 + rng.next(8) as CoordType);
+            for _ in 0..8 {
+                buffer.cursor_move_to_offset(rng.next(bytes.len() + 3));
+                assert!(buffer.cursor_offset() <= bytes.len());
+            }
+            buffer.render(
+                Point::default(),
+                Rect { left: 0, top: 0, right: 20, bottom: 5 },
+                true,
+                &mut fb,
+            );
+            stress_assert_model(&buffer, &bytes, 0xcafe_d00d, iteration);
+            if before != bytes || !bytes.is_empty() {
+                buffer.undo();
+                assert_eq!(contents(&buffer), before);
+                buffer.redo();
+                assert_eq!(contents(&buffer), bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_wrapped_tabs_and_resize_undo_keep_cursor_in_view() {
+        let mut buffer = multi_buffer("o界\tx界x\t");
+        for width in 2..9 {
+            for tab in 1..9 {
+                buffer.set_word_wrap(true);
+                buffer.set_width(width);
+                buffer.set_tab_size(tab);
+                for offset in 0..=buffer.text_length() {
+                    buffer.cursor_move_to_offset(offset);
+                    assert!(buffer.cursor_visual_pos().x <= width);
+                    assert!(buffer.cursor_visual_pos().y < buffer.visual_line_count());
+                }
+            }
+        }
+        let before = contents(&buffer);
+        buffer.apply_byte_edits(&[(0..1, b"one\ntwo\t".to_vec())]).unwrap();
+        buffer.set_width(80);
+        buffer.undo();
+        stress_assert_model(&buffer, &before, 0, 0);
+        buffer.redo();
+        let after = contents(&buffer);
+        stress_assert_model(&buffer, &after, 0, 1);
+    }
+
+    #[test]
+    fn stress_invalid_edits_leave_content_history_and_selections_intact() {
+        let mut b = multi_buffer("");
+        b.apply_byte_edits(&[(0..0, "e\u{301}🙂\r\nlast".as_bytes().to_vec())]).unwrap();
+        b.set_selection_ranges(&[(0, 3), (7, 7)]);
+        let before = contents(&b);
+        let selections = b.selection_ranges();
+        let generation = b.generation();
+        for ranges in [
+            vec![(usize::MAX..usize::MAX, vec![b'x'])],
+            vec![(0..usize::MAX, vec![])],
+            vec![(Range { start: 3, end: 2 }, vec![b'x'])],
+            vec![(1..2, vec![])],
+            vec![(8..9, vec![])],
+            vec![(0..3, vec![]), (0..0, vec![b'x'])],
+        ] {
+            assert!(b.apply_byte_edits(&ranges).is_err());
+            assert_eq!(contents(&b), before);
+            assert_eq!(b.selection_ranges(), selections);
+            assert_eq!(b.generation(), generation);
+        }
+        b.apply_byte_edits(&[(0..before.len(), vec![b'x'; 256 * KIBI])]).unwrap_err();
+        assert_eq!(contents(&b), before);
+        assert_eq!(b.selection_ranges(), selections);
+        b.undo();
+        assert!(contents(&b).is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires dynamically loaded ICU"]
+    fn stress_search_survives_moves_reloads_edits_and_drops() {
+        icu::init().unwrap();
+        for iteration in 0..128 {
+            let mut original = multi_buffer("🙂 first needle\r\n界 second needle");
+            original.find_and_select("needle", SearchOptions::default()).unwrap();
+            let mut moved = vec![original];
+            for _ in 0..5 {
+                moved.push(multi_buffer("padding"));
+            }
+            let mut b = moved.remove(0);
+            b.find_and_select("needle", SearchOptions::default()).unwrap();
+            let (start, end) = b.selection_range().unwrap();
+            assert_eq!(b.extract_bytes(start.offset..end.offset), b"needle", "move {iteration}");
+            let replacement = multi_buffer("new needle");
+            b.replace_loaded_content(replacement);
+            b.find_and_select("needle", SearchOptions::default()).unwrap();
+            let (start, end) = b.selection_range().unwrap();
+            assert_eq!(b.extract_bytes(start.offset..end.offset), b"needle");
+            b.select_all();
+            b.write_raw(b"empty");
+            b.find_and_select("needle", SearchOptions::default()).unwrap();
+            assert!(!b.has_selection());
+            b.undo();
+            b.find_and_select("needle", SearchOptions::default()).unwrap();
+            assert!(b.has_selection());
+        }
+    }
 
     // ===== SelectionHighlights::should_highlight Tests =====
 
@@ -3593,5 +5033,150 @@ mod tests {
         assert_eq!(buf.offset_to_line(5), 0); // End of "line1"
         assert_eq!(buf.offset_to_line(6), 1); // Start of line 1 (after \n)
         assert_eq!(buf.offset_to_line(12), 2); // Start of line 2
+    }
+
+    fn assert_layout_consistent(buffer: &TextBuffer) {
+        let measured = buffer.measurement_config().goto_logical(Point::MAX);
+        assert_eq!(buffer.visual_line_count(), measured.visual_pos.y + 1);
+        assert_eq!(buffer.logical_line_count(), measured.logical_pos.y + 1);
+        let measured_cursor = buffer.measurement_config().goto_offset(buffer.cursor.offset);
+        assert_eq!(buffer.cursor.logical_pos, measured_cursor.logical_pos);
+        assert_eq!(buffer.cursor.visual_pos, measured_cursor.visual_pos);
+    }
+
+    #[test]
+    fn legacy_duplicate_preserves_empty_lines_partial_selections_and_undo() {
+        for (original, range, expected, copy) in [
+            ("a\n\nlast", (0, 3), "a\n\na\n\nlast", "a\n"),
+            ("first\nsecond\ntail", (0, 8), "first\nsefirst\nsecond\ntail", "first\nse"),
+            ("é🙂\nnext", (0, 6), "é🙂\né🙂\nnext", "é🙂"),
+        ] {
+            let mut buffer = multi_buffer(original);
+            buffer.set_selection_ranges(&[range]);
+            let before = buffer.selection_ranges();
+            buffer.duplicate_line_or_selection();
+            assert_eq!(contents(&buffer), expected.as_bytes());
+            let (a, b) = buffer.selection_ranges()[0];
+            assert_eq!(buffer.extract_bytes(a.min(b)..a.max(b)), copy.as_bytes());
+            buffer.undo();
+            assert_eq!(contents(&buffer), original.as_bytes());
+            assert_eq!(buffer.selection_ranges(), before);
+            buffer.redo();
+            assert_eq!(contents(&buffer), expected.as_bytes());
+        }
+    }
+
+    #[test]
+    fn legacy_duplicate_empty_eof_repetition_and_mixed_newlines() {
+        let mut empty = multi_buffer("");
+        empty.duplicate_line_or_selection();
+        assert_eq!(contents(&empty), b"\n");
+        empty.duplicate_line_or_selection();
+        assert_eq!(contents(&empty), b"\n\n");
+        empty.undo();
+        assert_eq!(contents(&empty), b"\n");
+        empty.undo();
+        assert!(contents(&empty).is_empty());
+
+        let mut final_newline = multi_buffer("last");
+        final_newline.set_insert_final_newline(true);
+        final_newline.set_crlf(true);
+        final_newline.duplicate_line_or_selection();
+        assert_eq!(contents(&final_newline), b"last\r\nlast\r\n");
+        assert_eq!(final_newline.selection_ranges(), vec![(6, 10)]);
+        final_newline.undo();
+        assert_eq!(contents(&final_newline), b"last");
+
+        let mut mixed = multi_buffer("");
+        mixed.apply_byte_edits(&[(0..0, b"a\r\nb\nc".to_vec())]).unwrap();
+        mixed.cursor_move_to_offset(0);
+        mixed.duplicate_line_or_selection();
+        assert_eq!(contents(&mixed), b"a\r\na\r\nb\nc");
+        mixed.duplicate_line_or_selection();
+        assert_eq!(contents(&mixed), b"a\r\na\r\na\r\nb\nc");
+    }
+
+    #[test]
+    fn legacy_wrapped_multiline_paste_and_duplicate_keep_measured_layout() {
+        for width in [4, 8, 17] {
+            for crlf in [false, true] {
+                let mut buffer = multi_buffer("header\nalpha beta gamma delta\nlast");
+                buffer.set_crlf(crlf);
+                buffer.set_word_wrap(true);
+                buffer.set_width(width);
+                assert!(buffer.word_wrap_column > 0);
+                for (start, end) in [(8, 8), (8, 11), (0, 20)] {
+                    buffer.set_selection_ranges(&[(start, end)]);
+                    let before = contents(&buffer);
+                    let selection_before = buffer.selection_ranges();
+                    buffer.write_raw("new é🙂\nsecond long line\nthird".as_bytes());
+                    assert_layout_consistent(&buffer);
+                    let after = contents(&buffer);
+                    buffer.undo();
+                    assert_eq!(contents(&buffer), before);
+                    assert_eq!(buffer.selection_ranges(), selection_before);
+                    assert_layout_consistent(&buffer);
+                    buffer.redo();
+                    assert_eq!(contents(&buffer), after);
+                    assert_layout_consistent(&buffer);
+                    buffer.undo();
+                }
+                buffer.cursor_move_to_logical(Point { x: 6, y: 1 });
+                buffer.duplicate_line_or_selection();
+                assert_layout_consistent(&buffer);
+                buffer.duplicate_line_or_selection();
+                assert_layout_consistent(&buffer);
+                buffer.undo();
+                assert_layout_consistent(&buffer);
+                buffer.redo();
+                assert_layout_consistent(&buffer);
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_reload_matching_uses_complete_lines_nearest_tie_and_gap() {
+        let mut buffer = multi_buffer("target suffix\nnot target\ntarget\nother\ntarget");
+        buffer.cursor_move_to_offset(30);
+        buffer.write_raw(b"X");
+        buffer.delete(CursorMovement::Grapheme, -1);
+        assert_eq!(buffer.nearest_matching_line(b"target", 0), Some(2));
+        assert_eq!(buffer.nearest_matching_line(b"target", 3), Some(2));
+        assert_eq!(buffer.nearest_matching_line(b"target", 5), Some(4));
+        assert_eq!(buffer.nearest_matching_line(b"", 1), None);
+        assert_eq!(buffer.nearest_matching_line(b"target\nother", 1), None);
+        assert_eq!(buffer.nearest_matching_line(b"absent", 0), None);
+        let mut crlf = multi_buffer("");
+        crlf.apply_byte_edits(&[(0..0, "é🙂\r\nother\nlast\r".as_bytes().to_vec())]).unwrap();
+        assert_eq!(crlf.nearest_matching_line("é🙂".as_bytes(), 0), Some(0));
+        assert_eq!(crlf.nearest_matching_line(b"last", 2), None);
+        assert_eq!(crlf.nearest_matching_line(b"last\r", 2), Some(2));
+    }
+
+    #[test]
+    fn legacy_line_selection_is_inclusive_reversible_and_wrap_independent() {
+        let mut buffer = multi_buffer("long first line with wraps\nsecond\nthird");
+        buffer.set_word_wrap(true);
+        buffer.set_width(7);
+        assert_eq!(buffer.logical_line_at_visual_row(1), 0);
+        buffer.select_lines(0, 1);
+        assert_eq!(buffer.selection_ranges(), vec![(0, 34)]);
+        buffer.select_lines(1, 0);
+        assert_eq!(buffer.selection_ranges(), vec![(34, 0)]);
+        assert_eq!(buffer.selection_anchor_line(), 1);
+        buffer.select_lines(2, 2);
+        assert_eq!(buffer.selection_ranges(), vec![(34, 39)]);
+        buffer.select_lines(2, 100);
+        assert_eq!(buffer.selection_ranges(), vec![(34, 39)]);
+    }
+
+    #[test]
+    fn legacy_selection_highlights_classify_unicode_graphemes_and_whitespace() {
+        for text in ["é", "א", "界", "e\u{301}", "\u{a0}", "\u{2003} "] {
+            assert!(!SelectionHighlights::should_highlight(text.as_bytes()), "{text:?}");
+        }
+        for text in ["éé", "e\u{301}a", "🙂", "👨‍👩‍👧", "é ", "é\n"] {
+            assert!(SelectionHighlights::should_highlight(text.as_bytes()), "{text:?}");
+        }
     }
 }

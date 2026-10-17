@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use ogedit::arena::scratch_arena;
-use ogedit::framebuffer::{Attributes, IndexedColor};
+use ogedit::framebuffer::IndexedColor;
 use ogedit::fuzzy::score_fuzzy;
 use ogedit::helpers::*;
 use ogedit::input::vk;
@@ -27,6 +27,23 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
 
         ctx.table_next_row();
 
+        let path = doc.path.as_deref().unwrap_or(std::path::Path::new("untitled.txt"));
+        let explicit_language =
+            doc.language_override.as_deref().or_else(|| state.settings.language_for_path(path));
+        let language = match explicit_language {
+            Some(id) => ogedit::syntax::languages().iter().find(|language| language.id == id),
+            None => ogedit::syntax::language_for_path(path),
+        };
+        state.wants_language_picker |= ctx.button(
+            "language",
+            language.map_or("Plain Text", |language| language.name),
+            ButtonStyle::default(),
+        );
+        if state.wants_statusbar_focus {
+            state.wants_statusbar_focus = false;
+            ctx.steal_focus();
+        }
+
         if ctx.button("newline", if tb.is_crlf() { "CRLF" } else { "LF" }, ButtonStyle::default()) {
             let is_crlf = tb.is_crlf();
             let from = if is_crlf { "CRLF" } else { "LF" };
@@ -35,11 +52,10 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             tb.normalize_newlines(!is_crlf);
             // Save as new default
             state.config.newline_crlf = !is_crlf;
-            let _ = state.config.save();
-        }
-        if state.wants_statusbar_focus {
-            state.wants_statusbar_focus = false;
-            ctx.steal_focus();
+            if let Err(error) = state.config.save() {
+                state.workbench.message =
+                    format!("Settings were not saved: {}", FormatApperr::from(error));
+            }
         }
 
         if ctx.button("encoding", tb.encoding(), ButtonStyle::default()) {
@@ -139,7 +155,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                             logging::log_action("INDENTATION_TYPE: Spaces -> Tabs");
                             tb.set_indent_with_tabs(true);
                             state.config.indent_with_tabs = true;
-                            let _ = state.config.save();
+                            if let Err(error) = state.config.save() {
+                                state.workbench.message = format!(
+                                    "Settings were not saved: {}",
+                                    FormatApperr::from(error)
+                                );
+                            }
                         }
                         ctx.needs_rerender();
                     }
@@ -150,7 +171,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                             logging::log_action("INDENTATION_TYPE: Tabs -> Spaces");
                             tb.set_indent_with_tabs(false);
                             state.config.indent_with_tabs = false;
-                            let _ = state.config.save();
+                            if let Err(error) = state.config.save() {
+                                state.workbench.message = format!(
+                                    "Settings were not saved: {}",
+                                    FormatApperr::from(error)
+                                );
+                            }
                         }
                         ctx.needs_rerender();
                     }
@@ -169,10 +195,18 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                         {
                             let old_width = tb.tab_size();
                             if old_width != width as CoordType {
-                                logging::log_action(&format!("TAB_WIDTH: {} -> {}", old_width, width));
+                                logging::log_action(&format!(
+                                    "TAB_WIDTH: {} -> {}",
+                                    old_width, width
+                                ));
                                 tb.set_tab_size(width as CoordType);
                                 state.config.tab_size = width;
-                                let _ = state.config.save();
+                                if let Err(error) = state.config.save() {
+                                    state.workbench.message = format!(
+                                        "Settings were not saved: {}",
+                                        FormatApperr::from(error)
+                                    );
+                                }
                             }
                             ctx.needs_rerender();
                         }
@@ -211,6 +245,17 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
             ctx.needs_rerender();
         }
 
+        if tb.selection_count() > 1 {
+            ctx.label("cursors", &format!("{} cursors", tb.selection_count()));
+        }
+        if state.macros.as_ref().is_some_and(|store| store.is_recording()) {
+            ctx.label("recording", "● REC");
+            ctx.attr_foreground_rgba(ctx.indexed(IndexedColor::BrightRed));
+        }
+        if state.file_changed_cached {
+            ctx.label("external", "[!]");
+        }
+
         if tb.is_dirty() {
             ctx.label("dirty", "*");
         }
@@ -227,6 +272,12 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
                 filename = &filename_buf;
             }
 
+            if !state.workbench.message.is_empty()
+                && state.workbench.panel == crate::workbench::Panel::None
+            {
+                ctx.label("notice", &state.workbench.message);
+                ctx.attr_overflow(Overflow::TruncateTail);
+            }
             if ctx.button("filename", filename, ButtonStyle::default()) {
                 logging::log_action("BUTTON_CLICK: Go to file (filename)");
                 logging::log_dialog_open("Go to File");
@@ -250,6 +301,47 @@ pub fn draw_statusbar(ctx: &mut Context, state: &mut State) {
     }
 
     ctx.table_end();
+}
+
+pub fn draw_dialog_language_change(ctx: &mut Context, state: &mut State) {
+    let mut done = state.documents.active().is_none();
+    ctx.modal_begin("language", loc(LocId::LanguageSelectMode));
+    if let Some(doc) = state.documents.active_mut() {
+        let width = (ctx.size().width - 10).clamp(8, 48);
+        let height = (ctx.size().height - 6).clamp(3, 20);
+        ctx.scrollarea_begin("language-scroll", Size { width, height });
+        ctx.attr_background_rgba(ctx.indexed_alpha(IndexedColor::Black, 1, 4));
+        ctx.inherit_focus();
+        ctx.list_begin("languages");
+        ctx.inherit_focus();
+        if ctx.list_item(doc.language_override.is_none(), loc(LocId::LanguageAutoDetect))
+            == ListSelection::Activated
+        {
+            doc.language_override = None;
+            done = true;
+        }
+        if ctx.list_item(doc.language_override.as_deref() == Some("plaintext"), "Plain Text")
+            == ListSelection::Activated
+        {
+            doc.language_override = Some("plaintext".into());
+            done = true;
+        }
+        for language in ogedit::syntax::languages() {
+            if ctx.list_item(doc.language_override.as_deref() == Some(language.id), language.name)
+                == ListSelection::Activated
+            {
+                doc.language_override = Some(language.id.to_owned());
+                done = true;
+            }
+        }
+        ctx.list_end();
+        ctx.scrollarea_end();
+    }
+    done |= ctx.modal_end();
+    if done {
+        state.wants_language_picker = false;
+        ctx.needs_rerender();
+    }
 }
 
 pub fn draw_dialog_encoding_change(ctx: &mut Context, state: &mut State) {
@@ -362,94 +454,6 @@ fn encoding_picker_update_list(state: &mut State) {
         }
     }
 
-    matches.sort_by(|a, b| b.0.cmp(&a.0));
+    matches.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(b.1.label)));
     state.encoding_picker_results = Some(Vec::from_iter(matches.iter().map(|(_, enc)| *enc)));
 }
-
-pub fn draw_go_to_file(ctx: &mut Context, state: &mut State) {
-    ctx.modal_begin("go-to-file", loc(LocId::ViewGoToFile));
-    {
-        let width = (ctx.size().width - 20).max(10);
-        let height = (ctx.size().height - 10).max(10);
-
-        ctx.scrollarea_begin("scrollarea", Size { width, height });
-        ctx.attr_background_rgba(ctx.indexed_alpha(IndexedColor::Black, 1, 4));
-        ctx.inherit_focus();
-        {
-            ctx.list_begin("documents");
-            ctx.inherit_focus();
-
-            // Show currently open documents
-            if state.documents.update_active(|doc| {
-                let tb = doc.buffer.borrow();
-
-                ctx.styled_list_item_begin();
-                ctx.attr_overflow(Overflow::TruncateTail);
-                ctx.styled_label_add_text(if tb.is_dirty() { "* " } else { "  " });
-                ctx.styled_label_add_text(&doc.filename);
-
-                if let Some(path) = &doc.dir {
-                    ctx.styled_label_add_text("   ");
-                    ctx.styled_label_set_attributes(Attributes::Italic);
-                    ctx.styled_label_add_text(path.as_str());
-                }
-
-                let activated = ctx.styled_list_item_end(false) == ListSelection::Activated;
-                if activated {
-                    logging::log_action(&format!("SWITCH_DOCUMENT: {}", doc.filename));
-                    logging::log_dialog_close("Go to File", "document selected");
-                }
-                activated
-            }) {
-                state.wants_go_to_file = false;
-                ctx.needs_rerender();
-            }
-
-            // Show recent files (closed files) after a separator
-            if !state.config.recent_files.is_empty() {
-                // Filter: must exist and not be currently open
-                // Clone paths to avoid borrow issues when opening files
-                let recent_to_show: Vec<_> = state.config.recent_files.iter()
-                    .filter(|rf| rf.path.exists() && !state.documents.is_path_open(&rf.path))
-                    .map(|rf| rf.path.clone())
-                    .collect();
-
-                if !recent_to_show.is_empty() {
-                    // Separator
-                    ctx.list_item(false, "── Recent Files ──");
-                    ctx.attr_overflow(Overflow::TruncateTail);
-
-                    for path in recent_to_show {
-                        let display = path.to_string_lossy();
-                        if ctx.list_item(false, &display) == ListSelection::Activated {
-                            logging::log_action(&format!("OPEN_RECENT_FILE: {}", display));
-                            // Open the file
-                            match state.documents.add_file_path(&path, &state.config) {
-                                Ok(_) => {
-                                    state.config.add_recent_file(&path);
-                                    // Start watching for external modifications
-                                    state.file_watcher.watch(&path);
-                                    logging::log_dialog_close("Go to File", "recent file opened");
-                                    state.wants_go_to_file = false;
-                                    ctx.needs_rerender();
-                                }
-                                Err(err) => {
-                                    crate::state::error_log_add(ctx, state, err);
-                                }
-                            }
-                        }
-                        ctx.attr_overflow(Overflow::TruncateMiddle);
-                    }
-                }
-            }
-
-            ctx.list_end();
-        }
-        ctx.scrollarea_end();
-    }
-    if ctx.modal_end() {
-        logging::log_dialog_close("Go to File", "Escape");
-        state.wants_go_to_file = false;
-    }
-}
-

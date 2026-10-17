@@ -1,6 +1,7 @@
 #!/bin/bash
 # Helper script to enable/disable ogedit as the default EDITOR
 # Usage: ogedit-set-editor [--enable|--disable|--status]
+set -eu
 
 PROFILE_FILE="/etc/profile.d/ogedit-editor.sh"
 SAMPLE_FILE="/etc/profile.d/ogedit-editor.sh.sample"
@@ -29,19 +30,33 @@ check_root() {
 
 enable_editor() {
     check_root
-    cat > "$PROFILE_FILE" << 'EOF'
+    if [ -e "$PROFILE_FILE" ] || [ -L "$PROFILE_FILE" ]; then
+        if ! managed_profile; then
+            echo "Refusing to replace an administrator-managed $PROFILE_FILE" >&2
+            return 1
+        fi
+    fi
+    profile_tmp=$(mktemp "${PROFILE_FILE}.XXXXXX")
+    trap 'rm -f "$profile_tmp"' EXIT
+    cat > "$profile_tmp" << 'EOF'
 # Set EDITOR to ogedit (managed by ogedit-set-editor)
 export EDITOR="/usr/bin/ogedit"
 EOF
-    chmod 644 "$PROFILE_FILE"
+    chmod 644 "$profile_tmp"
+    mv -f "$profile_tmp" "$PROFILE_FILE"
     echo "EDITOR set to ogedit."
     echo "Changes will take effect in new login sessions."
     echo "To apply immediately, run: export EDITOR=/usr/bin/ogedit"
 }
 
+managed_profile() {
+    [ -f "$PROFILE_FILE" ] && [ ! -L "$PROFILE_FILE" ] &&
+        [ "$(cat "$PROFILE_FILE")" = "$(printf '%s\n' '# Set EDITOR to ogedit (managed by ogedit-set-editor)' 'export EDITOR="/usr/bin/ogedit"')" ]
+}
+
 disable_editor() {
     check_root
-    if [ -f "$PROFILE_FILE" ]; then
+    if managed_profile; then
         rm -f "$PROFILE_FILE"
         echo "EDITOR variable configuration removed."
         echo "Changes will take effect in new login sessions."
@@ -51,8 +66,10 @@ disable_editor() {
 }
 
 show_status() {
-    if [ -f "$PROFILE_FILE" ]; then
+    if managed_profile; then
         echo "Status: EDITOR is set to ogedit (via $PROFILE_FILE)"
+    elif [ -e "$PROFILE_FILE" ] || [ -L "$PROFILE_FILE" ]; then
+        echo "Status: $PROFILE_FILE is administrator-managed; OGEdit will preserve it."
     elif [ -f "$SAMPLE_FILE" ]; then
         echo "Status: EDITOR configuration is available but disabled."
         echo "Run '$0 --enable' to enable it."
@@ -60,7 +77,7 @@ show_status() {
         echo "Status: EDITOR is not configured by ogedit."
     fi
 
-    if [ -n "$EDITOR" ]; then
+    if [ -n "${EDITOR:-}" ]; then
         echo "Current EDITOR value: $EDITOR"
     else
         echo "Current EDITOR value: (not set)"

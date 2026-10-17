@@ -82,6 +82,10 @@ pub struct Size {
 }
 
 impl Size {
+    pub fn is_empty(&self) -> bool {
+        self.width <= 0 || self.height <= 0
+    }
+
     pub fn as_rect(&self) -> Rect {
         Rect { left: 0, top: 0, right: self.width, bottom: self.height }
     }
@@ -203,11 +207,11 @@ impl<T: Copy, A: Allocator> ReplaceRange<T> for Vec<T, A> {
     fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, src: &[T]) {
         let start = match range.start_bound() {
             Bound::Included(&start) => start,
-            Bound::Excluded(start) => start + 1,
+            Bound::Excluded(start) => start.saturating_add(1),
             Bound::Unbounded => 0,
         };
         let end = match range.end_bound() {
-            Bound::Included(end) => end + 1,
+            Bound::Included(end) => end.saturating_add(1),
             Bound::Excluded(&end) => end,
             Bound::Unbounded => usize::MAX,
         };
@@ -227,7 +231,7 @@ fn vec_replace_impl<T: Copy, A: Allocator>(dst: &mut Vec<T, A>, range: Range<usi
         }
 
         let tail_len = dst_len - off - del_len;
-        let new_len = dst_len - del_len + src_len;
+        let new_len = (dst_len - del_len).checked_add(src_len).expect("vector capacity overflow");
 
         if src_len > del_len {
             dst.reserve(src_len - del_len);
@@ -254,9 +258,16 @@ pub fn file_read_uninit<T: Read>(
     file: &mut T,
     buf: &mut [MaybeUninit<u8>],
 ) -> apperr::Result<usize> {
+    // Read is a safe trait: implementations may inspect any byte before writing
+    // it, or report having initialized more than they actually wrote. Therefore
+    // its entire destination must be initialized before creating an &mut [u8].
+    buf.fill(MaybeUninit::new(0));
     unsafe {
-        let buf_slice = slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len());
+        let buf_slice = buf.assume_init_mut();
         let n = file.read(buf_slice)?;
+        if n > buf.len() {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).into());
+        }
         Ok(n)
     }
 }
@@ -264,13 +275,13 @@ pub fn file_read_uninit<T: Read>(
 /// Turns a [`&[u8]`] into a [`&[MaybeUninit<T>]`].
 #[inline(always)]
 pub const fn slice_as_uninit_ref<T>(slice: &[T]) -> &[MaybeUninit<T>] {
-    unsafe { slice::from_raw_parts(slice.as_ptr() as *const MaybeUninit<T>, slice.len()) }
+    unsafe { slice::from_raw_parts(slice.as_ptr().cast(), slice.len()) }
 }
 
 /// Turns a [`&mut [T]`] into a [`&mut [MaybeUninit<T>]`].
 #[inline(always)]
 pub const fn slice_as_uninit_mut<T>(slice: &mut [T]) -> &mut [MaybeUninit<T>] {
-    unsafe { slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut MaybeUninit<T>, slice.len()) }
+    unsafe { slice::from_raw_parts_mut(slice.as_mut_ptr().cast(), slice.len()) }
 }
 
 /// Helpers for ASCII string comparisons.
@@ -289,5 +300,53 @@ impl AsciiStringHelpers for str {
         let s = self.as_bytes();
         let p = prefix.as_bytes();
         p.len() <= s.len() && s[..p.len()].eq_ignore_ascii_case(p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reader_can_inspect_the_entire_destination_before_writing() {
+        struct InspectingReader;
+        impl Read for InspectingReader {
+            fn read(&mut self, destination: &mut [u8]) -> std::io::Result<usize> {
+                assert!(destination.iter().all(|&b| b == 0));
+                destination[..3].copy_from_slice(b"abc");
+                Ok(3)
+            }
+        }
+        let mut destination = [MaybeUninit::uninit(); 64];
+        assert_eq!(file_read_uninit(&mut InspectingReader, &mut destination).unwrap(), 3);
+        assert_eq!(&unsafe { destination.assume_init_ref() }[..3], b"abc");
+        assert!(unsafe { destination.assume_init_ref() }[3..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn reader_cannot_report_bytes_beyond_the_destination() {
+        struct InvalidReader;
+        impl Read for InvalidReader {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Ok(usize::MAX)
+            }
+        }
+        let mut destination = [MaybeUninit::uninit(); 64];
+        assert!(file_read_uninit(&mut InvalidReader, &mut destination).is_err());
+    }
+
+    #[test]
+    fn replacement_extreme_bounds_clamp_without_wrapping() {
+        let mut bytes = b"abc".to_vec();
+        bytes.replace_range((Bound::Excluded(usize::MAX), Bound::Unbounded), b"d");
+        assert_eq!(bytes, b"abcd");
+        bytes.replace_range(..=usize::MAX, b"whole");
+        assert_eq!(bytes, b"whole");
+        let mut zero_sized = vec![(); usize::MAX];
+        let overflow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            zero_sized.replace_range(usize::MAX..usize::MAX, &[()]);
+        }));
+        assert!(overflow.is_err());
+        assert_eq!(zero_sized.len(), usize::MAX);
     }
 }

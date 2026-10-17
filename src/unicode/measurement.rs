@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::hint::cold_path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::Utf8Chars;
 use super::tables::*;
@@ -11,20 +12,18 @@ use crate::helpers::{CoordType, Point};
 // On one hand it's disgusting that I wrote this as a global variable, but on the
 // other hand, this isn't a public library API, and it makes the code a lot cleaner,
 // because we don't need to inject this once-per-process value everywhere.
-static mut AMBIGUOUS_WIDTH: usize = 1;
+static AMBIGUOUS_WIDTH: AtomicUsize = AtomicUsize::new(1);
 
 /// Sets the width of "ambiguous" width characters as per "UAX #11: East Asian Width".
 ///
 /// Defaults to 1.
 pub fn setup_ambiguous_width(ambiguous_width: CoordType) {
-    unsafe { AMBIGUOUS_WIDTH = ambiguous_width as usize };
+    AMBIGUOUS_WIDTH.store(ambiguous_width.clamp(1, 2) as usize, Ordering::Relaxed);
 }
 
 #[inline]
 fn ambiguous_width() -> usize {
-    // SAFETY: This is a global variable that is set once per process.
-    // It is never changed after that, so this is safe to call.
-    unsafe { AMBIGUOUS_WIDTH }
+    AMBIGUOUS_WIDTH.load(Ordering::Relaxed)
 }
 
 /// Stores a position inside a [`ReadableDocument`].
@@ -210,8 +209,7 @@ impl<'doc> MeasurementConfig<'doc> {
                 width += ucd_grapheme_cluster_character_width(props_next_cluster, ambiguous_width())
                     as CoordType;
 
-                // The `Document::read_forward` interface promises us that it will not split
-                // grapheme clusters across chunks. Therefore, we can safely break here.
+                // End of the currently available characters.
                 let ch = match chunk_iter.next() {
                     Some(ch) => ch,
                     None => break,
@@ -247,6 +245,13 @@ impl<'doc> MeasurementConfig<'doc> {
                 width = self.tab_size - (column % self.tab_size);
             }
 
+            // A tab wider than a narrow wrapped viewport is clipped visually,
+            // but its logical column still advances to the full tab stop.
+            let column_width = width;
+            if self.word_wrap_column > 0 {
+                width = width.min(self.word_wrap_column);
+            }
+
             // Hard wrap: Both the logical and visual position advance by one line.
             if props_last_char == ucd_linefeed_properties() {
                 cold_path();
@@ -280,7 +285,10 @@ impl<'doc> MeasurementConfig<'doc> {
             // Since this code above may need to revert to a previous `wrap_opp_*`,
             // it must be done before advancing / checking for `ucd_line_break_joins`.
             if self.word_wrap_column > 0 && visual_pos_x + width > self.word_wrap_column {
-                if !wrap_opp {
+                if !wrap_opp || visual_pos_x - wrap_opp_visual_pos_x + width > self.word_wrap_column
+                {
+                    // If the suffix after a wrap opportunity also exceeds the
+                    // viewport (for example a wide tab), hard-wrap it too.
                     // Otherwise, the lack of a wrap opportunity means that a single word
                     // is wider than the word wrap column. We need to force-break the word.
                     // This is similar to the above, but "bar" gets written at column 0.
@@ -329,7 +337,7 @@ impl<'doc> MeasurementConfig<'doc> {
             offset = offset_next_cluster;
             logical_pos_x += 1;
             visual_pos_x += width;
-            column += width;
+            column += column_width;
 
             if self.word_wrap_column > 0
                 && !ucd_line_break_joins(props_current_cluster, props_next_cluster)
@@ -360,6 +368,8 @@ impl<'doc> MeasurementConfig<'doc> {
 
                 // The loop below should not modify the target we already found.
                 let mut visual_pos_x_lookahead = visual_pos_x;
+                let mut column_lookahead = column;
+                let mut offset_lookahead = offset;
 
                 loop {
                     let props_current_cluster = props_next_cluster;
@@ -391,8 +401,7 @@ impl<'doc> MeasurementConfig<'doc> {
                             ambiguous_width(),
                         ) as CoordType;
 
-                        // The `Document::read_forward` interface promises us that it will not split
-                        // grapheme clusters across chunks. Therefore, we can safely break here.
+                        // End of the currently available characters.
                         let ch = match chunk_iter.next() {
                             Some(ch) => ch,
                             None => break,
@@ -409,7 +418,7 @@ impl<'doc> MeasurementConfig<'doc> {
                         }
                     }
 
-                    if offset_next_cluster == offset {
+                    if offset_next_cluster == offset_lookahead {
                         // No advance and the iterator is empty? End of text reached.
                         if chunk_iter.is_empty() {
                             break;
@@ -417,6 +426,8 @@ impl<'doc> MeasurementConfig<'doc> {
                         // Ignore the first iteration when processing the start-of-text.
                         continue;
                     }
+
+                    offset_lookahead = offset_next_cluster;
 
                     // The max. width of a terminal cell is 2.
                     width = width.min(2);
@@ -426,7 +437,7 @@ impl<'doc> MeasurementConfig<'doc> {
                         // SAFETY: `self.tab_size` is clamped to >= 1 in `with_tab_size`.
                         // This assert ensures that Rust doesn't insert panicking null checks.
                         unsafe { std::hint::assert_unchecked(self.tab_size >= 1) };
-                        width = self.tab_size - (column % self.tab_size);
+                        width = self.tab_size - (column_lookahead % self.tab_size);
                     }
 
                     // Hard wrap: Both the logical and visual position advance by one line.
@@ -434,11 +445,18 @@ impl<'doc> MeasurementConfig<'doc> {
                         break;
                     }
 
+                    column_lookahead += width;
+                    width = width.min(self.word_wrap_column);
                     visual_pos_x_lookahead += width;
 
                     if visual_pos_x_lookahead > self.word_wrap_column {
-                        visual_pos_x -= wrap_opp_visual_pos_x;
-                        visual_pos_y += 1;
+                        // The main pass hard-wraps when even the suffix would
+                        // exceed the viewport. Do not relocate earlier cursors
+                        // to a row which only starts at that future grapheme.
+                        if visual_pos_x_lookahead - wrap_opp_visual_pos_x <= self.word_wrap_column {
+                            visual_pos_x -= wrap_opp_visual_pos_x;
+                            visual_pos_y += 1;
+                        }
                         break;
                     } else if !ucd_line_break_joins(props_current_cluster, props_next_cluster) {
                         break;

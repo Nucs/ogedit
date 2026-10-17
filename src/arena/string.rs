@@ -142,8 +142,8 @@ impl<'a> ArenaString<'a> {
 
     /// Now it's small! Alarming!
     ///
-    /// *Do not* call this unless this string is the last thing on the arena.
-    /// Arenas are stacks, they can't deallocate what's in the middle.
+    /// Only the most recent allocation can return capacity to the arena.
+    /// Earlier allocations retain their capacity until the arena is reset.
     pub fn shrink_to_fit(&mut self) {
         self.vec.shrink_to_fit()
     }
@@ -184,8 +184,8 @@ impl<'a> ArenaString<'a> {
             let mut utf8_buf = [0; 4];
             let utf8 = ch.encode_utf8(&mut utf8_buf).as_bytes();
             let initial_len = buf.len();
-            let added_len = utf8.len() * total_copies;
-            let final_len = initial_len + added_len;
+            let added_len = utf8.len().checked_mul(total_copies).expect("string capacity overflow");
+            let final_len = initial_len.checked_add(added_len).expect("string capacity overflow");
 
             buf.reserve(added_len);
             buf.extend_from_slice(utf8);
@@ -201,11 +201,15 @@ impl<'a> ArenaString<'a> {
     pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str) {
         match range.start_bound() {
             Bound::Included(&n) => assert!(self.is_char_boundary(n)),
-            Bound::Excluded(&n) => assert!(self.is_char_boundary(n + 1)),
+            Bound::Excluded(&n) => {
+                assert!(n.checked_add(1).is_some_and(|n| self.is_char_boundary(n)))
+            }
             Bound::Unbounded => {}
         };
         match range.end_bound() {
-            Bound::Included(&n) => assert!(self.is_char_boundary(n + 1)),
+            Bound::Included(&n) => {
+                assert!(n.checked_add(1).is_some_and(|n| self.is_char_boundary(n)))
+            }
             Bound::Excluded(&n) => assert!(self.is_char_boundary(n)),
             Bound::Unbounded => {}
         };
@@ -255,6 +259,12 @@ impl DerefMut for ArenaString<'_> {
     }
 }
 
+impl AsRef<[u8]> for ArenaString<'_> {
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
 impl fmt::Display for ArenaString<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -283,4 +293,33 @@ macro_rules! arena_format {
         output.write_fmt(format_args!($($arg)*)).unwrap();
         output
     }}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_unicode_capacity_overflow_preserves_existing_text() {
+        let arena = Arena::new(64 * 1024).unwrap();
+        let mut text = ArenaString::from_str(&arena, "unchanged");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            text.push_repeat('🦀', usize::MAX / 4 + 1);
+        }));
+        assert!(result.is_err());
+        assert_eq!(text, "unchanged");
+        text.push_repeat('🦀', 513);
+        assert_eq!(text.as_str(), format!("unchanged{}", "🦀".repeat(513)));
+    }
+
+    #[test]
+    fn replacement_bounds_cannot_wrap_to_a_valid_utf8_boundary() {
+        let arena = Arena::new(64 * 1024).unwrap();
+        let mut text = ArenaString::from_str(&arena, "unchanged");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            text.replace_range(..=usize::MAX, "wrong");
+        }));
+        assert!(result.is_err());
+        assert_eq!(text, "unchanged");
+    }
 }

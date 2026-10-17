@@ -65,7 +65,7 @@ pub fn memset<T: MemsetSafe>(dst: &mut [T], val: T) {
                 let val = mem::transmute_copy::<_, u64>(&val);
                 memset_raw(beg as *mut u8, end as *mut u8, val);
             }
-            _ => unreachable!(),
+            _ => dst.fill(val),
         }
     }
 }
@@ -73,7 +73,7 @@ pub fn memset<T: MemsetSafe>(dst: &mut [T], val: T) {
 #[inline]
 fn memset_raw(beg: *mut u8, end: *mut u8, val: u64) {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "loongarch64"))]
-    return unsafe { MEMSET_DISPATCH(beg, end, val) };
+    return memset_dispatch(beg, end, val);
 
     #[cfg(target_arch = "aarch64")]
     return unsafe { memset_neon(beg, end, val) };
@@ -109,12 +109,20 @@ unsafe fn memset_fallback(mut beg: *mut u8, end: *mut u8, val: u64) {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "loongarch64"))]
-static mut MEMSET_DISPATCH: unsafe fn(beg: *mut u8, end: *mut u8, val: u64) = memset_dispatch;
+static MEMSET_DISPATCH: std::sync::OnceLock<unsafe fn(beg: *mut u8, end: *mut u8, val: u64)> =
+    std::sync::OnceLock::new();
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn memset_dispatch(beg: *mut u8, end: *mut u8, val: u64) {
-    let func = if is_x86_feature_detected!("avx2") { memset_avx2 } else { memset_sse2 };
-    unsafe { MEMSET_DISPATCH = func };
+    let func = MEMSET_DISPATCH.get_or_init(|| {
+        if is_x86_feature_detected!("avx2") {
+            memset_avx2
+        } else if is_x86_feature_detected!("sse2") {
+            memset_sse2
+        } else {
+            memset_fallback
+        }
+    });
     unsafe { func(beg, end, val) }
 }
 
@@ -239,14 +247,16 @@ fn memset_avx2(mut beg: *mut u8, end: *mut u8, val: u64) {
 fn memset_dispatch(beg: *mut u8, end: *mut u8, val: u64) {
     use std::arch::is_loongarch_feature_detected;
 
-    let func = if is_loongarch_feature_detected!("lasx") {
-        memset_lasx
-    } else if is_loongarch_feature_detected!("lsx") {
-        memset_lsx
-    } else {
-        memset_fallback
-    };
-    unsafe { MEMSET_DISPATCH = func };
+    let func = MEMSET_DISPATCH.get_or_init(|| {
+        if is_loongarch_feature_detected!("lasx") {
+            memset_lasx
+        } else if is_loongarch_feature_detected!("lsx") {
+            memset_lsx
+        } else {
+            memset_fallback
+        }
+    });
+
     unsafe { func(beg, end, val) }
 }
 

@@ -5,9 +5,9 @@
 //!
 //! Configuration is stored in `~/.ogedit/state.json`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ogedit::apperr;
@@ -79,33 +79,28 @@ impl Default for Hotkeys {
 impl Hotkeys {
     /// Parse a hotkey string like "Ctrl+S", "Alt+Shift+F5", "F3" into an InputKey
     pub fn parse_hotkey(s: &str) -> Option<InputKey> {
-        let s = s.trim();
-        if s.is_empty() {
+        let mut parts = s.trim().split('+');
+        let key = Self::parse_key(parts.next_back()?.trim())?;
+        let mut modifiers = kbmod::NONE;
+        for part in parts {
+            let modifier = match part.trim() {
+                value if value.eq_ignore_ascii_case("ctrl") => kbmod::CTRL,
+                value if value.eq_ignore_ascii_case("alt") => kbmod::ALT,
+                value if value.eq_ignore_ascii_case("shift") => kbmod::SHIFT,
+                _ => return None,
+            };
+            if modifiers.contains(modifier) {
+                return None;
+            }
+            modifiers |= modifier;
+        }
+        // Terminals report these as text, so they cannot be reliable shortcuts.
+        let printable = key == vk::SPACE
+            || (0x30..=0x39).contains(&key.value())
+            || (0x41..=0x5A).contains(&key.value());
+        if printable && !modifiers.contains(kbmod::CTRL) && !modifiers.contains(kbmod::ALT) {
             return None;
         }
-
-        let mut modifiers = kbmod::NONE;
-        let mut key_part = s;
-
-        // Parse modifiers (case-insensitive)
-        loop {
-            let lower = key_part.to_lowercase();
-            if lower.starts_with("ctrl+") {
-                modifiers |= kbmod::CTRL;
-                key_part = &key_part[5..];
-            } else if lower.starts_with("alt+") {
-                modifiers |= kbmod::ALT;
-                key_part = &key_part[4..];
-            } else if lower.starts_with("shift+") {
-                modifiers |= kbmod::SHIFT;
-                key_part = &key_part[6..];
-            } else {
-                break;
-            }
-        }
-
-        // Parse the key
-        let key = Self::parse_key(key_part.trim())?;
         Some(key.with_modifiers(modifiers))
     }
 
@@ -128,12 +123,12 @@ impl Hotkeys {
         }
 
         // Function keys F1-F24
-        if lower.starts_with('f') && lower.len() >= 2 {
-            if let Ok(n) = lower[1..].parse::<u32>() {
-                if (1..=24).contains(&n) {
-                    return Some(InputKey::new(0x70 + n - 1)); // VK_F1 = 0x70
-                }
-            }
+        if lower.starts_with('f')
+            && lower.len() >= 2
+            && let Ok(n) = lower[1..].parse::<u32>()
+            && (1..=24).contains(&n)
+        {
+            return Some(InputKey::new(0x70 + n - 1)); // VK_F1 = 0x70
         }
 
         // Special keys
@@ -258,13 +253,13 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             word_wrap: false,
-            indent_with_tabs: false,  // Default to spaces
-            tab_size: 4,              // Default to 4 spaces
-            newline_crlf: cfg!(windows), // CRLF on Windows, LF elsewhere
-            line_numbers: true,       // Show line numbers by default
-            line_highlight: true,     // Highlight current line by default
+            indent_with_tabs: false,              // Default to spaces
+            tab_size: 4,                          // Default to 4 spaces
+            newline_crlf: cfg!(windows),          // CRLF on Windows, LF elsewhere
+            line_numbers: true,                   // Show line numbers by default
+            line_highlight: true,                 // Highlight current line by default
             insert_final_newline: !cfg!(windows), // POSIX compliance on Unix
-            ruler_column: 0,          // No ruler by default (0 = disabled)
+            ruler_column: 0,                      // No ruler by default (0 = disabled)
             project_folders: HashMap::new(),
             recent_files: Vec::new(),
             hotkeys: Hotkeys::default(),
@@ -283,507 +278,208 @@ impl Config {
             None => return Default::default(),
         };
 
-        let content = match fs::read_to_string(&path) {
-            Ok(content) => content,
-            Err(_) => return Default::default(),
-        };
+        Self::load_from_path(&path)
+    }
 
-        // Try to parse the config
-        match Self::parse(&content) {
+    fn load_from_path(path: &Path) -> Self {
+        let content = match fs::read(path) {
+            Ok(content) => content,
+            Err(_) => return Self::default(),
+        };
+        match std::str::from_utf8(&content).ok().and_then(Self::parse) {
             Some(config) => config,
             None => {
-                // File is corrupted, back it up and write a fresh one
-                Self::handle_corruption(&path);
-                Default::default()
+                let config = Self::default();
+                // save_to_path first preserves the corrupt bytes. If that cannot
+                // be done, leave the user's original file untouched.
+                let _ = config.save_to_path(path);
+                config
             }
         }
     }
 
-    /// Handle a corrupted config file by backing it up and writing a fresh one
-    fn handle_corruption(path: &PathBuf) {
-        // Create backup path: state.json -> state.json.backup
-        let mut backup_path = path.clone();
-        backup_path.set_file_name("state.json.backup");
+    fn preserve_corrupt_config(path: &Path, content: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
 
-        // Try to back up the corrupted file
-        let _ = fs::rename(path, &backup_path);
-
-        // Write a fresh config
-        let default_config = Self::default();
-        let _ = default_config.save();
+        // Never overwrite an earlier recovery. create_new also protects against
+        // another OGEdit process choosing the same backup name concurrently.
+        for index in 0..1000 {
+            let suffix =
+                if index == 0 { ".backup".to_string() } else { format!(".backup.{index}") };
+            let mut backup_name = path.as_os_str().to_os_string();
+            backup_name.push(suffix);
+            let backup = PathBuf::from(backup_name);
+            let mut file = match fs::OpenOptions::new().write(true).create_new(true).open(&backup) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            };
+            let result = file.write_all(content).and_then(|()| file.sync_all());
+            drop(file);
+            if result.is_err() {
+                let _ = fs::remove_file(&backup);
+            }
+            return result;
+        }
+        Err(std::io::Error::other("Too many configuration recovery backups"))
     }
 
-    /// Save configuration to ~/.ogedit/state.json
+    /// Save configuration to ~/.ogedit/state.json.
     pub fn save(&self) -> apperr::Result<()> {
-        let path = match Self::config_path() {
-            Some(path) => path,
-            None => return Ok(()), // Can't save, but don't error
+        let Some(path) = Self::config_path() else {
+            return Ok(());
         };
+        self.save_to_path(&path).map_err(apperr::Error::from)
+    }
 
-        // Ensure the directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(apperr::Error::from)?;
+    fn save_to_path(&self, path: &Path) -> std::io::Result<()> {
+        // Protect damaged settings even when a previous startup recovery failed.
+        match fs::read(path) {
+            Ok(content) if std::str::from_utf8(&content).ok().and_then(Self::parse).is_none() => {
+                Self::preserve_corrupt_config(path, &content)?;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
-
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         let json = self.to_json();
-        fs::write(&path, json).map_err(apperr::Error::from)?;
-
-        Ok(())
+        atomicwrites::AtomicFile::new(path, atomicwrites::OverwriteBehavior::AllowOverwrite)
+            .write(|file| {
+                use std::io::Write;
+                file.write_all(json.as_bytes())?;
+                file.sync_all()
+            })
+            .map_err(|err| std::io::Error::other(err.to_string()))
     }
 
     /// Get the path to the configuration file (~/.ogedit/state.json)
-    fn config_path() -> Option<PathBuf> {
-        let home = if cfg!(windows) {
-            std::env::var_os("USERPROFILE")?
-        } else {
-            std::env::var_os("HOME")?
-        };
-
-        let mut path = PathBuf::from(home);
-        path.push(".ogedit");
-        path.push("state.json");
-        Some(path)
+    pub fn data_dir() -> Option<PathBuf> {
+        if let Some(path) = std::env::var_os("OGEDIT_DATA_DIR")
+            && !path.is_empty()
+        {
+            return Some(PathBuf::from(path));
+        }
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+        Some(PathBuf::from(home).join(".ogedit"))
     }
 
-    /// Parse configuration from JSON string (supports // comments)
+    fn config_path() -> Option<PathBuf> {
+        Some(Self::data_dir()?.join("state.json"))
+    }
+
+    /// Parse JSON with full-line // comments, preserving the documented format.
     fn parse(json: &str) -> Option<Self> {
-        // Strip // comments (lines starting with //)
-        let json: String = json
+        // Use a complete JSON parser, so nested fields, strings, malformed tokens,
+        // and Unicode escapes cannot be mistaken for top-level settings.
+        let json = json.trim_start_matches('\u{feff}');
+        let json = json
             .lines()
-            .map(|line| {
-                let trimmed = line.trim();
-                if trimmed.starts_with("//") {
-                    "" // Remove comment lines entirely
-                } else {
-                    line
-                }
-            })
+            .filter(|line| !line.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
             .join("\n");
-        let json = json.trim();
-
-        // Must be a JSON object
-        if !json.starts_with('{') || !json.ends_with('}') {
-            return None;
-        }
-
-        // Extract the content between braces
-        let content = &json[1..json.len() - 1].trim();
-
-        // Empty object is valid (will use defaults)
-        if content.is_empty() {
-            return Some(Self::default());
-        }
-
-        // Basic validation: if there's content, it should have quoted strings
-        // This rejects obvious corruption like {invalid} or {123}
-        if !content.is_empty() && !content.contains('"') {
-            return None;
-        }
-
-        let defaults = Self::default();
-        let mut config = defaults.clone();
-
-        // Parse boolean field
-        fn parse_bool(content: &str, field: &str, default: bool) -> Option<bool> {
-            if let Some(pos) = content.find(&format!("\"{}\"", field)) {
-                let rest = content[pos + field.len() + 2..].trim_start();
-                if !rest.starts_with(':') {
-                    return None;
+        let value: serde_json::Value = serde_json::from_str(&json).ok()?;
+        let object = value.as_object()?;
+        let mut config = Self::default();
+        macro_rules! boolean {
+            ($field:ident) => {
+                if let Some(value) = object.get(stringify!($field)) {
+                    config.$field = value.as_bool()?;
                 }
-                let value_part = rest[1..].trim_start();
-                if value_part.starts_with("true") {
-                    return Some(true);
-                } else if value_part.starts_with("false") {
-                    return Some(false);
-                } else {
-                    return None; // Invalid value
+            };
+        }
+        boolean!(word_wrap);
+        boolean!(indent_with_tabs);
+        boolean!(newline_crlf);
+        boolean!(line_numbers);
+        boolean!(line_highlight);
+        boolean!(insert_final_newline);
+        if let Some(value) = object.get("tab_size") {
+            config.tab_size = u8::try_from(value.as_u64()?).ok()?;
+            if !(1..=8).contains(&config.tab_size) {
+                return None;
+            }
+        }
+        if let Some(value) = object.get("ruler_column") {
+            config.ruler_column = u8::try_from(value.as_u64()?).ok()?;
+        }
+        if let Some(value) = object.get("project_folders") {
+            for (key, value) in value.as_object()? {
+                config.project_folders.insert(key.clone(), value.as_str()?.to_owned());
+            }
+        }
+        if let Some(value) = object.get("recent_files") {
+            for entry in value.as_array()? {
+                let path = PathBuf::from(entry.get("path")?.as_str()?);
+                let opened_at = entry.get("opened_at")?.as_u64()?;
+                if !path.as_os_str().is_empty() {
+                    config.recent_files.push(RecentFile { path, opened_at });
                 }
             }
-            Some(default)
+            config.normalize_recent_files();
         }
-
-        // Parse integer field
-        fn parse_u8(content: &str, field: &str, default: u8, min: u8, max: u8) -> Option<u8> {
-            if let Some(pos) = content.find(&format!("\"{}\"", field)) {
-                let rest = content[pos + field.len() + 2..].trim_start();
-                if !rest.starts_with(':') {
-                    return None;
-                }
-                let value_part = rest[1..].trim_start();
-                // Find the end of the number (digit characters)
-                let end = value_part.find(|c: char| !c.is_ascii_digit()).unwrap_or(value_part.len());
-                if end == 0 {
-                    return None;
-                }
-                if let Ok(n) = value_part[..end].parse::<u8>() {
-                    if n >= min && n <= max {
-                        return Some(n);
+        // Invalid hotkey fields are explicitly documented to fall back individually.
+        if let Some(hotkeys) = object.get("hotkeys").and_then(serde_json::Value::as_object) {
+            macro_rules! hotkey {
+                ($field:ident) => {
+                    if let Some(key) = hotkeys
+                        .get(stringify!($field))
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(Hotkeys::parse_hotkey)
+                    {
+                        config.hotkeys.$field = key;
                     }
-                }
-                return None; // Invalid value
+                };
             }
-            Some(default)
+            hotkey!(file_new);
+            hotkey!(file_open);
+            hotkey!(file_save);
+            hotkey!(file_save_as);
+            hotkey!(file_reload);
+            hotkey!(file_close);
+            hotkey!(file_exit);
+            hotkey!(edit_undo);
+            hotkey!(edit_redo);
+            hotkey!(edit_cut);
+            hotkey!(edit_copy);
+            hotkey!(edit_paste);
+            hotkey!(edit_duplicate_line);
+            hotkey!(edit_find);
+            hotkey!(edit_replace);
+            hotkey!(edit_find_next);
+            hotkey!(edit_select_all);
+            hotkey!(view_go_to_file);
+            hotkey!(view_go_to_line);
+            hotkey!(view_word_wrap);
         }
-
-        config.word_wrap = parse_bool(content, "word_wrap", defaults.word_wrap)?;
-        config.indent_with_tabs = parse_bool(content, "indent_with_tabs", defaults.indent_with_tabs)?;
-        config.newline_crlf = parse_bool(content, "newline_crlf", defaults.newline_crlf)?;
-        config.tab_size = parse_u8(content, "tab_size", defaults.tab_size, 1, 8)?;
-        config.line_numbers = parse_bool(content, "line_numbers", defaults.line_numbers)?;
-        config.line_highlight = parse_bool(content, "line_highlight", defaults.line_highlight)?;
-        config.insert_final_newline = parse_bool(content, "insert_final_newline", defaults.insert_final_newline)?;
-        config.ruler_column = parse_u8(content, "ruler_column", defaults.ruler_column, 0, 255)?;
-
-        // Parse project_folders HashMap
-        config.project_folders = Self::parse_project_folders(content);
-
-        // Parse recent_files array
-        config.recent_files = Self::parse_recent_files(content);
-
-        // Parse hotkeys
-        config.hotkeys = Self::parse_hotkeys(content, &defaults.hotkeys);
-
         Some(config)
     }
 
-    /// Parse a hotkey string field, returning the default if not found or invalid
-    fn parse_hotkey_field(content: &str, field: &str, default: InputKey) -> InputKey {
-        if let Some(pos) = content.find(&format!("\"{}\"", field)) {
-            let rest = content[pos + field.len() + 2..].trim_start();
-            if let Some(after_colon) = rest.strip_prefix(':') {
-                let value_part = after_colon.trim_start();
-                if let Some(after_quote) = value_part.strip_prefix('"') {
-                    let (value, _) = Self::parse_json_string_content(after_quote);
-                    if let Some(key) = Hotkeys::parse_hotkey(&value) {
-                        return key;
-                    }
+    fn normalize_recent_files(&mut self) {
+        // Stable sorting retains the most-recent-first order for equal timestamps.
+        self.recent_files.sort_by(|a, b| b.opened_at.cmp(&a.opened_at));
+        let mut seen = HashSet::new();
+        let mut recent = Vec::with_capacity(self.recent_files.len().min(100));
+        for mut file in std::mem::take(&mut self.recent_files) {
+            file.path = Self::recent_file_path(&file.path);
+            if seen.insert(file.path.clone()) {
+                recent.push(file);
+                if recent.len() == 100 {
+                    break;
                 }
             }
         }
-        default
+        self.recent_files = recent;
     }
 
-    /// Parse the hotkeys object from JSON
-    fn parse_hotkeys(content: &str, defaults: &Hotkeys) -> Hotkeys {
-        // Find "hotkeys" field
-        let Some(pos) = content.find("\"hotkeys\"") else {
-            return defaults.clone();
-        };
-
-        let rest = content[pos + 9..].trim_start();
-        if !rest.starts_with(':') {
-            return defaults.clone();
-        }
-
-        let value_part = rest[1..].trim_start();
-        if !value_part.starts_with('{') {
-            return defaults.clone();
-        }
-
-        // Find the matching closing brace
-        let mut depth = 0;
-        let mut end_pos = 0;
-        let mut in_string = false;
-        let mut escape_next = false;
-        for (i, c) in value_part.char_indices() {
-            if escape_next {
-                escape_next = false;
-                continue;
-            }
-            match c {
-                '\\' if in_string => escape_next = true,
-                '"' => in_string = !in_string,
-                '{' if !in_string => depth += 1,
-                '}' if !in_string => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end_pos = i;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if end_pos == 0 {
-            return defaults.clone();
-        }
-
-        let hotkeys_content = &value_part[1..end_pos];
-
-        Hotkeys {
-            file_new: Self::parse_hotkey_field(hotkeys_content, "file_new", defaults.file_new),
-            file_open: Self::parse_hotkey_field(hotkeys_content, "file_open", defaults.file_open),
-            file_save: Self::parse_hotkey_field(hotkeys_content, "file_save", defaults.file_save),
-            file_save_as: Self::parse_hotkey_field(hotkeys_content, "file_save_as", defaults.file_save_as),
-            file_reload: Self::parse_hotkey_field(hotkeys_content, "file_reload", defaults.file_reload),
-            file_close: Self::parse_hotkey_field(hotkeys_content, "file_close", defaults.file_close),
-            file_exit: Self::parse_hotkey_field(hotkeys_content, "file_exit", defaults.file_exit),
-
-            edit_undo: Self::parse_hotkey_field(hotkeys_content, "edit_undo", defaults.edit_undo),
-            edit_redo: Self::parse_hotkey_field(hotkeys_content, "edit_redo", defaults.edit_redo),
-            edit_cut: Self::parse_hotkey_field(hotkeys_content, "edit_cut", defaults.edit_cut),
-            edit_copy: Self::parse_hotkey_field(hotkeys_content, "edit_copy", defaults.edit_copy),
-            edit_paste: Self::parse_hotkey_field(hotkeys_content, "edit_paste", defaults.edit_paste),
-            edit_duplicate_line: Self::parse_hotkey_field(hotkeys_content, "edit_duplicate_line", defaults.edit_duplicate_line),
-            edit_find: Self::parse_hotkey_field(hotkeys_content, "edit_find", defaults.edit_find),
-            edit_replace: Self::parse_hotkey_field(hotkeys_content, "edit_replace", defaults.edit_replace),
-            edit_find_next: Self::parse_hotkey_field(hotkeys_content, "edit_find_next", defaults.edit_find_next),
-            edit_select_all: Self::parse_hotkey_field(hotkeys_content, "edit_select_all", defaults.edit_select_all),
-
-            view_go_to_file: Self::parse_hotkey_field(hotkeys_content, "view_go_to_file", defaults.view_go_to_file),
-            view_go_to_line: Self::parse_hotkey_field(hotkeys_content, "view_go_to_line", defaults.view_go_to_line),
-            view_word_wrap: Self::parse_hotkey_field(hotkeys_content, "view_word_wrap", defaults.view_word_wrap),
-        }
-    }
-
-    /// Parse a JSON object for project_folders: {"key": "value", ...}
-    fn parse_project_folders(content: &str) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-
-        // Find "project_folders" field
-        let Some(pos) = content.find("\"project_folders\"") else {
-            return map;
-        };
-
-        let rest = content[pos + 17..].trim_start();
-        if !rest.starts_with(':') {
-            return map;
-        }
-
-        let value_part = rest[1..].trim_start();
-        if !value_part.starts_with('{') {
-            return map;
-        }
-
-        // Find the matching closing brace (accounting for strings)
-        let mut depth = 0;
-        let mut end_pos = 0;
-        let mut in_string = false;
-        let mut escape_next = false;
-        for (i, c) in value_part.char_indices() {
-            if escape_next {
-                escape_next = false;
-                continue;
-            }
-            match c {
-                '\\' if in_string => escape_next = true,
-                '"' => in_string = !in_string,
-                '{' if !in_string => depth += 1,
-                '}' if !in_string => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end_pos = i;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if end_pos == 0 {
-            return map;
-        }
-
-        // Extract the object content between the braces
-        let obj_content = &value_part[1..end_pos];
-
-        // Parse key-value pairs: "key": "value"
-        let mut remaining = obj_content;
-        while let Some(key_start) = remaining.find('"') {
-            remaining = &remaining[key_start + 1..];
-
-            // Parse key (handle escapes)
-            let (key, key_end) = Self::parse_json_string_content(remaining);
-            if key_end == 0 {
-                break;
-            }
-            remaining = &remaining[key_end + 1..];
-
-            // Skip to colon
-            remaining = remaining.trim_start();
-            let Some(after_colon) = remaining.strip_prefix(':') else {
-                break;
-            };
-            remaining = after_colon.trim_start();
-
-            // Parse value
-            if !remaining.starts_with('"') {
-                break;
-            }
-            remaining = &remaining[1..];
-
-            // Parse value (handle escapes)
-            let (value, value_end) = Self::parse_json_string_content(remaining);
-            if value_end == 0 {
-                break;
-            }
-            remaining = &remaining[value_end + 1..];
-
-            map.insert(key, value);
-        }
-
-        map
-    }
-
-    /// Parse a JSON string's content (after the opening quote), returning the unescaped string
-    /// and the position of the closing quote
-    fn parse_json_string_content(s: &str) -> (String, usize) {
-        let mut result = String::new();
-        let mut chars = s.char_indices();
-        while let Some((i, c)) = chars.next() {
-            match c {
-                '"' => return (result, i),
-                '\\' => {
-                    if let Some((_, next)) = chars.next() {
-                        match next {
-                            'n' => result.push('\n'),
-                            'r' => result.push('\r'),
-                            't' => result.push('\t'),
-                            '\\' => result.push('\\'),
-                            '"' => result.push('"'),
-                            '/' => result.push('/'),
-                            _ => {
-                                result.push('\\');
-                                result.push(next);
-                            }
-                        }
-                    }
-                }
-                _ => result.push(c),
-            }
-        }
-        (result, 0) // No closing quote found
-    }
-
-    /// Parse a JSON array for recent_files: [{"path": "...", "opened_at": 123}, ...]
-    fn parse_recent_files(content: &str) -> Vec<RecentFile> {
-        let mut files = Vec::new();
-
-        // Find "recent_files" field
-        let Some(pos) = content.find("\"recent_files\"") else {
-            return files;
-        };
-
-        let rest = content[pos + 14..].trim_start();
-        if !rest.starts_with(':') {
-            return files;
-        }
-
-        let value_part = rest[1..].trim_start();
-        if !value_part.starts_with('[') {
-            return files;
-        }
-
-        // Find the matching closing bracket (accounting for strings and nested objects)
-        let mut depth = 0;
-        let mut end_pos = 0;
-        let mut in_string = false;
-        let mut escape_next = false;
-        for (i, c) in value_part.char_indices() {
-            if escape_next {
-                escape_next = false;
-                continue;
-            }
-            match c {
-                '\\' if in_string => escape_next = true,
-                '"' => in_string = !in_string,
-                '[' | '{' if !in_string => depth += 1,
-                ']' | '}' if !in_string => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end_pos = i;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if end_pos == 0 {
-            return files;
-        }
-
-        // Extract the array content between the brackets
-        let array_content = &value_part[1..end_pos];
-
-        // Parse each object in the array
-        let mut remaining = array_content;
-        while let Some(obj_start) = remaining.find('{') {
-            remaining = &remaining[obj_start..];
-
-            // Find matching closing brace
-            let mut depth = 0;
-            let mut obj_end = 0;
-            let mut in_string = false;
-            let mut escape_next = false;
-            for (i, c) in remaining.char_indices() {
-                if escape_next {
-                    escape_next = false;
-                    continue;
-                }
-                match c {
-                    '\\' if in_string => escape_next = true,
-                    '"' => in_string = !in_string,
-                    '{' if !in_string => depth += 1,
-                    '}' if !in_string => {
-                        depth -= 1;
-                        if depth == 0 {
-                            obj_end = i;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            if obj_end == 0 {
-                break;
-            }
-
-            let obj_content = &remaining[1..obj_end];
-
-            // Parse "path" field
-            let path = if let Some(path_pos) = obj_content.find("\"path\"") {
-                let path_rest = obj_content[path_pos + 6..].trim_start();
-                if let Some(after_colon) = path_rest.strip_prefix(':') {
-                    let path_value = after_colon.trim_start();
-                    if let Some(after_quote) = path_value.strip_prefix('"') {
-                        let (path_str, _) = Self::parse_json_string_content(after_quote);
-                        Some(PathBuf::from(path_str))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Parse "opened_at" field
-            let opened_at = if let Some(at_pos) = obj_content.find("\"opened_at\"") {
-                let at_rest = obj_content[at_pos + 11..].trim_start();
-                if let Some(after_colon) = at_rest.strip_prefix(':') {
-                    let at_value = after_colon.trim_start();
-                    let end = at_value.find(|c: char| !c.is_ascii_digit()).unwrap_or(at_value.len());
-                    at_value[..end].parse::<u64>().ok()
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let (Some(path), Some(opened_at)) = (path, opened_at) {
-                files.push(RecentFile { path, opened_at });
-            }
-
-            remaining = &remaining[obj_end + 1..];
-        }
-
-        files
+    fn recent_file_path(path: &Path) -> PathBuf {
+        // Opening through the picker and palette may yield different spellings
+        // (notably C:\file and \\?\C:\file on Windows). Existing paths share one
+        // canonical identity; unavailable paths retain their original spelling
+        // so a disconnected drive or symlink can be resolved when it returns.
+        fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
     }
 
     /// Convert configuration to JSON string with comments
@@ -835,6 +531,7 @@ impl Config {
                 "  // Available modifiers: Ctrl, Alt, Shift (combine with +)\n",
                 "  // Available keys: A-Z, 0-9, F1-F24, Space, Enter, Tab, Escape, Backspace, Delete,\n",
                 "  //                 Insert, Home, End, PageUp, PageDown, Up, Down, Left, Right\n",
+                "  // Letters, digits and Space require Ctrl or Alt (Shift alone produces text).\n",
                 "  \"hotkeys\": {},\n",
                 "\n",
                 "  // Per-project last-used save folder (auto-managed, do not edit)\n",
@@ -866,32 +563,92 @@ impl Config {
 
         // File operations
         json.push_str("    // File operations\n");
-        json.push_str(&format!("    \"file_new\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_new)));
-        json.push_str(&format!("    \"file_open\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_open)));
-        json.push_str(&format!("    \"file_save\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_save)));
-        json.push_str(&format!("    \"file_save_as\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_save_as)));
-        json.push_str(&format!("    \"file_reload\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_reload)));
-        json.push_str(&format!("    \"file_close\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_close)));
-        json.push_str(&format!("    \"file_exit\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.file_exit)));
+        json.push_str(&format!(
+            "    \"file_new\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_new)
+        ));
+        json.push_str(&format!(
+            "    \"file_open\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_open)
+        ));
+        json.push_str(&format!(
+            "    \"file_save\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_save)
+        ));
+        json.push_str(&format!(
+            "    \"file_save_as\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_save_as)
+        ));
+        json.push_str(&format!(
+            "    \"file_reload\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_reload)
+        ));
+        json.push_str(&format!(
+            "    \"file_close\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_close)
+        ));
+        json.push_str(&format!(
+            "    \"file_exit\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.file_exit)
+        ));
 
         // Edit operations
         json.push_str("\n    // Edit operations\n");
-        json.push_str(&format!("    \"edit_undo\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_undo)));
-        json.push_str(&format!("    \"edit_redo\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_redo)));
-        json.push_str(&format!("    \"edit_cut\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_cut)));
-        json.push_str(&format!("    \"edit_copy\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_copy)));
-        json.push_str(&format!("    \"edit_paste\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_paste)));
-        json.push_str(&format!("    \"edit_duplicate_line\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_duplicate_line)));
-        json.push_str(&format!("    \"edit_find\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_find)));
-        json.push_str(&format!("    \"edit_replace\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_replace)));
-        json.push_str(&format!("    \"edit_find_next\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_find_next)));
-        json.push_str(&format!("    \"edit_select_all\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.edit_select_all)));
+        json.push_str(&format!(
+            "    \"edit_undo\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_undo)
+        ));
+        json.push_str(&format!(
+            "    \"edit_redo\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_redo)
+        ));
+        json.push_str(&format!(
+            "    \"edit_cut\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_cut)
+        ));
+        json.push_str(&format!(
+            "    \"edit_copy\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_copy)
+        ));
+        json.push_str(&format!(
+            "    \"edit_paste\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_paste)
+        ));
+        json.push_str(&format!(
+            "    \"edit_duplicate_line\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_duplicate_line)
+        ));
+        json.push_str(&format!(
+            "    \"edit_find\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_find)
+        ));
+        json.push_str(&format!(
+            "    \"edit_replace\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_replace)
+        ));
+        json.push_str(&format!(
+            "    \"edit_find_next\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_find_next)
+        ));
+        json.push_str(&format!(
+            "    \"edit_select_all\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.edit_select_all)
+        ));
 
         // View operations
         json.push_str("\n    // View operations\n");
-        json.push_str(&format!("    \"view_go_to_file\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.view_go_to_file)));
-        json.push_str(&format!("    \"view_go_to_line\": \"{}\",\n", Hotkeys::hotkey_to_string(hotkeys.view_go_to_line)));
-        json.push_str(&format!("    \"view_word_wrap\": \"{}\"\n", Hotkeys::hotkey_to_string(hotkeys.view_word_wrap)));
+        json.push_str(&format!(
+            "    \"view_go_to_file\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.view_go_to_file)
+        ));
+        json.push_str(&format!(
+            "    \"view_go_to_line\": \"{}\",\n",
+            Hotkeys::hotkey_to_string(hotkeys.view_go_to_line)
+        ));
+        json.push_str(&format!(
+            "    \"view_word_wrap\": \"{}\"\n",
+            Hotkeys::hotkey_to_string(hotkeys.view_word_wrap)
+        ));
 
         json.push_str("  }");
         json
@@ -945,18 +702,10 @@ impl Config {
 
     /// Escape a string for JSON output
     fn escape_json_string(s: &str) -> String {
-        let mut escaped = String::with_capacity(s.len());
-        for c in s.chars() {
-            match c {
-                '"' => escaped.push_str("\\\""),
-                '\\' => escaped.push_str("\\\\"),
-                '\n' => escaped.push_str("\\n"),
-                '\r' => escaped.push_str("\\r"),
-                '\t' => escaped.push_str("\\t"),
-                _ => escaped.push(c),
-            }
-        }
-        escaped
+        // String serialization is infallible; this includes every JSON control
+        // character and keeps user paths round-trippable on Unix as well.
+        let quoted = serde_json::to_string(s).expect("serializing a string cannot fail");
+        quoted[1..quoted.len() - 1].to_owned()
     }
 
     /// Get the last-used save folder for a project, if any
@@ -974,28 +723,21 @@ impl Config {
     /// If the file already exists, updates its timestamp.
     /// Maintains max 100 entries, sorted by opened_at descending.
     pub fn add_recent_file(&mut self, path: &std::path::Path) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
 
-        // Check if file already exists in list
-        if let Some(existing) = self.recent_files.iter_mut().find(|f| f.path == path) {
-            existing.opened_at = now;
-        } else {
-            self.recent_files.push(RecentFile {
-                path: path.to_path_buf(),
-                opened_at: now,
-            });
-        }
-
-        // Sort by opened_at descending (most recent first)
-        self.recent_files.sort_by(|a, b| b.opened_at.cmp(&a.opened_at));
-
-        // Trim to max 100 entries
-        self.recent_files.truncate(100);
-
+        self.record_recent_file(path, now);
         let _ = self.save();
+    }
+
+    fn record_recent_file(&mut self, path: &Path, now: u64) {
+        self.normalize_recent_files();
+        let path = Self::recent_file_path(path);
+        // Reopening within the same second must still move the file to the top.
+        // Keep order stable after reload even if the system clock moves backwards.
+        let opened_at = now.max(self.recent_files.first().map_or(0, |file| file.opened_at));
+        self.recent_files.retain(|file| file.path != path);
+        self.recent_files.insert(0, RecentFile { path, opened_at });
+        self.recent_files.truncate(100);
     }
 }
 
@@ -1110,8 +852,12 @@ mod tests {
     fn test_project_folders_roundtrip() {
         // Test that project_folders can be serialized and deserialized
         let mut original = Config::default();
-        original.project_folders.insert("/home/user/project".to_string(), "/home/user/project/src".to_string());
-        original.project_folders.insert("C:\\Users\\Test".to_string(), "C:\\Users\\Test\\Documents".to_string());
+        original
+            .project_folders
+            .insert("/home/user/project".to_string(), "/home/user/project/src".to_string());
+        original
+            .project_folders
+            .insert("C:\\Users\\Test".to_string(), "C:\\Users\\Test\\Documents".to_string());
 
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();
@@ -1122,7 +868,9 @@ mod tests {
     fn test_project_folders_escaping() {
         // Test that special characters in paths are properly escaped and parsed
         let mut original = Config::default();
-        original.project_folders.insert("path\"with\"quotes".to_string(), "value\\with\\backslashes".to_string());
+        original
+            .project_folders
+            .insert("path\"with\"quotes".to_string(), "value\\with\\backslashes".to_string());
 
         let json = original.to_json();
         let parsed = Config::parse(&json).unwrap();
@@ -1133,10 +881,9 @@ mod tests {
     fn test_recent_files_roundtrip() {
         // Test that recent_files can be serialized and deserialized
         let mut original = Config::default();
-        original.recent_files.push(RecentFile {
-            path: PathBuf::from("/home/user/file.txt"),
-            opened_at: 1732900000,
-        });
+        original
+            .recent_files
+            .push(RecentFile { path: PathBuf::from("/home/user/file.txt"), opened_at: 1732900000 });
         original.recent_files.push(RecentFile {
             path: PathBuf::from("C:\\Users\\Test\\doc.rs"),
             opened_at: 1732890000,
@@ -1189,14 +936,14 @@ mod tests {
 
     #[test]
     fn test_parse_hotkey_simple() {
-        // Simple letter keys
-        assert_eq!(Hotkeys::parse_hotkey("S"), Some(InputKey::new(0x53)));
-        assert_eq!(Hotkeys::parse_hotkey("A"), Some(InputKey::new(0x41)));
-        assert_eq!(Hotkeys::parse_hotkey("Z"), Some(InputKey::new(0x5A)));
+        // Printable keys without Ctrl/Alt arrive as text and cannot bind commands.
+        assert_eq!(Hotkeys::parse_hotkey("S"), None);
+        assert_eq!(Hotkeys::parse_hotkey("A"), None);
+        assert_eq!(Hotkeys::parse_hotkey("Z"), None);
 
         // Digits
-        assert_eq!(Hotkeys::parse_hotkey("0"), Some(InputKey::new(0x30)));
-        assert_eq!(Hotkeys::parse_hotkey("9"), Some(InputKey::new(0x39)));
+        assert_eq!(Hotkeys::parse_hotkey("0"), None);
+        assert_eq!(Hotkeys::parse_hotkey("9"), None);
     }
 
     #[test]
@@ -1214,7 +961,8 @@ mod tests {
 
     #[test]
     fn test_parse_hotkey_special_keys() {
-        assert!(Hotkeys::parse_hotkey("Space").is_some());
+        assert!(Hotkeys::parse_hotkey("Ctrl+Space").is_some());
+        assert!(Hotkeys::parse_hotkey("Space").is_none());
         assert!(Hotkeys::parse_hotkey("Enter").is_some());
         assert!(Hotkeys::parse_hotkey("Return").is_some());
         assert!(Hotkeys::parse_hotkey("Tab").is_some());
@@ -1245,10 +993,8 @@ mod tests {
         assert!(key.modifiers().contains(kbmod::ALT));
         assert_eq!(key.key().value(), 0x5A); // 'Z'
 
-        // Shift+Key
-        let key = Hotkeys::parse_hotkey("Shift+A").unwrap();
-        assert!(key.modifiers().contains(kbmod::SHIFT));
-        assert_eq!(key.key().value(), 0x41); // 'A'
+        // Shift plus a printable key is text, not a reliable terminal shortcut.
+        assert!(Hotkeys::parse_hotkey("Shift+A").is_none());
 
         // Ctrl+Shift+Key
         let key = Hotkeys::parse_hotkey("Ctrl+Shift+S").unwrap();
@@ -1303,17 +1049,8 @@ mod tests {
     #[test]
     fn test_hotkey_roundtrip() {
         // Test that parsing and serializing produces the same result
-        let test_cases = [
-            "Ctrl+S",
-            "Ctrl+Shift+S",
-            "Alt+Z",
-            "F5",
-            "F3",
-            "Ctrl+N",
-            "Ctrl+W",
-            "Ctrl+P",
-            "Ctrl+G",
-        ];
+        let test_cases =
+            ["Ctrl+S", "Ctrl+Shift+S", "Alt+Z", "F5", "F3", "Ctrl+N", "Ctrl+W", "Ctrl+P", "Ctrl+G"];
 
         for original in test_cases {
             let parsed = Hotkeys::parse_hotkey(original).unwrap();
@@ -1366,10 +1103,9 @@ mod tests {
         let mut config = Config::default();
         assert!(config.recent_files.is_empty());
 
-        config.recent_files.push(RecentFile {
-            path: PathBuf::from("/test/file.txt"),
-            opened_at: 1000,
-        });
+        config
+            .recent_files
+            .push(RecentFile { path: PathBuf::from("/test/file.txt"), opened_at: 1000 });
 
         assert_eq!(config.recent_files.len(), 1);
         assert_eq!(config.recent_files[0].path, PathBuf::from("/test/file.txt"));
@@ -1379,18 +1115,11 @@ mod tests {
     fn test_recent_files_sorting() {
         let mut config = Config::default();
 
-        config.recent_files.push(RecentFile {
-            path: PathBuf::from("/old.txt"),
-            opened_at: 1000,
-        });
-        config.recent_files.push(RecentFile {
-            path: PathBuf::from("/new.txt"),
-            opened_at: 2000,
-        });
-        config.recent_files.push(RecentFile {
-            path: PathBuf::from("/middle.txt"),
-            opened_at: 1500,
-        });
+        config.recent_files.push(RecentFile { path: PathBuf::from("/old.txt"), opened_at: 1000 });
+        config.recent_files.push(RecentFile { path: PathBuf::from("/new.txt"), opened_at: 2000 });
+        config
+            .recent_files
+            .push(RecentFile { path: PathBuf::from("/middle.txt"), opened_at: 1500 });
 
         // Sort by opened_at descending
         config.recent_files.sort_by(|a, b| b.opened_at.cmp(&a.opened_at));
@@ -1441,5 +1170,156 @@ mod tests {
 
         assert_eq!(config.get_project_folder("/project1"), Some("/project1/src"));
         assert_eq!(config.get_project_folder("/project2"), Some("/project2/docs"));
+    }
+
+    #[test]
+    fn parser_rejects_malformed_tokens_and_nested_setting_confusion() {
+        for json in [
+            r#"{"word_wrap":truegarbage}"#,
+            r#"{"tab_size":4.5}"#,
+            r#"{"tab_size":4oops}"#,
+            r#"{"word_wrap":true "tab_size":4}"#,
+            r#"{"word_wrap":true,}"#,
+            r#"{"project_folders":{"project":123}}"#,
+            r#"{"recent_files":[{"path":"a","opened_at":-1}]}"#,
+        ] {
+            assert!(Config::parse(json).is_none(), "accepted {json}");
+        }
+        let config =
+            Config::parse(r#"{"future":{"word_wrap":true,"tab_size":8},"word_wrap":false}"#)
+                .unwrap();
+        assert!(!config.word_wrap);
+        assert_eq!(config.tab_size, 4);
+    }
+
+    #[test]
+    fn parser_supports_unicode_escapes_and_all_string_controls() {
+        let config = Config::parse(r#"{"project_folders":{"\u0061":"\uD83D\uDE80"}}"#).unwrap();
+        assert_eq!(config.get_project_folder("a"), Some("🚀"));
+        let mut config = Config::default();
+        config.project_folders.insert("control\0\x08\x0c\x1f".into(), "é🚀\t\n".into());
+        assert_eq!(Config::parse(&config.to_json()), Some(config));
+        assert!(Config::parse("\u{feff}{\"word_wrap\":true}").unwrap().word_wrap);
+    }
+
+    #[test]
+    fn hotkeys_trim_components_and_fall_back_for_unusable_text_bindings() {
+        assert_eq!(
+            Hotkeys::parse_hotkey(" Ctrl + Alt + Shift + s "),
+            Some(kbmod::CTRL_ALT_SHIFT | vk::S)
+        );
+        assert!(Hotkeys::parse_hotkey("Ctrl+Ctrl+S").is_none());
+        let config = Config::parse(
+            r#"{"hotkeys":{"file_save":"Shift+S","file_open":12,"file_close":"Ctrl + Alt + W"}}"#,
+        )
+        .unwrap();
+        assert_eq!(config.hotkeys.file_save, Hotkeys::default().file_save);
+        assert_eq!(config.hotkeys.file_open, Hotkeys::default().file_open);
+        assert_eq!(config.hotkeys.file_close, kbmod::CTRL_ALT | vk::W);
+    }
+
+    #[test]
+    fn recent_files_reopen_moves_to_front_even_with_equal_or_backwards_clock() {
+        let mut config = Config::default();
+        config.record_recent_file(Path::new("first.txt"), 100);
+        config.record_recent_file(Path::new("second.txt"), 100);
+        assert_eq!(config.recent_files[0].path, Path::new("second.txt"));
+        config.record_recent_file(Path::new("first.txt"), 99);
+        assert_eq!(config.recent_files.len(), 2);
+        assert_eq!(config.recent_files[0].path, Path::new("first.txt"));
+        assert_eq!(Config::parse(&config.to_json()).unwrap().recent_files, config.recent_files);
+        for index in 0..110 {
+            config.record_recent_file(Path::new(&format!("file-{index}.txt")), 100);
+        }
+        assert_eq!(config.recent_files.len(), 100);
+        assert_eq!(config.recent_files[0].path, Path::new("file-109.txt"));
+    }
+
+    #[test]
+    fn recent_files_loaded_are_sorted_deduplicated_and_bounded() {
+        let mut entries = vec![serde_json::json!({"path":"duplicate", "opened_at":999})];
+        for index in 0..110 {
+            entries.push(serde_json::json!({"path":format!("file-{index}"), "opened_at":index}));
+        }
+        entries.push(serde_json::json!({"path":"duplicate", "opened_at":0}));
+        let config =
+            Config::parse(&serde_json::json!({"recent_files":entries}).to_string()).unwrap();
+        assert_eq!(config.recent_files.len(), 100);
+        assert_eq!(config.recent_files[0].path, Path::new("duplicate"));
+        assert_eq!(config.recent_files[1].path, Path::new("file-109"));
+        assert_eq!(
+            config.recent_files.iter().filter(|entry| entry.path == Path::new("duplicate")).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn recent_file_aliases_share_one_entry_and_reopen_at_the_front() {
+        let folder = std::env::temp_dir().join(format!(
+            "ogedit-config-recent-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        let raw = folder.join("unicode-🚀.txt");
+        let dotted = folder.join(".").join("unicode-🚀.txt");
+        let other = folder.join("other.txt");
+        let missing = folder.join("unavailable").join("..").join("retained.txt");
+        fs::write(&raw, "fixture").unwrap();
+        fs::write(&other, "second").unwrap();
+        let canonical = fs::canonicalize(&raw).unwrap();
+        let canonical_other = fs::canonicalize(&other).unwrap();
+
+        let mut config = Config::default();
+        config.record_recent_file(&raw, 10);
+        config.record_recent_file(&other, 20);
+        config.record_recent_file(&canonical, 30);
+        config.record_recent_file(&dotted, 29);
+        assert_eq!(config.recent_files.len(), 2);
+        assert_eq!(config.recent_files[0], RecentFile { path: canonical.clone(), opened_at: 30 });
+        assert_eq!(config.recent_files[1].path, canonical_other);
+
+        // Old settings may already contain raw/verbatim/dot aliases. Keep the
+        // newest alias, then preserve distinct files and unavailable paths.
+        let json = serde_json::json!({ "recent_files": [
+            {"path":raw, "opened_at":30},
+            {"path":canonical, "opened_at":50},
+            {"path":dotted, "opened_at":40},
+            {"path":other, "opened_at":45},
+            {"path":missing, "opened_at":35}
+        ]});
+        let mut loaded = Config::parse(&json.to_string()).unwrap();
+        assert_eq!(loaded.recent_files.len(), 3);
+        assert_eq!(loaded.recent_files[0], RecentFile { path: canonical.clone(), opened_at: 50 });
+        assert_eq!(loaded.recent_files[1].path, canonical_other);
+        assert_eq!(loaded.recent_files[2].path, missing);
+        loaded.record_recent_file(&other, 60);
+        assert_eq!(loaded.recent_files[0].path, canonical_other);
+        loaded.record_recent_file(&raw, 60);
+        assert_eq!(loaded.recent_files[0].path, canonical);
+        assert_eq!(loaded.recent_files.len(), 3);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn corrupt_configuration_recovers_without_destroying_previous_backups() {
+        let folder = std::env::temp_dir().join(format!(
+            "ogedit-config-recovery-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("state.json");
+        fs::write(&path, b"{broken-first}").unwrap();
+        assert_eq!(Config::load_from_path(&path), Config::default());
+        assert_eq!(fs::read(folder.join("state.json.backup")).unwrap(), b"{broken-first}");
+        fs::write(&path, b"{broken-second}\xff").unwrap();
+        assert_eq!(Config::load_from_path(&path), Config::default());
+        assert_eq!(fs::read(folder.join("state.json.backup")).unwrap(), b"{broken-first}");
+        assert_eq!(fs::read(folder.join("state.json.backup.1")).unwrap(), b"{broken-second}\xff");
+        let config = Config { word_wrap: true, ..Config::default() };
+        config.save_to_path(&path).unwrap();
+        assert_eq!(Config::load_from_path(&path), config);
+        fs::remove_dir_all(folder).unwrap();
     }
 }

@@ -1,17 +1,5 @@
-# Auto-create release tag when Cargo.toml version changes
-#
-# Workflow:
-# 1. Developer updates version in Cargo.toml
-# 2. Developer pushes to main
-# 3. This workflow detects the change and creates release/vX.Y.Z tag
-# 4. The tag triggers release.yml which builds all platforms
-#
-# Manual tagging still works - this just automates it
-#
-# Examples:
-#   Cargo.toml: version = "1.2.5"     -> creates tag: release/v1.2.5
-#   Cargo.toml: version = "1.3.0-beta.1" -> creates tag: release/v1.3.0-beta.1
-
+# GITHUB_TOKEN tag pushes do not trigger another push workflow. Invoke the
+# reusable release workflow directly after creating and verifying the tag.
 name: Auto-tag Release
 
 on:
@@ -20,9 +8,11 @@ on:
     paths:
       - 'Cargo.toml'
 
-# Prevent duplicate runs if someone pushes commit + tag together
+permissions:
+  contents: read
+
 concurrency:
-  group: release-${{ github.sha }}
+  group: auto-tag-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -30,43 +20,33 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
+    outputs:
+      publish: ${{ steps.tag.outputs.publish }}
+      tag: ${{ steps.version.outputs.TAG }}
+      commit: ${{ github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0 # Need full history for tag operations
+          fetch-depth: 0
 
-      - name: Extract version from Cargo.toml
+      - name: Validate release version
         id: version
-        run: |
-          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Detected version: $VERSION"
+        run: python3 tools/release_metadata.py >> "$GITHUB_OUTPUT"
 
-      - name: Check if tag already exists
-        id: check_tag
-        run: |
-          TAG="release/v${{ steps.version.outputs.VERSION }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "EXISTS=true" >> $GITHUB_OUTPUT
-            echo "Tag $TAG already exists"
-          else
-            echo "EXISTS=false" >> $GITHUB_OUTPUT
-            echo "Tag $TAG does not exist"
-          fi
+      - name: Create and verify release tag
+        id: tag
+        env:
+          TAG: ${{ steps.version.outputs.TAG }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: bash tools/create_release_tag.sh
 
-      - name: Create and push tag
-        if: steps.check_tag.outputs.EXISTS == 'false'
-        run: |
-          TAG="release/v${{ steps.version.outputs.VERSION }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG" -m "Release v${{ steps.version.outputs.VERSION }}"
-
-          # Push tag (may fail if someone manually pushed it in a race condition - that's OK)
-          if git push origin "$TAG" 2>&1; then
-            echo "✅ Created and pushed tag: $TAG"
-          else
-            echo "⚠️ Tag $TAG already exists on remote (likely manual push) - skipping"
-          fi
+  release:
+    needs: create-tag
+    if: needs.create-tag.outputs.publish == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      release_tag: ${{ needs.create-tag.outputs.tag }}
+      release_commit: ${{ needs.create-tag.outputs.commit }}

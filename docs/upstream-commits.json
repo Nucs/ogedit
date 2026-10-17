@@ -1,0 +1,2918 @@
+{
+  "fork_base": "82cc84a610ded54d57f956285a8c4307c74bf364",
+  "upstream_head": "cb6de0a8966aecd01d19a3541dab1829d0e679ca",
+  "fetched_date": "2026-10-17",
+  "audit_phase": "before_ogedit_2.0.0_version_bump",
+  "audited_build_version": "1.2.4",
+  "commits": [
+    {
+      "sha": "5f284a1df9266ab07bb068e5eff6d7844b651a97",
+      "date": "2025-12-01T21:51:55+01:00",
+      "subject": "Move arena & helpers into their own crate (#694)",
+      "paths": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "benches/lib.rs",
+        "build/helpers.rs",
+        "build/i18n.rs",
+        "build/main.rs",
+        "crates/edit/Cargo.toml",
+        "crates/edit/benches/lib.rs",
+        "crates/edit/build/helpers.rs",
+        "crates/edit/build/i18n.rs",
+        "crates/edit/build/main.rs",
+        "crates/edit/src/apperr.rs",
+        "crates/edit/src/base64.rs",
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_editor.rs",
+        "crates/edit/src/bin/edit/draw_filepicker.rs",
+        "crates/edit/src/bin/edit/draw_menubar.rs",
+        "crates/edit/src/bin/edit/draw_statusbar.rs",
+        "crates/edit/src/bin/edit/edit.exe.manifest",
+        "crates/edit/src/bin/edit/localization.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/bin/edit/state.rs",
+        "crates/edit/src/buffer/gap_buffer.rs",
+        "crates/edit/src/buffer/line_cache.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/buffer/navigation.rs",
+        "crates/edit/src/cell.rs",
+        "crates/edit/src/clipboard.rs",
+        "crates/edit/src/document.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/fuzzy.rs",
+        "crates/edit/src/hash.rs",
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/icu.rs",
+        "crates/edit/src/input.rs",
+        "crates/edit/src/lib.rs",
+        "crates/edit/src/oklab.rs",
+        "crates/edit/src/path.rs",
+        "crates/edit/src/simd/lines_bwd.rs",
+        "crates/edit/src/simd/lines_fwd.rs",
+        "crates/edit/src/simd/memchr2.rs",
+        "crates/edit/src/simd/memset.rs",
+        "crates/edit/src/simd/mod.rs",
+        "crates/edit/src/sys/mod.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs",
+        "crates/edit/src/tui.rs",
+        "crates/edit/src/unicode/measurement.rs",
+        "crates/edit/src/unicode/mod.rs",
+        "crates/edit/src/unicode/tables.rs",
+        "crates/edit/src/unicode/utf8.rs",
+        "crates/edit/src/vt.rs",
+        "crates/stdext/Cargo.toml",
+        "crates/stdext/src/arena/debug.rs",
+        "crates/stdext/src/arena/mod.rs",
+        "crates/stdext/src/arena/release.rs",
+        "crates/stdext/src/arena/scratch.rs",
+        "crates/stdext/src/arena/string.rs",
+        "crates/stdext/src/helpers.rs",
+        "crates/stdext/src/lib.rs",
+        "crates/stdext/src/sys/mod.rs",
+        "crates/stdext/src/sys/unix.rs",
+        "crates/stdext/src/sys/windows.rs",
+        "crates/unicode-gen/Cargo.toml",
+        "crates/unicode-gen/README.md",
+        "crates/unicode-gen/src/main.rs",
+        "crates/unicode-gen/src/rules.rs",
+        "src/apperr.rs",
+        "src/arena/debug.rs",
+        "src/arena/mod.rs",
+        "src/arena/release.rs",
+        "src/arena/scratch.rs",
+        "src/arena/string.rs",
+        "src/base64.rs",
+        "src/bin/edit/documents.rs",
+        "src/bin/edit/draw_editor.rs",
+        "src/bin/edit/draw_filepicker.rs",
+        "src/bin/edit/draw_menubar.rs",
+        "src/bin/edit/draw_statusbar.rs",
+        "src/bin/edit/edit.exe.manifest",
+        "src/bin/edit/localization.rs",
+        "src/bin/edit/main.rs",
+        "src/bin/edit/state.rs",
+        "src/buffer/gap_buffer.rs",
+        "src/buffer/line_cache.rs",
+        "src/buffer/mod.rs",
+        "src/buffer/navigation.rs",
+        "src/cell.rs",
+        "src/clipboard.rs",
+        "src/document.rs",
+        "src/framebuffer.rs",
+        "src/fuzzy.rs",
+        "src/hash.rs",
+        "src/helpers.rs",
+        "src/icu.rs",
+        "src/input.rs",
+        "src/lib.rs",
+        "src/oklab.rs",
+        "src/path.rs",
+        "src/simd/lines_bwd.rs",
+        "src/simd/lines_fwd.rs",
+        "src/simd/memchr2.rs",
+        "src/simd/memset.rs",
+        "src/simd/mod.rs",
+        "src/sys/mod.rs",
+        "src/sys/unix.rs",
+        "src/sys/windows.rs",
+        "src/tui.rs",
+        "src/unicode/measurement.rs",
+        "src/unicode/mod.rs",
+        "src/unicode/tables.rs",
+        "src/unicode/utf8.rs",
+        "src/vt.rs",
+        "tools/grapheme-table-gen/Cargo.lock",
+        "tools/grapheme-table-gen/Cargo.toml",
+        "tools/grapheme-table-gen/README.md",
+        "tools/grapheme-table-gen/src/main.rs",
+        "tools/grapheme-table-gen/src/rules.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/arena/mod.rs",
+        "Cargo.toml"
+      ],
+      "disposition": "Retain OGEdit source layout. The intermediate stdext split was later reversed upstream; applicable behavior is integrated independently of file moves.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/5f284a1df9266ab07bb068e5eff6d7844b651a97"
+    },
+    {
+      "sha": "1601c3f592a042e8c331fe6184361fe0d627db8a",
+      "date": "2025-12-02T00:15:54+03:00",
+      "subject": "i18n: Add Arabic translations (#634)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Arabic language. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/1601c3f592a042e8c331fe6184361fe0d627db8a"
+    },
+    {
+      "sha": "ca661a2901f0b92fd51a1772f801af445d98fa74",
+      "date": "2025-12-01T23:16:34+02:00",
+      "subject": "i18n: Add Estonian translations (#693)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Estonian language. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/ca661a2901f0b92fd51a1772f801af445d98fa74"
+    },
+    {
+      "sha": "d71e94b3035d2ac27c3d5f2d3d5e02fd444048a5",
+      "date": "2025-12-02T06:17:14+09:00",
+      "subject": "Improve Korean translations (#663)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Korean corrections. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d71e94b3035d2ac27c3d5f2d3d5e02fd444048a5"
+    },
+    {
+      "sha": "3df9e7cb6cc2b454af03651241541f0604b84419",
+      "date": "2025-12-01T22:24:27+01:00",
+      "subject": "Fix multiple issues found under Linux (#706)",
+      "paths": [
+        ".vscode/launch.json",
+        "crates/edit/src/input.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/vt.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/input.rs",
+        "src/vt.rs",
+        "src/sys/unix.rs"
+      ],
+      "disposition": "Decode complete UTF-8 X10 mouse coordinates across input chunks; retain existing signal-handler cast and reject malformed coordinates without losing following input.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/3df9e7cb6cc2b454af03651241541f0604b84419"
+    },
+    {
+      "sha": "364579a0456348c6f0e5f84c83d86d48751790e7",
+      "date": "2025-12-02T04:33:40+07:00",
+      "subject": "Add Indonesian translation (#629)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Indonesian language. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/364579a0456348c6f0e5f84c83d86d48751790e7"
+    },
+    {
+      "sha": "fa2b1b88cc6fe4b28362311af0d43bfa540ab30e",
+      "date": "2026-01-05T15:12:26+01:00",
+      "subject": "Update man page for edit command to version 1.2.1 (#727)",
+      "paths": [
+        "assets/manpage/edit.1"
+      ],
+      "status": "backported",
+      "evidence": [
+        "assets/manpage/edit.1",
+        "src/bin/edit/main.rs"
+      ],
+      "disposition": "Updated the man page to current OGEdit CLI semantics and fork identity/version, incorporating subsequent --goto behavior.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/fa2b1b88cc6fe4b28362311af0d43bfa540ab30e"
+    },
+    {
+      "sha": "dbd74656a9cae4f097a1d8d7d4e3b42e3df5e615",
+      "date": "2026-01-05T17:50:36+01:00",
+      "subject": "Fix colors with Terminal.app's Clear Dark theme (#728)",
+      "paths": [
+        ".vscode/launch.json",
+        "crates/edit/Cargo.toml",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/stdext/src/arena/string.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/framebuffer.rs",
+        "src/bin/edit/main.rs"
+      ],
+      "disposition": "Use measured palette-lightness midpoint for contrast, sort light/dark endpoints, and invalidate cached contrast on palette changes. Later viewport fixes supersede temporary startup helpers.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/dbd74656a9cae4f097a1d8d7d4e3b42e3df5e615"
+    },
+    {
+      "sha": "48c2ab29498699feb65d2f3c9cbf80e084d64bc7",
+      "date": "2026-01-13T10:33:37-05:00",
+      "subject": "Use platform line ending when opening single line files (#739)",
+      "paths": [
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/buffer/mod.rs",
+        "src/bin/edit/config.rs"
+      ],
+      "disposition": "Strict CRLF-majority detection already exists. Files without newlines retain the configured default, whose initial value follows the platform.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/48c2ab29498699feb65d2f3c9cbf80e084d64bc7"
+    },
+    {
+      "sha": "d0db071474c193785aacafe426498bee43f6b2ae",
+      "date": "2026-01-20T13:10:55-06:00",
+      "subject": "Create parent directories when saving to a non-existent path (#738)",
+      "paths": [
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/sys/windows.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/bin/edit/safe_save.rs",
+        "src/sys/windows.rs"
+      ],
+      "disposition": "Create missing parent directories through the validated atomic-save path; classify Windows missing-parent errors as not-found.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d0db071474c193785aacafe426498bee43f6b2ae"
+    },
+    {
+      "sha": "8d9b1ede11eecc98d0df6ecae9af06a00f6a6aae",
+      "date": "2026-01-20T22:11:44+01:00",
+      "subject": "Add proper multithreading support to Arena (#741)",
+      "paths": [
+        "crates/edit/src/bin/edit/apperr.rs",
+        "crates/stdext/Cargo.toml",
+        "crates/stdext/src/arena/debug.rs",
+        "crates/stdext/src/arena/fs.rs",
+        "crates/stdext/src/arena/mod.rs",
+        "crates/stdext/src/arena/release.rs",
+        "crates/stdext/src/arena/scratch.rs",
+        "crates/stdext/src/arena/string.rs",
+        "crates/stdext/src/sys/unix.rs",
+        "crates/stdext/src/sys/windows.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/arena/scratch.rs",
+        "src/arena/release.rs",
+        "docs/memory-unsafe-review.md"
+      ],
+      "disposition": "Retain existing stronger TLS scratch ownership and release-mode nesting checks; add compatible 32-bit commit sizing and allocation-helper inlining. Do not replace checked fallible allocation with unchecked arithmetic.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/8d9b1ede11eecc98d0df6ecae9af06a00f6a6aae"
+    },
+    {
+      "sha": "6b6a4b2d9fb83a7c2513506325e80b8a17200f0a",
+      "date": "2026-01-21T00:05:09+01:00",
+      "subject": "Add a JSON parser (#742)",
+      "paths": [
+        "Cargo.lock",
+        "assets/highlighting-tests/json.json",
+        "crates/edit/Cargo.toml",
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/json.rs",
+        "crates/edit/src/lib.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "Cargo.toml",
+        "src/bin/edit/config.rs",
+        "src/bin/edit/data_lens.rs",
+        "assets/highlighting-tests/json.json"
+      ],
+      "disposition": "Existing serde_json/jsonc-parser implementations provide settings and editable JSON support. A second custom arena JSON parser is not introduced; its fixture is included in highlighting validation.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/6b6a4b2d9fb83a7c2513506325e80b8a17200f0a"
+    },
+    {
+      "sha": "9bc86c5acdc8e9ffe86dabee68626e87724457af",
+      "date": "2026-01-22T19:49:04+01:00",
+      "subject": "Add a glob matcher (#743)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/glob.rs",
+        "crates/edit/src/lib.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/glob.rs",
+        "src/bin/edit/settings.rs"
+      ],
+      "disposition": "Current vendored LSH already contains the upstream glob matcher; file associations now use it. No separate editor-local matcher is required.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/9bc86c5acdc8e9ffe86dabee68626e87724457af"
+    },
+    {
+      "sha": "ad8415fd44e1630716e902505869a8ef33305758",
+      "date": "2026-01-23T13:57:42+01:00",
+      "subject": "Clean up error handling (#745)",
+      "paths": [
+        "crates/edit/Cargo.toml",
+        "crates/edit/src/apperr.rs",
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_editor.rs",
+        "crates/edit/src/bin/edit/draw_filepicker.rs",
+        "crates/edit/src/bin/edit/draw_statusbar.rs",
+        "crates/edit/src/bin/edit/localization.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/bin/edit/state.rs",
+        "crates/edit/src/buffer/gap_buffer.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/clipboard.rs",
+        "crates/edit/src/document.rs",
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/icu.rs",
+        "crates/edit/src/lib.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/buffer/mod.rs",
+        "src/bin/edit/draw_filepicker.rs",
+        "src/apperr.rs"
+      ],
+      "disposition": "Adopt unstable file/encoding-list sorting and per-row render scratch lifetime. Preserve OGEdit error representation and conflict/recovery diagnostics; public API-only io::Error migration is not applied.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/ad8415fd44e1630716e902505869a8ef33305758"
+    },
+    {
+      "sha": "e5a92eb7d672b82387b4bb6e00f8d24f591a1cb9",
+      "date": "2026-01-26T23:30:31+01:00",
+      "subject": "Fix the latest clippy warning (#751)",
+      "paths": [
+        "crates/edit/src/bin/edit/draw_statusbar.rs",
+        "crates/edit/src/icu.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/icu.rs",
+        "src/bin/edit/draw_statusbar.rs"
+      ],
+      "disposition": "Apply applicable ICU provider iteration/lint cleanup while retaining initialized caches and immutable native function tables.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/e5a92eb7d672b82387b4bb6e00f8d24f591a1cb9"
+    },
+    {
+      "sha": "524b22c3c5eb9a81a527e3bb40f8a97518d8371f",
+      "date": "2026-01-28T00:12:20+01:00",
+      "subject": "Fix warnings when building on macOS (#754)",
+      "paths": [
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/sys/unix.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/helpers.rs",
+        "src/sys/unix.rs"
+      ],
+      "disposition": "Temporary Size constants are absent. Retained Unix CStr import is used by the fork error formatter, so upstream deletion would be incorrect; no runtime gap remains.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/524b22c3c5eb9a81a527e3bb40f8a97518d8371f"
+    },
+    {
+      "sha": "14c1defa25b5e8ce857b81a5dabce7807e24775a",
+      "date": "2026-02-12T22:28:53+01:00",
+      "subject": "Remove the majority of nightly features (#761)",
+      "paths": [
+        "Cargo.toml",
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_editor.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/lib.rs",
+        "crates/edit/src/tui.rs",
+        "crates/edit/src/unicode/measurement.rs",
+        "crates/stdext/src/arena/debug.rs",
+        "crates/stdext/src/arena/release.rs",
+        "crates/stdext/src/helpers.rs",
+        "crates/stdext/src/lib.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/buffer/mod.rs",
+        "src/bin/edit/documents.rs",
+        "src/lib.rs",
+        "rust-toolchain.toml"
+      ],
+      "disposition": "Use VecDeque for history and document MRU traversal, removing linked-list cursor APIs. Keep the pinned nightly and checked arena-backed collections for remaining allocator features.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/14c1defa25b5e8ce857b81a5dabce7807e24775a"
+    },
+    {
+      "sha": "719a478cf017d70221a6a8388c37e1bef672e0af",
+      "date": "2026-02-12T16:37:14-05:00",
+      "subject": "Change copyright in draw_menubar.rs (#760)",
+      "paths": [
+        "crates/edit/src/bin/edit/draw_menubar.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/bin/edit/draw_menubar.rs"
+      ],
+      "disposition": "Update About copyright wording while retaining OGEdit branding.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/719a478cf017d70221a6a8388c37e1bef672e0af"
+    },
+    {
+      "sha": "6c79a1d7e392a45a6e4d95a8ac81db0186fcc157",
+      "date": "2026-02-12T23:23:57+01:00",
+      "subject": "Remove allocator_api (#762)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/base64.rs",
+        "crates/edit/src/bin/edit/draw_filepicker.rs",
+        "crates/edit/src/bin/edit/draw_statusbar.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/document.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/fuzzy.rs",
+        "crates/edit/src/icu.rs",
+        "crates/edit/src/json.rs",
+        "crates/edit/src/lib.rs",
+        "crates/edit/src/oklab.rs",
+        "crates/edit/src/simd/memset.rs",
+        "crates/edit/src/simd/mod.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs",
+        "crates/edit/src/tui.rs",
+        "crates/stdext/src/alloc.rs",
+        "crates/stdext/src/arena/debug.rs",
+        "crates/stdext/src/arena/fs.rs",
+        "crates/stdext/src/arena/mod.rs",
+        "crates/stdext/src/arena/release.rs",
+        "crates/stdext/src/arena/scratch.rs",
+        "crates/stdext/src/arena/string.rs",
+        "crates/stdext/src/collections/mod.rs",
+        "crates/stdext/src/collections/string.rs",
+        "crates/stdext/src/collections/vec.rs",
+        "crates/stdext/src/helpers.rs",
+        "crates/stdext/src/lib.rs",
+        "crates/stdext/src/simd/memset.rs",
+        "crates/stdext/src/simd/mod.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/arena",
+        "src/fuzzy.rs",
+        "src/simd/memset.rs"
+      ],
+      "disposition": "Retain hardened standard Vec/ArenaString allocator interface instead of replacing all collections with BVec/BString. Preserve generic MemsetSafe behavior and safe fallback fills. This does not claim stable-toolchain compatibility.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/6c79a1d7e392a45a6e4d95a8ac81db0186fcc157"
+    },
+    {
+      "sha": "ff45b14d5e7200556e020db5a8b9bdb2434852a2",
+      "date": "2026-02-14T01:51:38+01:00",
+      "subject": "BVec::push_encode_utf16, Some micro optimizations (#764)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/icu.rs",
+        "crates/edit/src/unicode/measurement.rs",
+        "crates/edit/src/unicode/mod.rs",
+        "crates/edit/src/unicode/utf8.rs",
+        "crates/edit/src/vt.rs",
+        "crates/stdext/src/collections/string.rs",
+        "crates/stdext/src/collections/vec.rs",
+        "crates/stdext/src/lib.rs",
+        "crates/stdext/src/unicode/mod.rs",
+        "crates/stdext/src/unicode/utf8.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "docs/upstream-core-integration.md",
+        "src/unicode/utf8.rs",
+        "src/vt.rs",
+        "src/icu.rs"
+      ],
+      "disposition": "Retain single-crate Unicode layout and standard collection conversion. Upstream moves Utf8Chars unchanged into stdext and optimizes BVec plus UTF-8-to-UTF-16 collection conversion; OGEdit regex construction uses pattern.encode_utf16(). Later decoding fixes are tracked separately.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/ff45b14d5e7200556e020db5a8b9bdb2434852a2"
+    },
+    {
+      "sha": "017c0ba30de458f9707f65265be1f99a4508fc4c",
+      "date": "2026-03-19T23:52:26+01:00",
+      "subject": "Fix an incorrect debug assert (#774)",
+      "paths": [
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/buffer/mod.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Restore cursor directly after automatic final-newline insertion before visual statistics finalize; retain detailed buffer invariants.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/017c0ba30de458f9707f65265be1f99a4508fc4c"
+    },
+    {
+      "sha": "baa3cb05b4738c0fe2275d11b2eb2be3cfe7fc40",
+      "date": "2026-03-19T23:57:00+01:00",
+      "subject": "Use natural sort for filenames (#763)",
+      "paths": [
+        ".cargo/release-nightly.toml",
+        "crates/edit/src/bin/edit/draw_filepicker.rs",
+        "crates/edit/src/icu.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/icu.rs",
+        "src/bin/edit/draw_filepicker.rs"
+      ],
+      "disposition": "Enable numeric and normalized Unicode ICU collation in file lists and bounded filename completions, retaining directory-first groups and thread-local native service ownership. Cached and scanned completions share natural ordering with an original-name tie break.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/baa3cb05b4738c0fe2275d11b2eb2be3cfe7fc40"
+    },
+    {
+      "sha": "8ad89c849dd93940c2784b7a3cee67734c7d667a",
+      "date": "2026-03-20T21:41:42+01:00",
+      "subject": "Introduce the LSH compiler (#753)",
+      "paths": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "assets/highlighting-tests/COMMIT_EDITMSG",
+        "assets/highlighting-tests/diff.diff",
+        "assets/highlighting-tests/git-rebase-todo",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/lsh/Cargo.toml",
+        "crates/lsh/definitions/git_commit_messsage.lsh",
+        "crates/lsh/definitions/git_ignore.lsh",
+        "crates/lsh/definitions/git_rebase_todo.lsh",
+        "crates/lsh/src/compiler/backend.rs",
+        "crates/lsh/src/compiler/charset.rs",
+        "crates/lsh/src/compiler/frontend.rs",
+        "crates/lsh/src/compiler/generator.rs",
+        "crates/lsh/src/compiler/mod.rs",
+        "crates/lsh/src/compiler/optimizer.rs",
+        "crates/lsh/src/compiler/regex.rs",
+        "crates/lsh/src/lib.rs",
+        "crates/lsh/src/runtime.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/compiler",
+        "assets/highlighting-tests",
+        "src/syntax.rs"
+      ],
+      "disposition": "Latest LSH compiler is already vendored. Fetched-tree comparison confirms compiler implementation; latest highlighting fixtures are added for integration validation.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/8ad89c849dd93940c2784b7a3cee67734c7d667a"
+    },
+    {
+      "sha": "0bfb7a321008cba1c47c149c63a248f4d667349d",
+      "date": "2026-03-23T22:22:24+01:00",
+      "subject": "Add the LSH runtime (#776)",
+      "paths": [
+        "Cargo.lock",
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/glob.rs",
+        "crates/edit/src/lib.rs",
+        "crates/lsh-bin/Cargo.toml",
+        "crates/lsh-bin/src/main.rs",
+        "crates/lsh/src/compiler/backend.rs",
+        "crates/lsh/src/runtime.rs",
+        "crates/stdext/src/glob.rs",
+        "crates/stdext/src/lib.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/runtime.rs",
+        "vendor/lsh/src/main.rs",
+        "src/syntax.rs"
+      ],
+      "disposition": "Latest LSH runtime and compiler CLI already exist in the vendored standalone crate. Retain the heap_bytes accounting extension used to bound cache ownership.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/0bfb7a321008cba1c47c149c63a248f4d667349d"
+    },
+    {
+      "sha": "fa709bade0c51430db208998a770b8b8c55d9007",
+      "date": "2026-03-25T01:17:45+01:00",
+      "subject": "Integrate LSH into edit (#777)",
+      "paths": [
+        "Cargo.lock",
+        "crates/edit/Cargo.toml",
+        "crates/edit/build/main.rs",
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_statusbar.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/bin/edit/state.rs",
+        "crates/edit/src/buffer/line_cache.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/lib.rs",
+        "crates/edit/src/lsh/cache.rs",
+        "crates/edit/src/lsh/definitions.rs",
+        "crates/edit/src/lsh/highlighter.rs",
+        "crates/edit/src/lsh/mod.rs",
+        "crates/lsh/definitions/diff.lsh",
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-core-integration.md",
+        "src/bin/edit/draw_statusbar.rs",
+        "src/bin/edit/draw_editor.rs",
+        "src/syntax.rs"
+      ],
+      "disposition": "Keep existing bounded LSH highlighting and add missing status-bar language picker, automatic detection, per-document overrides and Plain Text mode; current runtime already existed.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/fa709bade0c51430db208998a770b8b8c55d9007"
+    },
+    {
+      "sha": "d1908b0b5317e43f747b5ecc86ef67a7035e30fb",
+      "date": "2026-03-25T20:50:24+01:00",
+      "subject": "Add rudimentary settings.json support (#779)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/bin/edit/apperr.rs",
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_menubar.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/bin/edit/settings.rs",
+        "crates/edit/src/bin/edit/state.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/json.rs",
+        "crates/stdext/src/float.rs",
+        "crates/stdext/src/lib.rs",
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-core-integration.md",
+        "src/bin/edit/settings.rs",
+        "src/bin/edit/draw_menubar.rs",
+        "src/buffer/mod.rs"
+      ],
+      "disposition": "Add settings.json preferences, ordered files.associations, validation and reload-on-save; apply explicit language selection to syntax caches. Keep automatic state.json separate.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d1908b0b5317e43f747b5ecc86ef67a7035e30fb"
+    },
+    {
+      "sha": "05452ab90ce7fa7b6161ca003307828bf168bef2",
+      "date": "2026-03-27T19:01:09+01:00",
+      "subject": "Complete the initial LSH implementation (#624)",
+      "paths": [
+        ".vscode/launch.json",
+        "assets/highlighting-tests/bash.sh",
+        "assets/highlighting-tests/batch.bat",
+        "assets/highlighting-tests/html.html",
+        "assets/highlighting-tests/markdown.md",
+        "assets/highlighting-tests/powershell.ps1",
+        "assets/highlighting-tests/properties.conf",
+        "assets/highlighting-tests/xml.xml",
+        "assets/highlighting-tests/yaml.yml",
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/bin/edit/draw_menubar.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/lsh/definitions/json.lsh",
+        "crates/lsh/definitions/lsh.lsh",
+        "crates/lsh/definitions/markdown.lsh",
+        "crates/lsh/definitions/powershell.lsh",
+        "crates/lsh/definitions/properties.lsh",
+        "crates/lsh/definitions/utility.lsh",
+        "crates/lsh/definitions/xml.lsh",
+        "crates/lsh/definitions/yaml.lsh",
+        "crates/lsh/src/compiler/backend.rs",
+        "crates/lsh/src/compiler/charset.rs",
+        "crates/lsh/src/compiler/mod.rs",
+        "crates/lsh/src/compiler/regex.rs",
+        "rust-toolchain.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/syntax.rs",
+        "src/buffer/mod.rs",
+        "src/framebuffer.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Retain current compiler/grammars, add missing Markdown bold/italic/link/strikethrough paint spans and independent terminal SGR attributes. Preserve OGEdit palette choices.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/05452ab90ce7fa7b6161ca003307828bf168bef2"
+    },
+    {
+      "sha": "4cef4eacdaf80e7c2218d2c4366754d026bfb4d5",
+      "date": "2026-03-27T16:17:23-05:00",
+      "subject": "lsh: fix up PowerShell a bit (#784)",
+      "paths": [
+        "crates/lsh/definitions/powershell.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/powershell.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "PowerShell matching corrections already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/4cef4eacdaf80e7c2218d2c4366754d026bfb4d5"
+    },
+    {
+      "sha": "8b24907aabb5b36edac064025d404df2b692ac6f",
+      "date": "2026-03-27T22:17:56+01:00",
+      "subject": "Add a small fuzzing harness for LSH (#782)",
+      "paths": [
+        "Cargo.lock",
+        "crates/edit/Cargo.toml",
+        "crates/lsh/src/runtime.rs",
+        "fuzz/.gitignore",
+        "fuzz/Cargo.lock",
+        "fuzz/Cargo.toml",
+        "fuzz/fuzz_targets/highlighter.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "fuzz/Cargo.toml",
+        "fuzz/fuzz_targets/highlighter.rs",
+        "target/upstream-audit/fuzz-check.log"
+      ],
+      "disposition": "Adapt LSH cargo-fuzz harness to this workspace and its direct runtime interface. The harness compiles; no coverage-guided fuzzing run is claimed.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/8b24907aabb5b36edac064025d404df2b692ac6f"
+    },
+    {
+      "sha": "5820364ce484ba58ce0de98abbb62cd9f02655b4",
+      "date": "2026-03-30T20:10:17+02:00",
+      "subject": "Prepare for v2.0.0 (#785)",
+      "paths": [
+        ".cargo/release-nightly.toml",
+        ".cargo/release-windows-ms.toml",
+        ".cargo/release.toml",
+        ".pipelines/release.yml",
+        "Cargo.lock",
+        "README.md",
+        "assets/manpage/edit.1",
+        "assets/snapcraft.yaml",
+        "crates/edit/Cargo.toml"
+      ],
+      "status": "not_applicable",
+      "evidence": [
+        "Cargo.toml",
+        ".cargo/release-nightly.toml",
+        "assets/manpage/edit.1",
+        "README.md"
+      ],
+      "disposition": "Upstream Microsoft Edit v2.0.0 release identity, Snap and release metadata do not describe this fork. Preserve the independent OGEdit release version, tested release configuration and packages; applicable man-page behavior is separately integrated.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/5820364ce484ba58ce0de98abbb62cd9f02655b4"
+    },
+    {
+      "sha": "c92c166ef6a3a5c4ea31ba13418c5cce229bcec2",
+      "date": "2026-03-30T21:24:16+02:00",
+      "subject": "Fix the Azure pipeline (#787)",
+      "paths": [
+        ".cargo/release-windows-ms.toml"
+      ],
+      "status": "not_applicable",
+      "evidence": [
+        ".cargo/release-nightly.toml",
+        ".github/workflows/release.yml"
+      ],
+      "disposition": "Microsoft Azure/MS signing configuration is absent from OGEdit delivery. Keep the fork Windows static-CRT release configuration.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c92c166ef6a3a5c4ea31ba13418c5cce229bcec2"
+    },
+    {
+      "sha": "35b863f826ec7a7a55f0833ddc57f2e4c8038b6d",
+      "date": "2026-03-31T18:25:11-05:00",
+      "subject": "lsh: fix strings in PowerShell (#790)",
+      "paths": [
+        "crates/lsh/definitions/powershell.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/powershell.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "PowerShell string matching fixes already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/35b863f826ec7a7a55f0833ddc57f2e4c8038b6d"
+    },
+    {
+      "sha": "6468920b16c85ed0ee6e57ae74a002b364863d7f",
+      "date": "2026-04-07T23:26:12+02:00",
+      "subject": "Add Shell, Python and JavaScript highlighting (#795)",
+      "paths": [
+        "assets/highlighting-tests/bash.sh",
+        "assets/highlighting-tests/javascript.js",
+        "assets/highlighting-tests/markdown.md",
+        "assets/highlighting-tests/python.py",
+        "assets/highlighting-tests/shellscript.sh",
+        "crates/lsh/definitions/javascript.lsh",
+        "crates/lsh/definitions/markdown.lsh",
+        "crates/lsh/definitions/python.lsh",
+        "crates/lsh/definitions/shellscript.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/shellscript.lsh",
+        "vendor/lsh/definitions/python.lsh",
+        "vendor/lsh/definitions/javascript.lsh",
+        "vendor/lsh/definitions/markdown.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Shell, Python and JavaScript grammars and Markdown fenced-language support already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/6468920b16c85ed0ee6e57ae74a002b364863d7f"
+    },
+    {
+      "sha": "7c0b3d17c1d566aac4198117798b7c120eaea633",
+      "date": "2026-04-16T12:27:08+01:00",
+      "subject": "clippy: fix ptr_as_ptr lint (#730)",
+      "paths": [
+        "crates/edit/src/base64.rs",
+        "crates/edit/src/hash.rs",
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/icu.rs",
+        "crates/edit/src/simd/memchr2.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/stdext/src/arena/fs.rs",
+        "crates/stdext/src/arena/release.rs",
+        "crates/stdext/src/collections/vec.rs",
+        "crates/stdext/src/helpers.rs",
+        "crates/stdext/src/simd/memset.rs",
+        "crates/stdext/src/sys/unix.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/base64.rs",
+        "src/helpers.rs",
+        "src/vt.rs"
+      ],
+      "disposition": "Apply relevant pointer-cast cleanup without replacing audited checked native memory paths or initialized Read destinations.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/7c0b3d17c1d566aac4198117798b7c120eaea633"
+    },
+    {
+      "sha": "c157ff328086a2e3a5afbec0956c0666b88d10f0",
+      "date": "2026-04-17T15:39:49-05:00",
+      "subject": "feat(tools): add one-line Linux installer (curl|bash) with ICU symlink shim + docs (#628)",
+      "paths": [
+        "README.md",
+        "assets/install.sh"
+      ],
+      "status": "backported",
+      "evidence": [
+        "assets/install.sh",
+        "tools/test_source_installer.py",
+        "target/upstream-audit/source-installer-tests.log"
+      ],
+      "disposition": "Add source installer using Nucs/ogedit releases, locked pinned-toolchain builds, OGEdit binary/alias names and namespaced release/v tags. Sandbox tests cover release selection and preserving unrelated aliases.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c157ff328086a2e3a5afbec0956c0666b88d10f0"
+    },
+    {
+      "sha": "d887414dabb764b555eea34085e6469176f606f6",
+      "date": "2026-04-18T05:25:11+08:00",
+      "subject": "Handle horizontal scrolling on macOS touchpads (#794)",
+      "paths": [
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/input.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/input.rs"
+      ],
+      "disposition": "Decode supported horizontal wheel directions from macOS/touchpad terminal input.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d887414dabb764b555eea34085e6469176f606f6"
+    },
+    {
+      "sha": "d4d3f3b6dca2c969b425da3005fb65d602ef990f",
+      "date": "2026-04-21T00:09:30+02:00",
+      "subject": "Fix Azure pipeline (again) (#807)",
+      "paths": [
+        ".cargo/release-windows-ms.toml",
+        ".pipelines/release.yml"
+      ],
+      "status": "not_applicable",
+      "evidence": [
+        ".cargo/release-nightly.toml",
+        ".github/workflows/release.yml"
+      ],
+      "disposition": "Further Microsoft Azure/signing pipeline changes do not apply to OGEdit GitHub Actions and release identity.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d4d3f3b6dca2c969b425da3005fb65d602ef990f"
+    },
+    {
+      "sha": "330d345a5da6ae485a3503d2ad518381d7ab20df",
+      "date": "2026-04-21T00:10:55+02:00",
+      "subject": "Align LSH language IDs with VS Code (#806)",
+      "paths": [
+        "crates/lsh/definitions/git_commit.lsh",
+        "crates/lsh/definitions/git_commit_messsage.lsh",
+        "crates/lsh/definitions/git_ignore.lsh",
+        "crates/lsh/definitions/git_rebase.lsh",
+        "crates/lsh/definitions/git_rebase_todo.lsh",
+        "crates/lsh/definitions/ignore.lsh",
+        "crates/lsh/src/compiler/generator.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/git_commit.lsh",
+        "vendor/lsh/definitions/git_rebase.lsh",
+        "vendor/lsh/definitions/ignore.lsh",
+        "vendor/lsh/src/compiler/generator.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "VS Code-compatible language IDs and generated language lookup already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/330d345a5da6ae485a3503d2ad518381d7ab20df"
+    },
+    {
+      "sha": "23db2ba93e22131bb096566c311648f7deb14f62",
+      "date": "2026-04-21T21:01:43+02:00",
+      "subject": "Improve LSH documentation (#805)",
+      "paths": [
+        "crates/README.md",
+        "crates/lsh-bin/src/main.rs",
+        "crates/lsh/README.md",
+        "crates/lsh/definitions/README.md",
+        "crates/lsh/src/lib.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/README.md",
+        "vendor/lsh/definitions/README.md",
+        "vendor/lsh/src/main.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "LSH compiler/runtime usage documentation already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/23db2ba93e22131bb096566c311648f7deb14f62"
+    },
+    {
+      "sha": "9e7b938e9e771a51bbdaf9bbe0b4e8213ff2460f",
+      "date": "2026-04-23T17:37:56+02:00",
+      "subject": "Fix reading redirected input from stdin (#810)",
+      "paths": [
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/bin/edit/main.rs",
+        "src/sys/unix.rs",
+        "src/sys/windows.rs"
+      ],
+      "disposition": "Capture redirected input before raw-mode setup while reopening terminal input separately; keep CLI help/version early exits and preserve the original stream on reopen failure.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/9e7b938e9e771a51bbdaf9bbe0b4e8213ff2460f"
+    },
+    {
+      "sha": "c8a9787607b354ea1a73ac73e918b6618c496389",
+      "date": "2026-04-23T19:51:49+02:00",
+      "subject": "Fix scrolling in modals (#812)",
+      "paths": [
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/tui.rs"
+      ],
+      "disposition": "Modal wheel input resolves the topmost hovered node and ancestry so covered editors cannot consume it.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c8a9787607b354ea1a73ac73e918b6618c496389"
+    },
+    {
+      "sha": "8ed85518f0fdec1958a681573089711e5b706884",
+      "date": "2026-04-27T12:58:53+02:00",
+      "subject": "Further improve LSH docs (#813)",
+      "paths": [
+        "crates/lsh/README.md"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/README.md",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Expanded LSH documentation already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/8ed85518f0fdec1958a681573089711e5b706884"
+    },
+    {
+      "sha": "2800cbb2ef57d3e5330fcfb04204a8c246dc6315",
+      "date": "2026-04-27T19:44:24+02:00",
+      "subject": "lsh: Fix PowerShell keyword lists (#820)",
+      "paths": [
+        "crates/lsh/definitions/powershell.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/powershell.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "PowerShell keyword lists already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/2800cbb2ef57d3e5330fcfb04204a8c246dc6315"
+    },
+    {
+      "sha": "24e2d79b879cc6f015f25aa363f7da03115133f9",
+      "date": "2026-04-27T19:44:39+02:00",
+      "subject": "Fix multi-line pastes into single-line fields (#818)",
+      "paths": [
+        "crates/edit/src/bin/edit/draw_menubar.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/buffer/mod.rs",
+        "src/tui.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Single-line fields use first-line paste for Ctrl+V, Shift+Insert and bracketed paste while preserving the full clipboard and ordinary multicursor paste.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/24e2d79b879cc6f015f25aa363f7da03115133f9"
+    },
+    {
+      "sha": "de3db9b10ae65db01d884c68b1cb850e2b3193ad",
+      "date": "2026-04-27T19:44:56+02:00",
+      "subject": "Further improve xterm mouse decoding (#819)",
+      "paths": [
+        "crates/edit/src/input.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/input.rs"
+      ],
+      "disposition": "Handle X10/SGR mouse releases, motion and wheel codes; preserve incomplete UTF-8 coordinates and reject malformed completed sequences.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/de3db9b10ae65db01d884c68b1cb850e2b3193ad"
+    },
+    {
+      "sha": "e5f0c4574871f5a351e3bac44ddfddf07e3ec479",
+      "date": "2026-04-27T20:44:52+02:00",
+      "subject": "Stop moving focus into the search box (#821)",
+      "paths": [
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_editor.rs",
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-core-integration.md",
+        "src/bin/edit/draw_editor.rs",
+        "src/buffer/mod.rs"
+      ],
+      "disposition": "Search option changes do not steal focus. Preserve later upstream-corrected single-line final-newline behavior and configurable document defaults.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/e5f0c4574871f5a351e3bac44ddfddf07e3ec479"
+    },
+    {
+      "sha": "2bb7c1090ac12fa3c039ce5a3884a67aff148c8e",
+      "date": "2026-04-27T21:31:25+02:00",
+      "subject": "Fix stability of compare_strings_ascii (#823)",
+      "paths": [
+        "crates/edit/src/icu.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/icu.rs"
+      ],
+      "disposition": "Compare complete ASCII-folded byte strings lexicographically, then original bytes. Also repair the remaining upstream a/aa/Ab comparison cycle; regression checks 89 strings and 704,969 ordered triples.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/2bb7c1090ac12fa3c039ce5a3884a67aff148c8e"
+    },
+    {
+      "sha": "d14e24b349b36d5a143c0c76d9dffd2c2b968028",
+      "date": "2026-04-28T00:18:27+03:00",
+      "subject": "Fix zero-width regex replace (#815)",
+      "paths": [
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/icu.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/buffer/mod.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Advance zero-width regex replacement and group Replace All atomically. Also repair empty-replacement progress, stale-pattern replacement and failed-regex grouping edge cases.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d14e24b349b36d5a143c0c76d9dffd2c2b968028"
+    },
+    {
+      "sha": "d3f86975dc3c1298bf7300dbdf409a1df8d8b2b7",
+      "date": "2026-04-28T17:26:08+02:00",
+      "subject": "Fix text search on *nix (#824)",
+      "paths": [
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "src/buffer/mod.rs",
+        "src/bin/edit/documents.rs",
+        "src/bin/edit/config.rs",
+        "docs/upstream-core-integration.md"
+      ],
+      "disposition": "The actual fix keeps automatic final newline disabled in generic TextBuffer instances and enables it only for document buffers. OGEdit already separates these using configured document defaults (POSIX by default).",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d3f86975dc3c1298bf7300dbdf409a1df8d8b2b7"
+    },
+    {
+      "sha": "c481b718da336ed43adbbfdf543b0368a24fe740",
+      "date": "2026-04-29T15:38:59+03:00",
+      "subject": "Update Turkish translations (#833)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Turkish corrections. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c481b718da336ed43adbbfdf543b0368a24fe740"
+    },
+    {
+      "sha": "58408a72d2dcd8a47e6fb91e709ca9216e7b8f26",
+      "date": "2026-04-30T00:33:49+08:00",
+      "subject": "update and correct zh-hant translation (#830)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Traditional Chinese corrections. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/58408a72d2dcd8a47e6fb91e709ca9216e7b8f26"
+    },
+    {
+      "sha": "f7de3513efb267a5ca60046fd8385673e74f2848",
+      "date": "2026-04-29T19:14:57+02:00",
+      "subject": "Fix localization selection (#835)",
+      "paths": [
+        "crates/edit/build/i18n.rs",
+        "crates/edit/src/sys/unix.rs",
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "build/i18n.rs",
+        "src/bin/edit/localization.rs",
+        "src/sys/unix.rs",
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-platform-integration.md"
+      ],
+      "disposition": "Normalize generated language catalogue tags and aliases with current upstream build logic while accepting OGEdit legacy underscore spelling; runtime uses normalized language resolution.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/f7de3513efb267a5ca60046fd8385673e74f2848"
+    },
+    {
+      "sha": "3afb4f7fb2576b054d271938760243ba62a12a12",
+      "date": "2026-04-29T19:38:12+02:00",
+      "subject": "Support both Serbian languages (Cyrillic & Latin) (#749)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Serbian Cyrillic and Latin languages. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/3afb4f7fb2576b054d271938760243ba62a12a12"
+    },
+    {
+      "sha": "9642f7ffca7026c3c4fe8ef54061201b7344a3b0",
+      "date": "2026-05-04T16:31:27+02:00",
+      "subject": "Update Polish translations (#838)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Polish corrections. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/9642f7ffca7026c3c4fe8ef54061201b7344a3b0"
+    },
+    {
+      "sha": "cc5f7ef8b8f22e96e7255b37051dca35301ff51c",
+      "date": "2026-05-04T22:31:58+08:00",
+      "subject": "Add macOS Homebrew install instructions (#839)",
+      "paths": [
+        "README.md"
+      ],
+      "status": "not_applicable",
+      "evidence": [
+        "README.md",
+        "assets/install.sh"
+      ],
+      "disposition": "Microsoft Edit Homebrew formula instructions would install another product. Retain OGEdit installation instructions and adapted source installer.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/cc5f7ef8b8f22e96e7255b37051dca35301ff51c"
+    },
+    {
+      "sha": "737450cef9ee40030221d1ddc4e91a5e67173306",
+      "date": "2026-05-05T04:51:54+08:00",
+      "subject": "Fix stdarch_loongarch support in stdext (#837)",
+      "paths": [
+        "crates/stdext/src/lib.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/lib.rs"
+      ],
+      "disposition": "OGEdit single-crate lib already gates stdarch_loongarch and incompatible_msrv allowance for LoongArch; there is no temporary stdext crate missing its feature gate.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/737450cef9ee40030221d1ddc4e91a5e67173306"
+    },
+    {
+      "sha": "428ef55715ff747782759e309a37e5ce8e49010a",
+      "date": "2026-06-09T10:19:36-04:00",
+      "subject": "Fix zh-Hant locale fallback (#846)",
+      "paths": [
+        "crates/edit/src/bin/edit/localization.rs",
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/bin/edit/localization.rs",
+        "i18n/edit.toml"
+      ],
+      "disposition": "Resolve Traditional/Simplified Chinese via language/script/region aliases, including CN/SG/TW/HK/MO/Hant regressions.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/428ef55715ff747782759e309a37e5ce8e49010a"
+    },
+    {
+      "sha": "10cbfcc7330c894f2173611029df44ca5cb6fd77",
+      "date": "2026-06-30T13:29:24-04:00",
+      "subject": "Load settings before parsing args (#875)",
+      "paths": [
+        "crates/edit/src/bin/edit/main.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/bin/edit/state.rs",
+        "src/bin/edit/main.rs"
+      ],
+      "disposition": "Load preferences before opening command-line files so language associations take effect immediately.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/10cbfcc7330c894f2173611029df44ca5cb6fd77"
+    },
+    {
+      "sha": "c5d54558e09b44934b5dbf7c7df640818fef4b31",
+      "date": "2026-07-22T05:26:08+08:00",
+      "subject": "LoongArch SIMD: use immediate compare and simplify accumulator setup (#858)",
+      "paths": [
+        "crates/edit/src/simd/lines_bwd.rs",
+        "crates/edit/src/simd/lines_fwd.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/simd/lines_fwd.rs",
+        "src/simd/lines_bwd.rs"
+      ],
+      "disposition": "Use LoongArch immediate comparisons and simplified SIMD accumulator setup. Native LoongArch execution is not claimed.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c5d54558e09b44934b5dbf7c7df640818fef4b31"
+    },
+    {
+      "sha": "e04a6708fe24744d119944cc90839c7c45659c12",
+      "date": "2026-07-22T16:11:53+02:00",
+      "subject": "Fix release pipeline (#897)",
+      "paths": [
+        ".pipelines/release.yml",
+        "crates/edit/build/i18n.rs",
+        "crates/edit/src/buffer/gap_buffer.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "build/i18n.rs",
+        "src/buffer/gap_buffer.rs",
+        "docs/upstream-core-integration.md"
+      ],
+      "disposition": "Take latest i18n generator keys/values lint fixes. Gap-buffer tuple-binding cleanup is behaviorally equivalent to retained checked code; Microsoft Azure changes remain inapplicable.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/e04a6708fe24744d119944cc90839c7c45659c12"
+    },
+    {
+      "sha": "ed52eff8ac2a0f7cdca74c05517f338d4e675a17",
+      "date": "2026-07-22T16:24:06+02:00",
+      "subject": "Use copied() instead of cloned() for u16 iterator (#884)",
+      "paths": [
+        "crates/stdext/src/collections/string.rs"
+      ],
+      "status": "not_applicable",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/sys/windows.rs"
+      ],
+      "disposition": "Only changes BString u16 iterator .cloned() to .copied(). OGEdit has no such BString method; native UTF-16 conversion already uses its audited initialized destination.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/ed52eff8ac2a0f7cdca74c05517f338d4e675a17"
+    },
+    {
+      "sha": "e16e2a40c1e231bcf9f086b361a68cccf2d2b31c",
+      "date": "2026-07-22T11:59:02-03:00",
+      "subject": "Add TOML highlighting (#866)",
+      "paths": [
+        "assets/highlighting-tests/toml.toml",
+        "crates/lsh/definitions/toml.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/toml.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "TOML grammar already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/e16e2a40c1e231bcf9f086b361a68cccf2d2b31c"
+    },
+    {
+      "sha": "885ef2e8f8f01afe643ef4eb939c03619fd06848",
+      "date": "2026-07-22T17:25:30+02:00",
+      "subject": "Add Java highlighting (#898)",
+      "paths": [
+        "assets/highlighting-tests/java.java",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/lsh/definitions/java.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/java.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Java grammar and annotation/type highlight kinds already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/885ef2e8f8f01afe643ef4eb939c03619fd06848"
+    },
+    {
+      "sha": "b5303d7d9639f236b997f57b024b009384012034",
+      "date": "2026-07-27T10:46:50-05:00",
+      "subject": "input: Translate \\0 as Ctrl+Space (#899)",
+      "paths": [
+        "crates/edit/src/input.rs",
+        "crates/edit/src/sys/windows.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/input.rs",
+        "src/sys/windows.rs"
+      ],
+      "disposition": "Map NUL to Ctrl+Space and preserve Windows synthesized zero-character keyboard records.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/b5303d7d9639f236b997f57b024b009384012034"
+    },
+    {
+      "sha": "843e48f54427c8f1f1166d800a5e08e043bd695a",
+      "date": "2026-07-27T12:47:13-04:00",
+      "subject": "Require --goto for file positions (#900)",
+      "paths": [
+        "assets/manpage/edit.1",
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/main.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/bin/edit/main.rs",
+        "src/bin/edit/documents.rs",
+        "assets/manpage/edit.1"
+      ],
+      "disposition": "CLI filenames are literal unless the immediately preceding -g/--goto requests location parsing. GUI Open File keeps the requested quoted-path and position-suffix conveniences.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/843e48f54427c8f1f1166d800a5e08e043bd695a"
+    },
+    {
+      "sha": "b05f727e52cf1583a3104673783143af7bc5aa42",
+      "date": "2026-07-28T18:39:26+02:00",
+      "subject": "Fix two LSH issues (#901)",
+      "paths": [
+        "crates/lsh/src/compiler/mod.rs",
+        "crates/lsh/src/compiler/regex.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/compiler/mod.rs",
+        "vendor/lsh/src/compiler/regex.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Optional-alternation fast-skip calculation and non-ASCII hexadecimal regex atoms already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/b05f727e52cf1583a3104673783143af7bc5aa42"
+    },
+    {
+      "sha": "ebc3f7a735ae5d83ce34e5356e7e360f649e3f41",
+      "date": "2026-07-28T19:11:40+02:00",
+      "subject": "Fix large_const_arrays warning (#902)",
+      "paths": [
+        "crates/lsh/src/compiler/generator.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/compiler/generator.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Generated large-array lint handling already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/ebc3f7a735ae5d83ce34e5356e7e360f649e3f41"
+    },
+    {
+      "sha": "9c9fdcc135cbf5c2f850f57988e5b6490c903e73",
+      "date": "2026-07-28T18:18:17-04:00",
+      "subject": "Add Rust highlighting (#809)",
+      "paths": [
+        "assets/highlighting-tests/rust.rs",
+        "crates/lsh/definitions/rust.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/rust.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Rust grammar already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/9c9fdcc135cbf5c2f850f57988e5b6490c903e73"
+    },
+    {
+      "sha": "774a02f705b80140e62da2f112bd1b865ff91e0c",
+      "date": "2026-07-28T23:19:31+01:00",
+      "subject": "Add Lua highlighting (#800)",
+      "paths": [
+        "assets/highlighting-tests/lua.lua",
+        "assets/highlighting-tests/markdown.md",
+        "crates/lsh/definitions/lua.lsh",
+        "crates/lsh/definitions/markdown.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/lua.lsh",
+        "vendor/lsh/definitions/markdown.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Lua grammar and Markdown fence support already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/774a02f705b80140e62da2f112bd1b865ff91e0c"
+    },
+    {
+      "sha": "68d54e435fb75a188c80257c2f73079e1a29749f",
+      "date": "2026-07-29T15:24:27+01:00",
+      "subject": "Add C# highlighting (#802)",
+      "paths": [
+        "assets/highlighting-tests/csharp.cs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/lsh-bin/src/main.rs",
+        "crates/lsh/definitions/csharp.lsh",
+        "crates/lsh/src/compiler/charset.rs",
+        "crates/lsh/src/compiler/regex.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/csharp.lsh",
+        "vendor/lsh/src/compiler/charset.rs",
+        "vendor/lsh/src/compiler/regex.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "C# grammar, preprocessor highlighting and related regex/compiler support already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/68d54e435fb75a188c80257c2f73079e1a29749f"
+    },
+    {
+      "sha": "67047813fc6e600830aba00e0bd2c4afafd120a7",
+      "date": "2026-07-30T01:45:24+10:00",
+      "subject": "Add F# highlighting (#857)",
+      "paths": [
+        "assets/highlighting-tests/fsharp.fsx",
+        "crates/lsh/definitions/fsharp.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/fsharp.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "F# grammar already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/67047813fc6e600830aba00e0bd2c4afafd120a7"
+    },
+    {
+      "sha": "60a47dccf28a6fb740278da19b9fdf8841ccbc43",
+      "date": "2026-07-30T07:20:10+09:00",
+      "subject": "Add Ruby highlighting (#849)",
+      "paths": [
+        "assets/highlighting-tests/ruby.rb",
+        "crates/lsh/definitions/ruby.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/ruby.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Ruby grammar already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/60a47dccf28a6fb740278da19b9fdf8841ccbc43"
+    },
+    {
+      "sha": "b2fac443bb967c42d7b6a4aa37a04fc3b843007e",
+      "date": "2026-07-30T03:21:34+02:00",
+      "subject": "Fix backtracking in alternations (#903)",
+      "paths": [
+        "crates/lsh-bin/src/main.rs",
+        "crates/lsh/src/compiler/regex.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/compiler/regex.rs",
+        "vendor/lsh/src/main.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Regex alternation backtracking corrections already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/b2fac443bb967c42d7b6a4aa37a04fc3b843007e"
+    },
+    {
+      "sha": "570011725492fc6196d4a314bf928e0ddd076eaa",
+      "date": "2026-07-30T19:30:16+03:00",
+      "subject": "Add C/C++ highlighting (#796)",
+      "paths": [
+        "assets/highlighting-tests/c.c",
+        "assets/highlighting-tests/cpp.cpp",
+        "crates/lsh/definitions/c.lsh",
+        "crates/lsh/definitions/cpp.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/c.lsh",
+        "vendor/lsh/definitions/cpp.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "C and C++ grammars already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/570011725492fc6196d4a314bf928e0ddd076eaa"
+    },
+    {
+      "sha": "33ae9b0632f6e26f6a7981ec88f537d66701e7cd",
+      "date": "2026-07-30T17:36:21+01:00",
+      "subject": "Add assert_unchecked for memchr2's return value (#836)",
+      "paths": [
+        "crates/edit/src/simd/memchr2.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/simd/memchr2.rs"
+      ],
+      "disposition": "Retain a debug-checked bounded memchr2 return invariant rather than adding an unchecked optimizer assumption. No search behavior is missing.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/33ae9b0632f6e26f6a7981ec88f537d66701e7cd"
+    },
+    {
+      "sha": "5366d29363de17cf9976f4bbfc0f00a9be2bc926",
+      "date": "2026-07-30T17:36:31+01:00",
+      "subject": "Fix case-insensitive matching with uppercase literals (#850)",
+      "paths": [
+        "crates/lsh/src/compiler/regex.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/src/compiler/regex.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Case-insensitive regex matching with uppercase literals already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/5366d29363de17cf9976f4bbfc0f00a9be2bc926"
+    },
+    {
+      "sha": "874ef3e437baebbc9a897d287423b34a819121ce",
+      "date": "2026-07-31T03:48:53+08:00",
+      "subject": "Add Go highlighting (#859)",
+      "paths": [
+        "assets/highlighting-tests/go.go",
+        "assets/highlighting-tests/markdown.md",
+        "crates/lsh/definitions/go.lsh",
+        "crates/lsh/definitions/markdown.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/go.lsh",
+        "vendor/lsh/definitions/markdown.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Go grammar and Markdown fence support already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/874ef3e437baebbc9a897d287423b34a819121ce"
+    },
+    {
+      "sha": "a6b0f4239c3f127a0cec55d717390e7d8e4ebe98",
+      "date": "2026-07-31T14:13:00+01:00",
+      "subject": "Use Cargo v3 resolver (#905)",
+      "paths": [
+        "Cargo.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "Cargo.toml",
+        "fuzz/Cargo.toml"
+      ],
+      "disposition": "Use Cargo resolver 3 with vendor/lsh as a workspace member and fuzz as a separate excluded workspace.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/a6b0f4239c3f127a0cec55d717390e7d8e4ebe98"
+    },
+    {
+      "sha": "6301ef3268baf4bda96dda682c58f3d018bf874b",
+      "date": "2026-07-31T16:17:52+01:00",
+      "subject": "Check clippy on workspace packages (#906)",
+      "paths": [
+        ".github/workflows/ci.yml",
+        "crates/stdext/src/arena/scratch.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        ".github/workflows/ci.yml",
+        "Cargo.toml",
+        "src/arena/scratch.rs"
+      ],
+      "disposition": "CI tests and Clippy cover all workspace packages, features and targets; documentation and delivery checks are included. Preserve checked scratch-lifetime diagnostics.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/6301ef3268baf4bda96dda682c58f3d018bf874b"
+    },
+    {
+      "sha": "729d6aed08d7e2c15fa407da5e2051126a96c499",
+      "date": "2026-07-31T19:04:35+03:00",
+      "subject": "Add Odin highlighting (#863)",
+      "paths": [
+        "assets/highlighting-tests/markdown.md",
+        "assets/highlighting-tests/odin.odin",
+        "crates/lsh/definitions/markdown.lsh",
+        "crates/lsh/definitions/odin.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/odin.lsh",
+        "vendor/lsh/definitions/markdown.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Odin grammar and Markdown fence support already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/729d6aed08d7e2c15fa407da5e2051126a96c499"
+    },
+    {
+      "sha": "3e2061572a30c6d039dbd8bf1e56d82eea63d8df",
+      "date": "2026-08-01T05:52:37+08:00",
+      "subject": "Support negative line numbers for goto (#841)",
+      "paths": [
+        "crates/edit/src/bin/edit/documents.rs",
+        "crates/edit/src/bin/edit/draw_editor.rs",
+        "crates/edit/src/bin/edit/main.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/bin/edit/documents.rs",
+        "src/bin/edit/draw_editor.rs",
+        "src/bin/edit/main.rs"
+      ],
+      "disposition": "CLI and Go To support negative logical line numbers counted from EOF, using saturating arithmetic; negative counting applies only to lines.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/3e2061572a30c6d039dbd8bf1e56d82eea63d8df"
+    },
+    {
+      "sha": "0a6f8a33bb2d7110a36434956aef023338cde326",
+      "date": "2026-08-03T16:45:55+01:00",
+      "subject": "Select lines when clicking/dragging on line numbers (#622)",
+      "paths": [
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/tui.rs",
+        "src/buffer/mod.rs"
+      ],
+      "disposition": "Fork gutter selection already supports whole-line dragging, Shift extension, wrapping and stable logical anchors; preserve its tested implementation.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/0a6f8a33bb2d7110a36434956aef023338cde326"
+    },
+    {
+      "sha": "11f0848e02bec715122adb8c295f1e1a87edec3c",
+      "date": "2026-08-03T08:54:25-07:00",
+      "subject": "Correctly parse colours on big endian systems (#721)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/oklab.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/oklab.rs",
+        "src/framebuffer.rs",
+        "src/bin/edit/main.rs",
+        "src/tui.rs"
+      ],
+      "disposition": "Use host-independent packed RGBA conversion and parsing; preserve existing from_be/from_le callers through compatibility APIs.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/11f0848e02bec715122adb8c295f1e1a87edec3c"
+    },
+    {
+      "sha": "a6eeb205c68906cf858cefa2467c55f64f887493",
+      "date": "2026-08-03T12:05:35-04:00",
+      "subject": "Scroll sideways while holding the shift key and scroll fast while holding the alt key (#766)",
+      "paths": [
+        "crates/edit/src/input.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/input.rs",
+        "src/tui.rs"
+      ],
+      "disposition": "Shift routes wheel ticks horizontally; TUI applies normal axis scale and Alt acceleration rather than multiplying twice in the decoder.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/a6eeb205c68906cf858cefa2467c55f64f887493"
+    },
+    {
+      "sha": "721d84815f485ba9cb2a2cd6b1de038d36469caa",
+      "date": "2026-08-04T16:45:35+05:00",
+      "subject": "Don't auto-scroll horizontal drag-selection in the top/bottom rows (#895)",
+      "paths": [
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/tui.rs"
+      ],
+      "disposition": "Keep horizontal drags in the top/bottom viewport row from causing vertical autoscroll; include the original press and bound the speed lookup.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/721d84815f485ba9cb2a2cd6b1de038d36469caa"
+    },
+    {
+      "sha": "93dfdf99296a58708fea3166f693074d683e1852",
+      "date": "2026-08-07T03:19:04+08:00",
+      "subject": "Use compatible checkbox marker glyphs (#840)",
+      "paths": [
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/tui.rs"
+      ],
+      "disposition": "Use compatible square checkbox markers instead of emoji ballot-box glyphs.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/93dfdf99296a58708fea3166f693074d683e1852"
+    },
+    {
+      "sha": "9b34f1876966d834453cba39968f97137d0471b4",
+      "date": "2026-08-07T02:59:32+03:00",
+      "subject": "Toggle menus on click (#793)",
+      "paths": [
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/tui.rs"
+      ],
+      "disposition": "Clicking an open menu again closes it after the opening press ends.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/9b34f1876966d834453cba39968f97137d0471b4"
+    },
+    {
+      "sha": "d6ba99bf3f961972d04ac55aae0f5e27a5db0c2f",
+      "date": "2026-08-10T20:00:01+08:00",
+      "subject": "Update Chinese translations (#910)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Chinese corrections. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/d6ba99bf3f961972d04ac55aae0f5e27a5db0c2f"
+    },
+    {
+      "sha": "adf09b8b60013148cea34064836905816be6cf42",
+      "date": "2026-08-11T00:30:34+02:00",
+      "subject": "Sanitize all text before printing (#913)",
+      "paths": [
+        ".vscode/launch.json",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/stdext/src/collections/string.rs",
+        "crates/stdext/src/collections/vec.rs",
+        "crates/stdext/src/lib.rs",
+        "crates/stdext/src/maybe_owned.rs",
+        "crates/stdext/src/unicode/mod.rs",
+        "crates/stdext/src/unicode/sanitize.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/unicode/sanitize.rs",
+        "src/framebuffer.rs",
+        "src/bin/edit/main.rs"
+      ],
+      "disposition": "Sanitize C0/C1 controls and malformed UTF-8 at framebuffer insertion and terminal-title boundaries. Preserve buffer control-glyph coloring and clean-text borrowed fast path.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/adf09b8b60013148cea34064836905816be6cf42"
+    },
+    {
+      "sha": "01b3bc64118c19482ae7f4d947ae149b19baf15b",
+      "date": "2026-08-11T14:14:24+02:00",
+      "subject": "Add Norwegian translations (#914)",
+      "paths": [
+        "i18n/edit.toml"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "i18n/edit.toml",
+        "build/i18n.rs"
+      ],
+      "disposition": "Merged latest upstream translation catalogue: Norwegian Bokmal/Nynorsk and no alias. Preserved all nine OGEdit-only translation sections.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/01b3bc64118c19482ae7f4d947ae149b19baf15b"
+    },
+    {
+      "sha": "7557c7800ed856eaad51384d27b401f16f0c905e",
+      "date": "2026-08-11T21:31:26+09:00",
+      "subject": "Improve Ruby highlighting (#911)",
+      "paths": [
+        "assets/highlighting-tests/ruby.rb",
+        "crates/lsh/definitions/ruby.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/ruby.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Ruby grammar improvements already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/7557c7800ed856eaad51384d27b401f16f0c905e"
+    },
+    {
+      "sha": "22689f47b82b8c99537a13939e4b24810e5519c7",
+      "date": "2026-08-19T09:43:15-04:00",
+      "subject": "Pin GitHub Actions to full-length commit SHAs (#920)",
+      "paths": [
+        ".github/dependabot.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/winget.yml"
+      ],
+      "status": "backported",
+      "evidence": [
+        ".github/workflows",
+        ".github/dependabot.yml",
+        "tools/test_delivery.py"
+      ],
+      "disposition": "Pin all existing GitHub Actions references to full SHAs while retaining current major versions; add grouped Dependabot maintenance. Do not add Microsoft WinGet publishing.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/22689f47b82b8c99537a13939e4b24810e5519c7"
+    },
+    {
+      "sha": "861419d10e69485c6479e772db4f9cef2822b8d4",
+      "date": "2026-08-26T02:58:34+08:00",
+      "subject": "Allow memset fallback to non SIMD implementation on x86 (#940)",
+      "paths": [
+        "crates/stdext/src/simd/memset.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/simd/memset.rs",
+        "src/simd/mod.rs"
+      ],
+      "disposition": "Select scalar fill when x86 lacks SSE2, and use immutable OnceLock dispatch to avoid races in concurrent editor workers.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/861419d10e69485c6479e772db4f9cef2822b8d4"
+    },
+    {
+      "sha": "4bfb9d956c5519338ae95e57bace6bcd692c7508",
+      "date": "2026-08-27T01:44:38+02:00",
+      "subject": "json: Double perf, Thirdle memory use (#941)",
+      "paths": [
+        "crates/edit/src/json.rs",
+        "crates/stdext/src/collections/string.rs",
+        "crates/stdext/src/collections/vec.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "Cargo.toml",
+        "src/bin/edit/settings.rs",
+        "src/bin/edit/data_lens.rs"
+      ],
+      "disposition": "Custom JSON/BVec parser architecture is not used in OGEdit. Existing serde_json/jsonc-parser handle the supported features; no claim is made to match the upstream parser performance figures.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/4bfb9d956c5519338ae95e57bace6bcd692c7508"
+    },
+    {
+      "sha": "310d6e66c87657e9ce206c6d4bee226fb9cd7bc2",
+      "date": "2026-08-27T21:30:27+02:00",
+      "subject": "Fix a \"chunk size must be non-zero\" panic (#919)",
+      "paths": [
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/input.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/helpers.rs",
+        "src/input.rs",
+        "src/framebuffer.rs",
+        "src/tui.rs",
+        "src/sys"
+      ],
+      "disposition": "Deliver native window-size events separately from input text, use a valid startup viewport, preserve it on zero-size reports and prevent zero-sized bitmap chunks or forged CSI resize events.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/310d6e66c87657e9ce206c6d4bee226fb9cd7bc2"
+    },
+    {
+      "sha": "826b4c097b6f14ba0a846dc56f2f0223a3aaf73a",
+      "date": "2026-08-27T22:52:08+02:00",
+      "subject": "Add an Inno Setup Installer (#915)",
+      "paths": [
+        ".github/workflows/winget.yml",
+        ".pipelines/nuget.config",
+        ".pipelines/packages.config",
+        ".pipelines/release.yml",
+        "assets/build-windows-setup.ps1",
+        "assets/edit.iss"
+      ],
+      "status": "not_applicable",
+      "evidence": [
+        "wix/main.wxs",
+        ".github/workflows/release.yml"
+      ],
+      "disposition": "Keep OGEdit MSI/package delivery. The upstream Inno/WinGet/Azure installer has Microsoft identity and recursively removes its application directory, so it is not copied over the fork installer.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/826b4c097b6f14ba0a846dc56f2f0223a3aaf73a"
+    },
+    {
+      "sha": "adc60a88d966d76944458294a550b3cd36e8b43e",
+      "date": "2026-09-17T21:33:34+05:00",
+      "subject": "Don't indent a line the selection stops at column 0 of (#918)",
+      "paths": [
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/buffer/mod.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Exclude a final line-start endpoint from multiline indentation, matching existing multicursor behavior.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/adc60a88d966d76944458294a550b3cd36e8b43e"
+    },
+    {
+      "sha": "650edc1c7467932aebeb4d1fc8de607bc40e1c6f",
+      "date": "2026-09-18T01:27:34+03:00",
+      "subject": "Unindent leading whitespace on backspace (#792)",
+      "paths": [
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-ui-integration.md",
+        "src/buffer/mod.rs",
+        "src/tui.rs",
+        "src/bin/edit/macros.rs"
+      ],
+      "disposition": "Within leading whitespace, Backspace unindents to the previous tab stop and Ctrl+Backspace goes to line start. Apply the same operation to multicursors and macro replay; elsewhere and in single-line fields, ordinary deletion remains.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/650edc1c7467932aebeb4d1fc8de607bc40e1c6f"
+    },
+    {
+      "sha": "8c97fa2d95ac03403b738c77d6e10cfdac53218f",
+      "date": "2026-09-18T20:33:51+02:00",
+      "subject": "Theoretical fix for crashing when tabbing (#955)",
+      "paths": [
+        "crates/edit/src/tui.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-ui-integration.md",
+        "src/tui.rs"
+      ],
+      "disposition": "Restrict Tab traversal to a real ancestor of the focused node so unrelated focus wells cannot borrow the wrong subtree.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/8c97fa2d95ac03403b738c77d6e10cfdac53218f"
+    },
+    {
+      "sha": "b767559c323bebf95f5987a7fa66e79832291a5e",
+      "date": "2026-09-18T20:34:02+02:00",
+      "subject": "Configure CodeQL (#956)",
+      "paths": [
+        ".github/codeql/codeql-config.yml",
+        ".github/workflows/codeql-analysis.yml"
+      ],
+      "status": "backported",
+      "evidence": [
+        ".github/workflows/codeql-analysis.yml",
+        ".github/codeql/codeql-config.yml"
+      ],
+      "disposition": "Add CodeQL Rust workflow/configuration for the fork, with SHA-pinned actions and repository-appropriate permissions.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/b767559c323bebf95f5987a7fa66e79832291a5e"
+    },
+    {
+      "sha": "f6ae6154576316a38854800f25e2d3c6a737dce6",
+      "date": "2026-09-21T16:48:28+02:00",
+      "subject": "Fix reading overly large files (#954)",
+      "paths": [
+        "crates/edit/src/buffer/gap_buffer.rs",
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/buffer/gap_buffer.rs",
+        "src/buffer/mod.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Checked large-file virtual reservation, robust metadata/stream reads and explicit capacity errors prevent successful truncated loads. Backing replacement frees the old mapping only once.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/f6ae6154576316a38854800f25e2d3c6a737dce6"
+    },
+    {
+      "sha": "2c4177f6ffb0752a677ea9bf8296beb9b79574e7",
+      "date": "2026-09-21T18:12:41+02:00",
+      "subject": "Turn lsh into a standalone crate (#958)",
+      "paths": [
+        ".github/workflows/ci.yml",
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/README.md",
+        "crates/edit/Cargo.toml",
+        "crates/edit/benches/lib.rs",
+        "crates/edit/build/main.rs",
+        "crates/edit/src/lsh/highlighter.rs",
+        "crates/edit/src/lsh/mod.rs",
+        "crates/lsh-bin/Cargo.toml",
+        "crates/lsh-bin/src/main.rs",
+        "crates/lsh/Cargo.toml",
+        "crates/lsh/README.md",
+        "crates/lsh/src/compiler/backend.rs",
+        "crates/lsh/src/compiler/charset.rs",
+        "crates/lsh/src/compiler/frontend.rs",
+        "crates/lsh/src/compiler/generator.rs",
+        "crates/lsh/src/compiler/index_vec.rs",
+        "crates/lsh/src/compiler/ir.rs",
+        "crates/lsh/src/compiler/mod.rs",
+        "crates/lsh/src/compiler/optimizer.rs",
+        "crates/lsh/src/compiler/regex.rs",
+        "crates/lsh/src/glob.rs",
+        "crates/lsh/src/lib.rs",
+        "crates/lsh/src/main.rs",
+        "crates/lsh/src/runtime.rs",
+        "crates/stdext/src/glob.rs",
+        "crates/stdext/src/lib.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/Cargo.toml",
+        "vendor/lsh/src",
+        "Cargo.toml"
+      ],
+      "disposition": "LSH was already vendored as the current standalone crate, including compiler, runtime and CLI. Workspace membership now adds its integration checks; no intermediate stdext dependency is restored.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/2c4177f6ffb0752a677ea9bf8296beb9b79574e7"
+    },
+    {
+      "sha": "3cff89ee82ee1a7fd1a520449259f4bb8f364b8f",
+      "date": "2026-09-21T18:33:41+02:00",
+      "subject": "Enable CodeQL for actions (#959)",
+      "paths": [
+        ".github/workflows/codeql-analysis.yml"
+      ],
+      "status": "backported",
+      "evidence": [
+        ".github/workflows/codeql-analysis.yml"
+      ],
+      "disposition": "Include GitHub Actions in the CodeQL language matrix alongside Rust.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/3cff89ee82ee1a7fd1a520449259f4bb8f364b8f"
+    },
+    {
+      "sha": "c470ca59af44c176ea39c672d09b32061c274896",
+      "date": "2026-09-21T22:48:38+02:00",
+      "subject": "Reintegrate stdext into edit (#960)",
+      "paths": [
+        ".github/workflows/ci.yml",
+        "Cargo.lock",
+        "crates/README.md",
+        "crates/edit/Cargo.toml",
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/alloc.rs",
+        "crates/edit/src/arena/debug.rs",
+        "crates/edit/src/arena/fs.rs",
+        "crates/edit/src/arena/mod.rs",
+        "crates/edit/src/arena/release.rs",
+        "crates/edit/src/arena/scratch.rs",
+        "crates/edit/src/base64.rs",
+        "crates/edit/src/bin/edit/draw_editor.rs",
+        "crates/edit/src/bin/edit/draw_filepicker.rs",
+        "crates/edit/src/bin/edit/draw_menubar.rs",
+        "crates/edit/src/bin/edit/draw_statusbar.rs",
+        "crates/edit/src/bin/edit/localization.rs",
+        "crates/edit/src/bin/edit/main.rs",
+        "crates/edit/src/bin/edit/settings.rs",
+        "crates/edit/src/buffer/gap_buffer.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/collections/mod.rs",
+        "crates/edit/src/collections/string.rs",
+        "crates/edit/src/collections/vec.rs",
+        "crates/edit/src/document.rs",
+        "crates/edit/src/float.rs",
+        "crates/edit/src/framebuffer.rs",
+        "crates/edit/src/fuzzy.rs",
+        "crates/edit/src/helpers.rs",
+        "crates/edit/src/icu.rs",
+        "crates/edit/src/json.rs",
+        "crates/edit/src/lib.rs",
+        "crates/edit/src/lsh/cache.rs",
+        "crates/edit/src/lsh/highlighter.rs",
+        "crates/edit/src/maybe_owned.rs",
+        "crates/edit/src/simd/memchr2.rs",
+        "crates/edit/src/simd/memset.rs",
+        "crates/edit/src/simd/mod.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs",
+        "crates/edit/src/tui.rs",
+        "crates/edit/src/unicode/measurement.rs",
+        "crates/edit/src/unicode/mod.rs",
+        "crates/edit/src/unicode/sanitize.rs",
+        "crates/edit/src/unicode/utf8.rs",
+        "crates/edit/src/vt.rs",
+        "crates/lsh/README.md",
+        "crates/stdext/Cargo.toml",
+        "crates/stdext/src/alloc.rs",
+        "crates/stdext/src/arena/debug.rs",
+        "crates/stdext/src/arena/fs.rs",
+        "crates/stdext/src/arena/mod.rs",
+        "crates/stdext/src/arena/release.rs",
+        "crates/stdext/src/arena/scratch.rs",
+        "crates/stdext/src/collections/mod.rs",
+        "crates/stdext/src/collections/string.rs",
+        "crates/stdext/src/collections/vec.rs",
+        "crates/stdext/src/float.rs",
+        "crates/stdext/src/helpers.rs",
+        "crates/stdext/src/lib.rs",
+        "crates/stdext/src/maybe_owned.rs",
+        "crates/stdext/src/simd/memset.rs",
+        "crates/stdext/src/simd/mod.rs",
+        "crates/stdext/src/sys/mod.rs",
+        "crates/stdext/src/sys/unix.rs",
+        "crates/stdext/src/sys/windows.rs",
+        "crates/stdext/src/unicode/mod.rs",
+        "crates/stdext/src/unicode/sanitize.rs",
+        "crates/stdext/src/unicode/utf8.rs",
+        "fuzz/Cargo.lock",
+        "fuzz/Cargo.toml",
+        "fuzz/fuzz_targets/highlighter.rs"
+      ],
+      "status": "superseded",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/arena",
+        "src/helpers.rs",
+        "fuzz/Cargo.toml"
+      ],
+      "disposition": "OGEdit already has allocator/helpers within its own crate. Apply runtime fixes independently and adapt the fuzz harness; do not recreate then undo the stdext split.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c470ca59af44c176ea39c672d09b32061c274896"
+    },
+    {
+      "sha": "469e0e2648a1cb066488b07bdfae60c79898aae8",
+      "date": "2026-10-02T00:56:16+05:30",
+      "subject": "Add various file extensions (#945)",
+      "paths": [
+        "crates/lsh/definitions/cpp.lsh",
+        "crates/lsh/definitions/fsharp.lsh",
+        "crates/lsh/definitions/json.lsh",
+        "crates/lsh/definitions/xml.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/cpp.lsh",
+        "vendor/lsh/definitions/fsharp.lsh",
+        "vendor/lsh/definitions/json.lsh",
+        "vendor/lsh/definitions/xml.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Additional C++, F#, JSON and XML filename extensions already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/469e0e2648a1cb066488b07bdfae60c79898aae8"
+    },
+    {
+      "sha": "91244f5f405a9bac289b98dabfcf55ae5866000b",
+      "date": "2026-10-02T00:05:50+04:00",
+      "subject": "Add Zig highlighting (#925)",
+      "paths": [
+        "assets/highlighting-tests/zig.zig",
+        "crates/lsh/definitions/zig.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/zig.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Zig grammar already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/91244f5f405a9bac289b98dabfcf55ae5866000b"
+    },
+    {
+      "sha": "8bb20388aca01287c404a1de64815606a88a5290",
+      "date": "2026-10-02T02:35:56+05:30",
+      "subject": "Add SQL syntax highlighting (#943)",
+      "paths": [
+        "assets/highlighting-tests/sql.sql",
+        "crates/lsh/definitions/sql.lsh",
+        "crates/lsh/definitions/zig.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/sql.lsh",
+        "vendor/lsh/definitions/zig.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "SQL grammar and Zig adjustments already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/8bb20388aca01287c404a1de64815606a88a5290"
+    },
+    {
+      "sha": "731fc9a3b7e6421211c99e919114aa1206774864",
+      "date": "2026-10-01T23:49:16+02:00",
+      "subject": "Introduce utf8_decode_last (#969)",
+      "paths": [
+        "crates/edit/src/unicode/utf8.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/unicode/utf8.rs"
+      ],
+      "disposition": "Add backward UTF-8 scalar decoding with malformed/truncated-tail tests.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/731fc9a3b7e6421211c99e919114aa1206774864"
+    },
+    {
+      "sha": "78cf564a57ec9f957ff1c29b00a77c26f4ad7918",
+      "date": "2026-10-01T21:50:57Z",
+      "subject": "Improve YAML highlighting (#967)",
+      "paths": [
+        "assets/highlighting-tests/yaml.yml",
+        "crates/lsh/definitions/yaml.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/yaml.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "YAML grammar improvements already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/78cf564a57ec9f957ff1c29b00a77c26f4ad7918"
+    },
+    {
+      "sha": "c04475cf38af0cb1e263bd93fb26601a8ade1639",
+      "date": "2026-10-01T23:53:41+02:00",
+      "subject": "Don't require grapheme boundaries (#970)",
+      "paths": [
+        "crates/edit/src/buffer/navigation.rs",
+        "crates/edit/src/document.rs",
+        "crates/edit/src/unicode/measurement.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/document.rs",
+        "src/buffer/navigation.rs",
+        "src/unicode/measurement.rs"
+      ],
+      "disposition": "Allow document chunks to split grapheme clusters at codepoint boundaries, and handle CRLF across the gap in both navigation directions.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/c04475cf38af0cb1e263bd93fb26601a8ade1639"
+    },
+    {
+      "sha": "25fcee57c8e0422fa1f75390b1e45f6c0109aa09",
+      "date": "2026-10-02T00:51:46+02:00",
+      "subject": "Fix undo grouping in TextBuffer benchmarks (#971)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "benches/lib.rs",
+        "src/buffer/mod.rs"
+      ],
+      "disposition": "Trace benchmarks record real Move/Insert/Delete/Replace operations without unconditional cursor moves. Replace All groups explicitly; keep OGEdit separate paste undo semantics.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/25fcee57c8e0422fa1f75390b1e45f6c0109aa09"
+    },
+    {
+      "sha": "a359626098076da4a1a01dd93446d2b63b17a271",
+      "date": "2026-10-05T18:12:43+02:00",
+      "subject": "Improve Arena allocator perf (#974)",
+      "paths": [
+        "crates/edit/src/arena/release.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/arena/release.rs"
+      ],
+      "disposition": "Skip a zero-byte copy intrinsic while growing arena storage, preserving checked alignment and capacity calculations.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/a359626098076da4a1a01dd93446d2b63b17a271"
+    },
+    {
+      "sha": "be94eccd7f27091783f56e3a96f7ac012a2ef36a",
+      "date": "2026-10-06T21:08:29+02:00",
+      "subject": "Make newline normalization undoable (#978)",
+      "paths": [
+        "crates/edit/benches/lib.rs",
+        "crates/edit/src/buffer/mod.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "src/buffer/mod.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Retain existing reversible eager newline conversion; add preference-only undo and buffered, fully drained encoding writes. Do not adopt output-only normalization that would diverge from editable views/recovery bytes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/be94eccd7f27091783f56e3a96f7ac012a2ef36a"
+    },
+    {
+      "sha": "61184294aa3e5058fd9724f6ba27f78e16ff8678",
+      "date": "2026-10-06T23:22:29+02:00",
+      "subject": "Fix several major undo/redo issues (#979)",
+      "paths": [
+        "crates/edit/src/buffer/gap_buffer.rs",
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/unicode/mod.rs",
+        "crates/edit/src/unicode/utf8.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/buffer/mod.rs",
+        "src/buffer/gap_buffer.rs",
+        "src/unicode/mod.rs",
+        "src/buffer/upstream_tests.rs"
+      ],
+      "disposition": "Fresh branch/reload revisions, save barriers, adjacency-aware history, exact-byte replay and grapheme-seam remeasurement. Retain complete bounded history groups, current-layout undo and nested/multicursor transactions.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/61184294aa3e5058fd9724f6ba27f78e16ff8678"
+    },
+    {
+      "sha": "cc1b35e58e29c32bb138825e7bc71e63b099bd23",
+      "date": "2026-10-06T23:25:27+02:00",
+      "subject": "Introduce copious amounts of TextBuffer tests (#980)",
+      "paths": [
+        "crates/edit/src/buffer/mod.rs",
+        "crates/edit/src/sys/unix.rs",
+        "crates/edit/src/sys/windows.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-core-integration.md",
+        "docs/upstream-platform-integration.md",
+        "src/buffer/upstream_tests.rs",
+        "src/sys/unix.rs",
+        "src/sys/windows.rs"
+      ],
+      "disposition": "Adapt 25 upstream buffer regressions and add fork-specific edge cases. Add anonymous temporary-file helpers. Two output-only normalization cases are represented by equivalent eager-conversion tests.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/cc1b35e58e29c32bb138825e7bc71e63b099bd23"
+    },
+    {
+      "sha": "e3e3b4c4d56a9dbd5e1586d3cf2e4f4848d72f26",
+      "date": "2026-10-06T23:37:03+02:00",
+      "subject": "Fix multiline strings for .js/.py/.sh (#973)",
+      "paths": [
+        "assets/highlighting-tests/javascript.js",
+        "assets/highlighting-tests/python.py",
+        "assets/highlighting-tests/shellscript.sh",
+        "crates/edit/benches/lib.rs",
+        "crates/lsh/README.md",
+        "crates/lsh/definitions/javascript.lsh",
+        "crates/lsh/definitions/python.lsh",
+        "crates/lsh/definitions/shellscript.lsh",
+        "crates/lsh/src/compiler/frontend.rs",
+        "crates/lsh/src/compiler/regex.rs",
+        "crates/lsh/src/runtime.rs"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/javascript.lsh",
+        "vendor/lsh/definitions/python.lsh",
+        "vendor/lsh/definitions/shellscript.lsh",
+        "vendor/lsh/src/compiler/frontend.rs",
+        "vendor/lsh/src/compiler/regex.rs",
+        "vendor/lsh/src/runtime.rs",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "JavaScript/Python/Shell multiline matching and associated runtime/compiler fixes already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/e3e3b4c4d56a9dbd5e1586d3cf2e4f4848d72f26"
+    },
+    {
+      "sha": "fdc3d14ef87b4de8f7c9c6a6add6ba79cc486d63",
+      "date": "2026-10-08T00:22:45+02:00",
+      "subject": "unix: Fix EINTR handling in write_stdout (#982)",
+      "paths": [
+        "crates/edit/src/sys/unix.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/sys/unix.rs"
+      ],
+      "disposition": "Unix output advances the actual remaining slice, retries EINTR, handles zero writes and waits for writability after EAGAIN without looping on hangups.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/fdc3d14ef87b4de8f7c9c6a6add6ba79cc486d63"
+    },
+    {
+      "sha": "01df2525411e01fce951c229018cee2cf9aa6b36",
+      "date": "2026-10-08T00:52:37+02:00",
+      "subject": "unix: Avoid open() in file_id() (#983)",
+      "paths": [
+        "crates/edit/src/sys/unix.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/sys/unix.rs"
+      ],
+      "disposition": "Unix file identity uses metadata device/inode instead of opening a file merely to identify it.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/01df2525411e01fce951c229018cee2cf9aa6b36"
+    },
+    {
+      "sha": "a820b05544bd751a0f138e7b25ebcdddea29de1f",
+      "date": "2026-10-08T01:23:35+02:00",
+      "subject": "unix: Fix lang selection with an empty LANGUAGE env var (#984)",
+      "paths": [
+        "crates/edit/src/sys/unix.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/sys/unix.rs"
+      ],
+      "disposition": "Empty/delimiter-only LANGUAGE falls back correctly; include LC_MESSAGES between LC_ALL and LANG.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/a820b05544bd751a0f138e7b25ebcdddea29de1f"
+    },
+    {
+      "sha": "67543cbfcdf24be10bfc1e36296f7a6a5843cd08",
+      "date": "2026-10-08T01:44:54+02:00",
+      "subject": "unix: Fix EINTR handling around termios (#985)",
+      "paths": [
+        "crates/edit/src/sys/unix.rs"
+      ],
+      "status": "backported",
+      "evidence": [
+        "docs/upstream-platform-integration.md",
+        "src/sys/unix.rs"
+      ],
+      "disposition": "Retry interrupted terminal setup/restore, apply current raw-mode flags and preserve original descriptor flags; close the reopened terminal descriptor during cleanup.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/67543cbfcdf24be10bfc1e36296f7a6a5843cd08"
+    },
+    {
+      "sha": "1be69c85a63bcd475a0b397196d0be3dbed60023",
+      "date": "2026-10-09T17:15:19+02:00",
+      "subject": "Fix lsh manifest (#988)",
+      "paths": [
+        "crates/lsh/Cargo.toml"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "vendor/lsh/Cargo.toml",
+        "target/upstream-audit/lsh-differences.json"
+      ],
+      "disposition": "Vendored LSH already uses valid parsing/text-processing/compilers categories and syntax/highlighter/highlighting keywords. Local standalone manifest metadata is intentional.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/1be69c85a63bcd475a0b397196d0be3dbed60023"
+    },
+    {
+      "sha": "cb6de0a8966aecd01d19a3541dab1829d0e679ca",
+      "date": "2026-10-12T13:50:34+01:00",
+      "subject": "python.lsh: Avoid capturing underscores as numeric literals (#981)",
+      "paths": [
+        "crates/lsh/definitions/c.lsh",
+        "crates/lsh/definitions/cpp.lsh",
+        "crates/lsh/definitions/csharp.lsh",
+        "crates/lsh/definitions/fsharp.lsh",
+        "crates/lsh/definitions/go.lsh",
+        "crates/lsh/definitions/java.lsh",
+        "crates/lsh/definitions/javascript.lsh",
+        "crates/lsh/definitions/odin.lsh",
+        "crates/lsh/definitions/python.lsh",
+        "crates/lsh/definitions/ruby.lsh",
+        "crates/lsh/definitions/rust.lsh",
+        "crates/lsh/definitions/toml.lsh",
+        "crates/lsh/definitions/yaml.lsh",
+        "crates/lsh/definitions/zig.lsh"
+      ],
+      "status": "already_present",
+      "evidence": [
+        "target/upstream-audit/lsh-differences.json",
+        "vendor/lsh/definitions/python.lsh",
+        "vendor/lsh/definitions/c.lsh",
+        "vendor/lsh/definitions/cpp.lsh",
+        "vendor/lsh/definitions/csharp.lsh",
+        "vendor/lsh/definitions/fsharp.lsh",
+        "vendor/lsh/definitions/go.lsh",
+        "vendor/lsh/definitions/java.lsh",
+        "vendor/lsh/definitions/javascript.lsh",
+        "vendor/lsh/definitions/odin.lsh",
+        "vendor/lsh/definitions/ruby.lsh",
+        "vendor/lsh/definitions/rust.lsh",
+        "vendor/lsh/definitions/toml.lsh",
+        "vendor/lsh/definitions/yaml.lsh",
+        "vendor/lsh/definitions/zig.lsh",
+        "src/syntax.rs",
+        "assets/highlighting-tests"
+      ],
+      "disposition": "Numeric-literal underscore handling in Python and the other updated language grammars already present in the vendored latest LSH snapshot; confirmed against fetched upstream. Newly copied fixtures extend validation, not the claimed provenance of runtime changes.",
+      "upstream_url": "https://github.com/microsoft/edit/commit/cb6de0a8966aecd01d19a3541dab1829d0e679ca"
+    }
+  ],
+  "integration_method": "Adapted backports in the existing working tree; no Git ancestry merge or commit was created.",
+  "pre_integration_backup": "target/upstream-audit/pre-integration.zip",
+  "pre_integration_manifest": "target/upstream-audit/pre-integration-manifest.json",
+  "status_definitions": {
+    "backported": "Applicable changes were implemented or adapted during this integration. A mixed commit may retain documented fork-specific structures.",
+    "already_present": "Relevant behavior/source was already present before this integration and was verified; added validation assets do not imply newly ported runtime code.",
+    "superseded": "An intermediate organization, redundant implementation or weaker alternative is replaced by an explicitly documented existing fork design.",
+    "not_applicable": "The change targets Microsoft-specific distribution/release identity or a collection implementation not used by OGEdit."
+  },
+  "summary": {
+    "total_commits": 122,
+    "reviewed_commits": 122,
+    "pending_commits": 0,
+    "status_counts": {
+      "already_present": 38,
+      "backported": 71,
+      "not_applicable": 6,
+      "superseded": 7
+    }
+  },
+  "final_validation": {
+    "debug": {
+      "editor_library": 193,
+      "application": 116,
+      "lsh": 3,
+      "passed": 312
+    },
+    "release": {
+      "passed": 312
+    },
+    "asan": {
+      "passed": 312,
+      "test_threads": 1,
+      "memory_diagnostics": 0,
+      "initial_parallel_worker_timeout": "Passed isolated recheck and complete serial suite; assertions unchanged."
+    },
+    "doctests": 3,
+    "clippy": "pass",
+    "cross_compile": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-apple-darwin"
+    ],
+    "delivery_fixture_tests": 18,
+    "source_installer_fixture_tests": 3,
+    "fuzz_harness": "compiles; no coverage-guided run",
+    "actionlint": "pass",
+    "browser": {
+      "feature_matrix": "pass",
+      "release_acceptance": "pass: 12 documents, 8 panels, 20 palettes, 16 byte-verified Save As operations",
+      "release_churn": "pass: five rounds, 30 documents, 20 panels, 100 palettes",
+      "normal_exit": "Ctrl+Q; process stopped",
+      "memory": {
+        "median_window_limit": 10,
+        "memory_unit": "bytes",
+        "span_definition": "Last minus first sample timestamp, including gaps.",
+        "vms_note": "platform_vms is platform-specific; Windows vms is commit/pagefile usage, not reserved virtual address space. Legacy reserved_virtual_bytes is not summarized.",
+        "runs": [
+          {
+            "pid": 20024,
+            "generation": "4",
+            "sample_count": 905,
+            "first_time": 1792256051.9618597,
+            "last_time": 1792256550.2227945,
+            "span_seconds": 498.2609348297119,
+            "median_window_samples": 10,
+            "median_windows_overlap": false,
+            "metrics": {
+              "private_bytes": {
+                "first10_median": 2125824.0,
+                "last10_median": 2920448.0,
+                "median_delta": 794624.0,
+                "peak": 16658432
+              },
+              "rss": {
+                "first10_median": 9998336.0,
+                "last10_median": 12226560.0,
+                "median_delta": 2228224.0,
+                "peak": 24170496
+              },
+              "handles": {
+                "first10_median": 115.0,
+                "last10_median": 119.0,
+                "median_delta": 4.0,
+                "peak": 123
+              },
+              "threads": {
+                "first10_median": 5.0,
+                "last10_median": 3.0,
+                "median_delta": -2.0,
+                "peak": 6
+              }
+            },
+            "phases": [
+              {
+                "phase": "release-warm",
+                "episodes": 1,
+                "sample_count": 68,
+                "first_time": 1792256051.9618597,
+                "last_time": 1792256088.0018563,
+                "span_seconds": 36.03999662399292,
+                "median_window_samples": 10,
+                "median_windows_overlap": false,
+                "metrics": {
+                  "private_bytes": {
+                    "first10_median": 2125824.0,
+                    "last10_median": 2629632.0,
+                    "median_delta": 503808.0,
+                    "peak": 2760704
+                  },
+                  "rss": {
+                    "first10_median": 9998336.0,
+                    "last10_median": 11436032.0,
+                    "median_delta": 1437696.0,
+                    "peak": 11509760
+                  },
+                  "handles": {
+                    "first10_median": 115.0,
+                    "last10_median": 119.0,
+                    "median_delta": 4.0,
+                    "peak": 119
+                  },
+                  "threads": {
+                    "first10_median": 5.0,
+                    "last10_median": 3.0,
+                    "median_delta": -2.0,
+                    "peak": 5
+                  }
+                }
+              },
+              {
+                "phase": "release-workload",
+                "episodes": 1,
+                "sample_count": 152,
+                "first_time": 1792256088.5410478,
+                "last_time": 1792256168.5552561,
+                "span_seconds": 80.01420831680298,
+                "median_window_samples": 10,
+                "median_windows_overlap": false,
+                "metrics": {
+                  "private_bytes": {
+                    "first10_median": 2629632.0,
+                    "last10_median": 2887680.0,
+                    "median_delta": 258048.0,
+                    "peak": 14008320
+                  },
+                  "rss": {
+                    "first10_median": 11436032.0,
+                    "last10_median": 12054528.0,
+                    "median_delta": 618496.0,
+                    "peak": 21958656
+                  },
+                  "handles": {
+                    "first10_median": 119.0,
+                    "last10_median": 119.0,
+                    "median_delta": 0.0,
+                    "peak": 120
+                  },
+                  "threads": {
+                    "first10_median": 3.0,
+                    "last10_median": 3.0,
+                    "median_delta": 0.0,
+                    "peak": 6
+                  }
+                }
+              },
+              {
+                "phase": "release-settled",
+                "episodes": 1,
+                "sample_count": 38,
+                "first_time": 1792256169.076088,
+                "last_time": 1792256188.7709055,
+                "span_seconds": 19.694817543029785,
+                "median_window_samples": 10,
+                "median_windows_overlap": false,
+                "metrics": {
+                  "private_bytes": {
+                    "first10_median": 2887680.0,
+                    "last10_median": 2887680.0,
+                    "median_delta": 0.0,
+                    "peak": 2891776
+                  },
+                  "rss": {
+                    "first10_median": 12054528.0,
+                    "last10_median": 12054528.0,
+                    "median_delta": 0.0,
+                    "peak": 12058624
+                  },
+                  "handles": {
+                    "first10_median": 119.0,
+                    "last10_median": 119.0,
+                    "median_delta": 0.0,
+                    "peak": 119
+                  },
+                  "threads": {
+                    "first10_median": 3.0,
+                    "last10_median": 3.0,
+                    "median_delta": 0.0,
+                    "peak": 3
+                  }
+                }
+              },
+              {
+                "phase": "release-churn",
+                "episodes": 1,
+                "sample_count": 542,
+                "first_time": 1792256189.314465,
+                "last_time": 1792256485.9591117,
+                "span_seconds": 296.6446466445923,
+                "median_window_samples": 10,
+                "median_windows_overlap": false,
+                "metrics": {
+                  "private_bytes": {
+                    "first10_median": 2887680.0,
+                    "last10_median": 2912256.0,
+                    "median_delta": 24576.0,
+                    "peak": 16658432
+                  },
+                  "rss": {
+                    "first10_median": 12054528.0,
+                    "last10_median": 12218368.0,
+                    "median_delta": 163840.0,
+                    "peak": 24170496
+                  },
+                  "handles": {
+                    "first10_median": 119.0,
+                    "last10_median": 119.0,
+                    "median_delta": 0.0,
+                    "peak": 123
+                  },
+                  "threads": {
+                    "first10_median": 3.0,
+                    "last10_median": 3.0,
+                    "median_delta": 0.0,
+                    "peak": 5
+                  }
+                }
+              },
+              {
+                "phase": "release-churn-settled",
+                "episodes": 1,
+                "sample_count": 105,
+                "first_time": 1792256486.5649865,
+                "last_time": 1792256550.2227945,
+                "span_seconds": 63.65780806541443,
+                "median_window_samples": 10,
+                "median_windows_overlap": false,
+                "metrics": {
+                  "private_bytes": {
+                    "first10_median": 2912256.0,
+                    "last10_median": 2920448.0,
+                    "median_delta": 8192.0,
+                    "peak": 2924544
+                  },
+                  "rss": {
+                    "first10_median": 12218368.0,
+                    "last10_median": 12226560.0,
+                    "median_delta": 8192.0,
+                    "peak": 12230656
+                  },
+                  "handles": {
+                    "first10_median": 119.0,
+                    "last10_median": 119.0,
+                    "median_delta": 0.0,
+                    "peak": 119
+                  },
+                  "threads": {
+                    "first10_median": 3.0,
+                    "last10_median": 3.0,
+                    "median_delta": 0.0,
+                    "peak": 3
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "evidence": [
+        "target/upstream-audit/browser-release-workload.txt",
+        "target/upstream-audit/browser-release-churn.txt",
+        "target/upstream-audit/browser-release-churn.png"
+      ]
+    },
+    "installation": {
+      "path": "%LOCALAPPDATA%\\Programs\\OGEdit\\ogedit.exe",
+      "sha256": "6C0A67315596B5EB09AFBEFFD397BE5978AB3A56F2346A88057FB57005708AAA",
+      "size": 2620416,
+      "backup": "%LOCALAPPDATA%\\Programs\\OGEdit\\ogedit.previous-20261017-200250.exe",
+      "previousSha256": "0F1954699EDCC99150BF9FFEE5D2585E13B36BAEC2FF3C713540B55544357BE2",
+      "version": "ogedit version 1.2.4",
+      "installedAt": "2026-10-17T20:02:50.7998978+03:00"
+    }
+  }
+}

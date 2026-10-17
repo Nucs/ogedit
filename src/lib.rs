@@ -3,9 +3,7 @@
 
 #![feature(
     allocator_api,
-    breakpoint,
     cold_path,
-    linked_list_cursors,
     maybe_uninit_fill,
     maybe_uninit_slice,
     maybe_uninit_uninit_array_transpose
@@ -35,6 +33,7 @@ pub mod input;
 pub mod oklab;
 pub mod path;
 pub mod simd;
+pub mod syntax;
 pub mod sys;
 pub mod tui;
 pub mod unicode;

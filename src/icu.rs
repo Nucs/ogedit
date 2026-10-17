@@ -3,15 +3,18 @@
 
 //! Bindings to the ICU library.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::ffi::{CStr, c_char};
 use std::mem;
 use std::mem::MaybeUninit;
 use std::ops::Range;
 use std::ptr::{null, null_mut};
+use std::sync::OnceLock;
 
 use crate::arena::{Arena, ArenaString, scratch_arena};
-use crate::buffer::TextBuffer;
+use crate::buffer::GapBuffer;
+use crate::document::ReadableDocument;
 use crate::unicode::Utf8Chars;
 use crate::{apperr, arena_format, sys};
 
@@ -26,14 +29,12 @@ pub struct Encodings {
     pub all: &'static [Encoding],
 }
 
-static mut ENCODINGS: Encodings = Encodings { preferred: &[], all: &[] };
+static ENCODINGS: OnceLock<Encodings> = OnceLock::new();
 
 /// Returns a list of encodings ICU supports.
 pub fn get_available_encodings() -> &'static Encodings {
-    // OnceCell for people that want to put it into a static.
-    #[allow(static_mut_refs)]
-    unsafe {
-        if ENCODINGS.all.is_empty() {
+    ENCODINGS.get_or_init(|| {
+        unsafe {
             let scratch = scratch_arena(None);
             let mut preferred = Vec::new_in(&*scratch);
             let mut alternative = Vec::new_in(&*scratch);
@@ -83,12 +84,10 @@ pub fn get_available_encodings() -> &'static Encodings {
             all.extend(alternative);
 
             let all = all.leak();
-            ENCODINGS.preferred = &all[..preferred_len];
-            ENCODINGS.all = &all[..];
+            // ICU encoding names and this bounded catalog live for the process.
+            Encodings { preferred: &all[..preferred_len], all }
         }
-
-        &ENCODINGS
-    }
+    })
 }
 
 /// Formats the given ICU error code into a human-readable string.
@@ -245,17 +244,17 @@ impl<'pivot> Converter<'pivot> {
 // I picked 64 because it seemed like a reasonable lower bound.
 const CACHE_SIZE: usize = 64;
 
-/// Caches a chunk of TextBuffer contents (UTF-8) in UTF-16 format.
+/// Caches a chunk of GapBuffer contents (UTF-8) in UTF-16 format.
 #[repr(C)]
 struct Cache {
     /// The translated text. Contains [`Cache::utf16_len`]-many valid items.
     utf16: [u16; CACHE_SIZE],
-    /// For each character in [`Cache::utf16`] this stores the offset in the [`TextBuffer`],
+    /// For each character in [`Cache::utf16`] this stores the offset in the [`GapBuffer`],
     /// relative to the start offset stored in `native_beg`.
     /// This has the same length as [`Cache::utf16`].
     utf16_to_utf8_offsets: [u16; CACHE_SIZE],
     /// `utf8_to_utf16_offsets[native_offset - native_beg]` will tell you which character in
-    /// [`Cache::utf16`] maps to the given `native_offset` in the underlying [`TextBuffer`].
+    /// [`Cache::utf16`] maps to the given `native_offset` in the underlying [`GapBuffer`].
     /// Contains `native_end - native_beg`-many valid items.
     utf8_to_utf16_offsets: [u16; CACHE_SIZE],
 
@@ -265,7 +264,7 @@ struct Cache {
     /// Less than or equal to [`Cache::utf16_len`].
     native_indexing_limit: usize,
 
-    /// The range of UTF-8 text in the [`TextBuffer`] that this chunk covers.
+    /// The range of UTF-8 text in the [`GapBuffer`] that this chunk covers.
     utf8_range: Range<usize>,
 }
 
@@ -276,15 +275,30 @@ struct DoubleCache {
     mru: bool,
 }
 
+impl DoubleCache {
+    fn new() -> Self {
+        Self {
+            cache: std::array::from_fn(|_| Cache {
+                utf16: [0; CACHE_SIZE],
+                utf16_to_utf8_offsets: [0; CACHE_SIZE],
+                utf8_to_utf16_offsets: [0; CACHE_SIZE],
+                utf16_len: 0,
+                native_indexing_limit: 0,
+                utf8_range: 0..0,
+            }),
+            mru: false,
+        }
+    }
+}
+
 /// A wrapper around ICU's `UText` struct.
 ///
-/// In our case its only purpose is to adapt a [`TextBuffer`] for ICU.
+/// In our case its only purpose is to adapt a [`GapBuffer`] for ICU.
 ///
 /// # Safety
 ///
-/// Warning! No lifetime tracking is done here.
-/// I initially did it properly with a PhantomData marker for the TextBuffer
-/// lifetime, but it was a pain so now I don't. Not a big deal in our case.
+/// The provider is borrowed by native callbacks. Its owner must keep the
+/// GapBuffer at a stable address until all Text and Regex objects are closed.
 pub struct Text(&'static mut icu_ffi::UText);
 
 impl Drop for Text {
@@ -295,13 +309,13 @@ impl Drop for Text {
 }
 
 impl Text {
-    /// Constructs an ICU `UText` instance from a [`TextBuffer`].
+    /// Constructs an ICU `UText` instance from a [`GapBuffer`].
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the given [`TextBuffer`]
-    /// outlives the returned `Text` instance.
-    pub unsafe fn new(tb: &TextBuffer) -> apperr::Result<Self> {
+    /// The caller must ensure that the given [`GapBuffer`]
+    /// outlives the returned `Text` instance and remains at the same address.
+    pub unsafe fn new(tb: &GapBuffer) -> apperr::Result<Self> {
         let f = init_if_needed()?;
 
         let mut status = icu_ffi::U_ZERO_ERROR;
@@ -331,16 +345,17 @@ impl Text {
         };
 
         let ut = unsafe { &mut *ptr };
+        unsafe { ut.p_extra.cast::<DoubleCache>().write(DoubleCache::new()) };
         ut.p_funcs = &FUNCS;
-        ut.context = tb as *const TextBuffer as *mut _;
+        ut.context = tb as *const GapBuffer as *mut _;
         ut.a = -1;
 
         Ok(Self(ut))
     }
 }
 
-fn text_buffer_from_utext<'a>(ut: &icu_ffi::UText) -> &'a TextBuffer {
-    unsafe { &*(ut.context as *const TextBuffer) }
+fn text_buffer_from_utext<'a>(ut: &icu_ffi::UText) -> &'a GapBuffer {
+    unsafe { &*(ut.context as *const GapBuffer) }
 }
 
 fn double_cache_from_utext<'a>(ut: &icu_ffi::UText) -> &'a mut DoubleCache {
@@ -370,9 +385,10 @@ extern "C" fn utext_clone(
 
     // TODO: I'm somewhat unsure whether we have to preserve the `chunk_offset`.
     // We can't blindly copy chunk contents and the `Cache` in `ut.p_extra`,
-    // because they may contain dirty contents (different `TextBuffer` generation).
+    // because they may contain dirty contents (different `GapBuffer` generation).
     unsafe {
         let ut = &mut *ut_ptr;
+        ut.p_extra.cast::<DoubleCache>().write(DoubleCache::new());
         ut.p_funcs = src.p_funcs;
         ut.context = src.context;
         ut.a = -1;
@@ -383,7 +399,7 @@ extern "C" fn utext_clone(
 
 extern "C" fn utext_native_length(ut: &mut icu_ffi::UText) -> i64 {
     let tb = text_buffer_from_utext(ut);
-    tb.text_length() as i64
+    tb.len() as i64
 }
 
 extern "C" fn utext_access(ut: &mut icu_ffi::UText, native_index: i64, forward: bool) -> bool {
@@ -410,9 +426,9 @@ fn utext_access_impl<'a>(
     let mut index_contained = native_index;
 
     if !forward {
-        index_contained -= 1;
+        index_contained = index_contained.saturating_sub(1);
     }
-    if index_contained < 0 || index_contained as usize >= tb.text_length() {
+    if index_contained < 0 || index_contained as usize >= tb.len() {
         return None;
     }
 
@@ -452,7 +468,7 @@ fn utext_access_impl<'a>(
     let native_start;
 
     if forward {
-        utf8_len_limit = (tb.text_length() - native_index).min(UTF16_LEN_LIMIT);
+        utf8_len_limit = (tb.len() - native_index).min(UTF16_LEN_LIMIT);
         native_start = native_index;
     } else {
         // The worst case ratio for UTF-8 to UTF-16 is 1:1, when the text is ASCII.
@@ -461,16 +477,29 @@ fn utext_access_impl<'a>(
         // TODO: Test what happens if you have lots of invalid UTF-8 text blow up to U+FFFD.
         utf8_len_limit = native_index.min(UTF16_LEN_LIMIT);
 
-        // Since simply subtracting an offset may end up in the middle of a codepoint sequence,
-        // we must align the offset to the next codepoint boundary.
-        // Here we skip trail bytes until we find a lead.
+        // Align only when this is inside a valid UTF-8 character. Arbitrary
+        // continuation bytes are individual replacement characters, not a trail
+        // to skip: skipping a malformed run could pass native_index or EOF.
         let mut beg = native_index - utf8_len_limit;
-        let chunk = tb.read_forward(beg);
-        for &c in chunk {
-            if c & 0b1100_0000 != 0b1000_0000 {
-                break;
+        let before = tb.read_backward(beg);
+        for distance in 1..=before.len().min(3) {
+            let lead = before[before.len() - distance];
+            if lead & 0xc0 == 0x80 {
+                continue;
             }
-            beg += 1;
+            let length = match lead {
+                0xc2..=0xdf => 2,
+                0xe0..=0xef => 3,
+                0xf0..=0xf4 => 4,
+                _ => 0,
+            };
+            if length > distance {
+                let candidate = tb.read_forward(beg - distance);
+                if candidate.get(..length).is_some_and(|bytes| std::str::from_utf8(bytes).is_ok()) {
+                    beg += length - distance;
+                }
+            }
+            break;
         }
 
         native_start = beg;
@@ -520,11 +549,7 @@ fn utext_access_impl<'a>(
             }
         }
 
-        loop {
-            let Some(c) = it.next() else {
-                break;
-            };
-
+        while let Some(c) = it.next() {
             // Thanks to our `if utf16_len >= UTF16_LEN_LIMIT` check,
             // we can safely assume that this will fit.
             unsafe {
@@ -643,6 +668,9 @@ impl Regex {
             (f.uregex_setTimeLimit)(ptr, 4096, &mut status);
             (f.uregex_setUText)(ptr, text.0 as *const _ as *mut _, &mut status);
             if status.is_failure() {
+                if !ptr.is_null() {
+                    (f.uregex_close)(ptr);
+                }
                 return Err(status.as_error());
             }
 
@@ -658,9 +686,17 @@ impl Regex {
     ///
     /// The caller must ensure that the given `Text` outlives the `Regex` instance.
     pub unsafe fn set_text(&mut self, text: &mut Text, offset: usize) {
-        // Get `utext_access_impl` to detect the `TextBuffer::generation` change,
+        // Get `utext_access_impl` to detect the `GapBuffer::generation` change,
         // and refresh its contents. This ensures that ICU doesn't reuse
         // stale `UText::chunk_contents`, as it has no way tell that it's stale.
+        // Undo and a new edit may reuse a generation number. Invalidate even
+        // then, and also when refreshing an empty document.
+        text.0.a = -1;
+        text.0.chunk_length = 0;
+        text.0.chunk_offset = 0;
+        text.0.chunk_native_start = 0;
+        text.0.chunk_native_limit = 0;
+        text.0.native_indexing_limit = 0;
         utext_access(text.0, offset as i64, true);
 
         let f = assume_loaded();
@@ -720,115 +756,109 @@ impl Iterator for Regex {
     }
 }
 
-static mut ROOT_COLLATOR: Option<*mut icu_ffi::UCollator> = None;
+#[derive(Default)]
+struct ThreadServices {
+    collator: Option<*mut icu_ffi::UCollator>,
+    casemap: Option<*mut icu_ffi::UCaseMap>,
+}
+
+impl Drop for ThreadServices {
+    fn drop(&mut self) {
+        if let Ok(f) = init_if_needed() {
+            if let Some(ptr) = self.collator.filter(|ptr| !ptr.is_null()) {
+                unsafe { (f.ucol_close)(ptr) };
+            }
+            if let Some(ptr) = self.casemap.filter(|ptr| !ptr.is_null()) {
+                unsafe { (f.ucasemap_close)(ptr) };
+            }
+        }
+    }
+}
+
+thread_local! {
+    static SERVICES: RefCell<ThreadServices> = RefCell::new(ThreadServices::default());
+}
 
 /// Compares two UTF-8 strings for sorting using ICU's collation algorithm.
 pub fn compare_strings(a: &[u8], b: &[u8]) -> Ordering {
-    #[cold]
-    fn init() {
-        unsafe {
-            let mut coll = null_mut();
-
-            if let Ok(f) = init_if_needed() {
-                let mut status = icu_ffi::U_ZERO_ERROR;
-                coll = (f.ucol_open)(c"".as_ptr(), &mut status);
-            }
-
-            ROOT_COLLATOR = Some(coll);
-        }
-    }
-
-    // OnceCell for people that want to put it into a static.
-    #[allow(static_mut_refs)]
-    let coll = unsafe {
-        if ROOT_COLLATOR.is_none() {
-            init();
-        }
-        ROOT_COLLATOR.unwrap_unchecked()
+    let Ok(f) = init_if_needed() else { return compare_strings_ascii(a, b) };
+    let (Ok(a_len), Ok(b_len)) = (i32::try_from(a.len()), i32::try_from(b.len())) else {
+        return compare_strings_ascii(a, b);
     };
-
-    if coll.is_null() {
-        compare_strings_ascii(a, b)
-    } else {
-        let f = assume_loaded();
+    SERVICES.with_borrow_mut(|services| {
+        let coll = *services.collator.get_or_insert_with(|| {
+            let mut status = icu_ffi::U_ZERO_ERROR;
+            let ptr = unsafe { (f.ucol_open)(c"".as_ptr(), &mut status) };
+            if !ptr.is_null() && !status.is_failure() {
+                unsafe {
+                    (f.ucol_setAttribute)(
+                        ptr,
+                        icu_ffi::UCOL_NORMALIZATION_MODE,
+                        icu_ffi::UCOL_ON,
+                        &mut status,
+                    );
+                    (f.ucol_setAttribute)(
+                        ptr,
+                        icu_ffi::UCOL_NUMERIC_COLLATION,
+                        icu_ffi::UCOL_ON,
+                        &mut status,
+                    );
+                }
+            }
+            if status.is_failure() {
+                if !ptr.is_null() {
+                    unsafe { (f.ucol_close)(ptr) };
+                }
+                null_mut()
+            } else {
+                ptr
+            }
+        });
+        if coll.is_null() {
+            return compare_strings_ascii(a, b);
+        }
         let mut status = icu_ffi::U_ZERO_ERROR;
         let res = unsafe {
-            (f.ucol_strcollUTF8)(
-                coll,
-                a.as_ptr(),
-                a.len() as i32,
-                b.as_ptr(),
-                b.len() as i32,
-                &mut status,
-            )
+            (f.ucol_strcollUTF8)(coll, a.as_ptr(), a_len, b.as_ptr(), b_len, &mut status)
         };
-
+        if status.is_failure() {
+            return compare_strings_ascii(a, b);
+        }
         match res {
             icu_ffi::UCollationResult::UCOL_EQUAL => Ordering::Equal,
             icu_ffi::UCollationResult::UCOL_GREATER => Ordering::Greater,
             icu_ffi::UCollationResult::UCOL_LESS => Ordering::Less,
         }
-    }
+    })
 }
 
-/// Unicode collation via `ucol_strcollUTF8`, now for ASCII!
+/// Stable ASCII fallback: compare entire folded strings before the original-byte tie break.
 fn compare_strings_ascii(a: &[u8], b: &[u8]) -> Ordering {
-    let mut iter = a.iter().zip(b.iter());
-
-    // Low weight: Find the first character which differs.
-    //
-    // Remember that result in case all remaining characters are
-    // case-insensitive equal, because then we use that as a fallback.
-    while let Some((&a, &b)) = iter.next() {
-        if a != b {
-            let mut order = a.cmp(&b);
-            let la = a.to_ascii_lowercase();
-            let lb = b.to_ascii_lowercase();
-
-            if la == lb {
-                // High weight: Find the first character which
-                // differs case-insensitively.
-                for (a, b) in iter {
-                    let la = a.to_ascii_lowercase();
-                    let lb = b.to_ascii_lowercase();
-
-                    if la != lb {
-                        order = la.cmp(&lb);
-                        break;
-                    }
-                }
-            }
-
-            return order;
-        }
-    }
-
-    // Fallback: The shorter string wins.
-    a.len().cmp(&b.len())
+    a.iter()
+        .map(u8::to_ascii_lowercase)
+        .cmp(b.iter().map(u8::to_ascii_lowercase))
+        .then_with(|| a.cmp(b))
 }
 
-static mut ROOT_CASEMAP: Option<*mut icu_ffi::UCaseMap> = None;
-
-/// Converts the given UTF-8 string to lower case.
-///
-/// Case folding differs from lower case in that the output is primarily useful
-/// to machines for comparisons. It's like applying Unicode normalization.
+/// Converts the given UTF-8 string to a case-folded comparison key.
 pub fn fold_case<'a>(arena: &'a Arena, input: &str) -> ArenaString<'a> {
-    // OnceCell for people that want to put it into a static.
-    #[allow(static_mut_refs)]
-    let casemap = unsafe {
-        if ROOT_CASEMAP.is_none() {
-            ROOT_CASEMAP = Some(if let Ok(f) = init_if_needed() {
-                let mut status = icu_ffi::U_ZERO_ERROR;
-                (f.ucasemap_open)(null(), 0, &mut status)
-            } else {
+    let casemap = SERVICES.with_borrow_mut(|services| {
+        *services.casemap.get_or_insert_with(|| {
+            let Ok(f) = init_if_needed() else { return null_mut() };
+            let mut status = icu_ffi::U_ZERO_ERROR;
+            let ptr = unsafe { (f.ucasemap_open)(null(), 0, &mut status) };
+            if status.is_failure() {
+                if !ptr.is_null() {
+                    unsafe { (f.ucasemap_close)(ptr) };
+                }
                 null_mut()
-            })
-        }
-        ROOT_CASEMAP.unwrap_unchecked()
-    };
+            } else {
+                ptr
+            }
+        })
+    });
 
-    if !casemap.is_null() {
+    if !casemap.is_null() && input.len() <= i32::MAX as usize - 16 {
         let f = assume_loaded();
         let mut status = icu_ffi::U_ZERO_ERROR;
         let mut output = Vec::new_in(arena);
@@ -854,6 +884,7 @@ pub fn fold_case<'a>(arena: &'a Arena, input: &str) -> ArenaString<'a> {
         // If that failed to fit, retry with the correct length.
         if status == icu_ffi::U_BUFFER_OVERFLOW_ERROR && output_len > 0 {
             output.reserve_exact(output_len as usize);
+            status = icu_ffi::U_ZERO_ERROR;
             let output = output.spare_capacity_mut();
             output_len = unsafe {
                 (f.ucasemap_utf8FoldCase)(
@@ -899,6 +930,7 @@ struct LibraryFunctions {
     // LIBICUUC_PROC_NAMES
     u_errorName: icu_ffi::u_errorName,
     ucasemap_open: icu_ffi::ucasemap_open,
+    ucasemap_close: icu_ffi::ucasemap_close,
     ucasemap_utf8FoldCase: icu_ffi::ucasemap_utf8FoldCase,
     ucnv_getAvailableName: icu_ffi::ucnv_getAvailableName,
     ucnv_getStandardName: icu_ffi::ucnv_getStandardName,
@@ -910,6 +942,8 @@ struct LibraryFunctions {
 
     // LIBICUI18N_PROC_NAMES
     ucol_open: icu_ffi::ucol_open,
+    ucol_close: icu_ffi::ucol_close,
+    ucol_setAttribute: icu_ffi::ucol_setAttribute,
     ucol_strcollUTF8: icu_ffi::ucol_strcollUTF8,
     uregex_open: icu_ffi::uregex_open,
     uregex_close: icu_ffi::uregex_close,
@@ -930,9 +964,10 @@ macro_rules! proc_name {
 }
 
 // Found in libicuuc.so on UNIX, icuuc.dll/icu.dll on Windows.
-const LIBICUUC_PROC_NAMES: [*const c_char; 10] = [
+const LIBICUUC_PROC_NAMES: [*const c_char; 11] = [
     proc_name!("u_errorName"),
     proc_name!("ucasemap_open"),
+    proc_name!("ucasemap_close"),
     proc_name!("ucasemap_utf8FoldCase"),
     proc_name!("ucnv_getAvailableName"),
     proc_name!("ucnv_getStandardName"),
@@ -944,8 +979,10 @@ const LIBICUUC_PROC_NAMES: [*const c_char; 10] = [
 ];
 
 // Found in libicui18n.so on UNIX, icuin.dll/icu.dll on Windows.
-const LIBICUI18N_PROC_NAMES: [*const c_char; 11] = [
+const LIBICUI18N_PROC_NAMES: [*const c_char; 13] = [
     proc_name!("ucol_open"),
+    proc_name!("ucol_close"),
+    proc_name!("ucol_setAttribute"),
     proc_name!("ucol_strcollUTF8"),
     proc_name!("uregex_open"),
     proc_name!("uregex_close"),
@@ -958,28 +995,19 @@ const LIBICUI18N_PROC_NAMES: [*const c_char; 11] = [
     proc_name!("uregex_end64"),
 ];
 
-enum LibraryFunctionsState {
-    Uninitialized,
-    Failed,
-    Loaded(LibraryFunctions),
-}
-
-static mut LIBRARY_FUNCTIONS: LibraryFunctionsState = LibraryFunctionsState::Uninitialized;
+static LIBRARY_FUNCTIONS: OnceLock<Option<LibraryFunctions>> = OnceLock::new();
 
 pub fn init() -> apperr::Result<()> {
     init_if_needed()?;
     Ok(())
 }
 
-#[allow(static_mut_refs)]
 fn init_if_needed() -> apperr::Result<&'static LibraryFunctions> {
     #[cold]
-    fn load() {
+    fn load() -> Option<LibraryFunctions> {
         unsafe {
-            LIBRARY_FUNCTIONS = LibraryFunctionsState::Failed;
-
             let Ok(icu) = sys::load_icu() else {
-                return;
+                return None;
             };
 
             type TransparentFunction = unsafe extern "C" fn() -> *const ();
@@ -1023,7 +1051,7 @@ fn init_if_needed() -> apperr::Result<&'static LibraryFunctions> {
                             "Failed to load ICU function: {:?}",
                             CStr::from_ptr(name)
                         );
-                        return;
+                        return None;
                     };
 
                     ptr.write(func);
@@ -1031,28 +1059,14 @@ fn init_if_needed() -> apperr::Result<&'static LibraryFunctions> {
                 }
             }
 
-            LIBRARY_FUNCTIONS = LibraryFunctionsState::Loaded(funcs.assume_init());
+            Some(funcs.assume_init())
         }
     }
-
-    unsafe {
-        if matches!(&LIBRARY_FUNCTIONS, LibraryFunctionsState::Uninitialized) {
-            load();
-        }
-    }
-
-    match unsafe { &LIBRARY_FUNCTIONS } {
-        LibraryFunctionsState::Loaded(f) => Ok(f),
-        _ => Err(apperr::APP_ICU_MISSING),
-    }
+    LIBRARY_FUNCTIONS.get_or_init(load).as_ref().ok_or(apperr::APP_ICU_MISSING)
 }
 
-#[allow(static_mut_refs)]
 fn assume_loaded() -> &'static LibraryFunctions {
-    match unsafe { &LIBRARY_FUNCTIONS } {
-        LibraryFunctionsState::Loaded(f) => f,
-        _ => unreachable!(),
-    }
+    LIBRARY_FUNCTIONS.get().and_then(Option::as_ref).expect("ICU was initialized")
 }
 
 mod icu_ffi {
@@ -1130,6 +1144,8 @@ mod icu_ffi {
         status: &mut UErrorCode,
     ) -> *mut UCaseMap;
 
+    pub type ucasemap_close = unsafe extern "C" fn(casemap: *mut UCaseMap);
+
     pub type ucasemap_utf8FoldCase = unsafe extern "C" fn(
         csm: *const UCaseMap,
         dest: *mut c_char,
@@ -1151,6 +1167,19 @@ mod icu_ffi {
 
     pub type ucol_open =
         unsafe extern "C" fn(loc: *const c_char, status: &mut UErrorCode) -> *mut UCollator;
+
+    pub type ucol_close = unsafe extern "C" fn(collator: *mut UCollator);
+
+    pub type ucol_setAttribute = unsafe extern "C" fn(
+        collator: *mut UCollator,
+        attribute: i32,
+        value: i32,
+        status: &mut UErrorCode,
+    );
+
+    pub const UCOL_NORMALIZATION_MODE: i32 = 4;
+    pub const UCOL_NUMERIC_COLLATION: i32 = 7;
+    pub const UCOL_ON: i32 = 17;
 
     pub type ucol_strcollUTF8 = unsafe extern "C" fn(
         coll: *mut UCollator,
@@ -1323,6 +1352,141 @@ mod tests {
     #[test]
     fn init() {
         assert!(init_if_needed().is_ok());
+    }
+
+    #[test]
+    #[ignore = "requires dynamically loaded ICU"]
+    fn stress_parallel_initialization_and_thread_cleanup() {
+        let threads: Vec<_> = (0..16)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    for _ in 0..128 {
+                        init_if_needed().unwrap();
+                        assert!(!get_available_encodings().all.is_empty());
+                        assert_eq!(
+                            compare_strings("café".as_bytes(), "café".as_bytes()),
+                            Ordering::Equal
+                        );
+                        let arena = scratch_arena(None);
+                        assert_eq!(fold_case(&arena, "Straße Σ"), "strasse σ");
+                        // U+0390 expands from two UTF-8 bytes to six when case folded,
+                        // exercising the native buffer-overflow retry path.
+                        let expanded = fold_case(&arena, &"ΐ".repeat(64));
+                        assert_eq!(expanded.as_str(), "ι\u{308}\u{301}".repeat(64));
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "requires dynamically loaded ICU"]
+    fn stress_native_text_cache_valid_and_malformed_boundaries() {
+        init_if_needed().unwrap();
+        let sources = [
+            "a界🙂e\u{301}\r\n".repeat(32).into_bytes(),
+            vec![0x80; 257],
+            [vec![b'a'; 59], vec![0xf0, 0x9f, 0x99, 0x82], vec![0xff; 64]].concat(),
+        ];
+        for source in sources {
+            let mut buffer = GapBuffer::new(true).unwrap();
+            buffer.replace(0..0, &source);
+            let text = unsafe { Text::new(&buffer) }.unwrap();
+            for index in 0..=source.len() {
+                for forward in [true, false] {
+                    // Discard cached chunks so each offset exercises an independent fill.
+                    text.0.a = -1;
+                    let result = utext_access(text.0, index as i64, forward);
+                    assert_eq!(result, if forward { index < source.len() } else { index > 0 });
+                    if result {
+                        assert!((0..=text.0.chunk_length).contains(&text.0.chunk_offset));
+                        assert!(text.0.chunk_native_start <= index as i64);
+                        assert!(text.0.chunk_native_limit >= index as i64);
+                        let mapped = utext_map_offset_to_native(text.0);
+                        assert!(mapped >= text.0.chunk_native_start && mapped <= index as i64);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires dynamically loaded ICU"]
+    fn stress_regex_construction_and_invalid_patterns() {
+        init_if_needed().unwrap();
+        let mut buffer = GapBuffer::new(true).unwrap();
+        buffer.replace(0..0, "before 界🙂 after".as_bytes());
+        let text = unsafe { Text::new(&buffer) }.unwrap();
+        for _ in 0..512 {
+            for pattern in ["(", "[", r"\p{not_a_property}"] {
+                assert!(unsafe { Regex::new(pattern, 0, &text) }.is_err());
+            }
+            let mut regex = unsafe { Regex::new("界🙂", 0, &text) }.unwrap();
+            assert_eq!(regex.next(), Some(7..14));
+            assert_eq!(regex.next(), None);
+        }
+    }
+
+    #[test]
+    fn natural_filename_sorting_and_normalized_unicode() {
+        super::init().unwrap();
+        assert_eq!(compare_strings(b"file2", b"file10"), Ordering::Less);
+        assert_eq!(compare_strings("café".as_bytes(), "cafe\u{301}".as_bytes()), Ordering::Equal);
+        assert_eq!(compare_strings_ascii(b"a", b"B"), Ordering::Less);
+        assert_eq!(compare_strings_ascii(b"B", b"a"), Ordering::Greater);
+        let values = ["Zebra", "apples", "Apple", "banana", "Banana", "zebra"];
+        for a in values {
+            for b in values {
+                for c in values {
+                    let ab = compare_strings_ascii(a.as_bytes(), b.as_bytes());
+                    let bc = compare_strings_ascii(b.as_bytes(), c.as_bytes());
+                    if ab.is_lt() && bc.is_lt() {
+                        assert!(compare_strings_ascii(a.as_bytes(), c.as_bytes()).is_lt());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_fallback_orders_case_prefixes_transitively() {
+        // Choosing a case-sensitive tie break before comparing prefix lengths
+        // formerly created a cycle: "a" < "aa" < "Ab" < "a".
+        assert_eq!(compare_strings_ascii(b"a", b"aa"), Ordering::Less);
+        assert_eq!(compare_strings_ascii(b"aa", b"Ab"), Ordering::Less);
+        assert_eq!(compare_strings_ascii(b"a", b"Ab"), Ordering::Less);
+
+        let alphabet = b"AaBb";
+        let mut values = Vec::new();
+        for len in 0..=3 {
+            for mut code in 0usize..4usize.pow(len) {
+                let mut value = Vec::new();
+                for _ in 0..len {
+                    value.push(alphabet[code & 3]);
+                    code >>= 2;
+                }
+                values.push(value);
+            }
+        }
+        values.extend([vec![0], vec![0xff], vec![b'Z'], vec![b'z']]);
+        let comparisons: Vec<Vec<_>> = values
+            .iter()
+            .map(|a| values.iter().map(|b| compare_strings_ascii(a, b)).collect())
+            .collect();
+        for (i, a) in values.iter().enumerate() {
+            for (j, b) in values.iter().enumerate() {
+                assert_eq!(comparisons[i][j], comparisons[j][i].reverse(), "{a:?}, {b:?}");
+                assert_eq!(comparisons[i][j].is_eq(), a == b, "{a:?}, {b:?}");
+                for (k, c) in values.iter().enumerate() {
+                    if !comparisons[i][j].is_gt() && !comparisons[j][k].is_gt() {
+                        assert!(!comparisons[i][k].is_gt(), "non-transitive: {a:?}, {b:?}, {c:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

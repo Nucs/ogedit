@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![feature(allocator_api, linked_list_cursors, string_from_utf8_lossy_owned)]
+#![feature(allocator_api)]
 
 mod config;
+mod data_lens;
 mod documents;
 mod draw_editor;
 mod draw_filepicker;
@@ -12,10 +13,21 @@ mod draw_statusbar;
 mod localization;
 #[allow(dead_code)]
 mod logging;
+mod macros;
+mod native_dialog;
+mod native_open;
+mod palette;
+mod recovery;
+mod safe_save;
+mod settings;
+mod shortcuts;
 mod state;
+#[cfg(test)]
+mod test_runtime;
 mod watch;
+mod workbench;
+mod workspace_search;
 
-use std::borrow::Cow;
 #[cfg(feature = "debug-latency")]
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -26,15 +38,14 @@ use draw_editor::*;
 use draw_filepicker::*;
 use draw_menubar::*;
 use draw_statusbar::*;
+use localization::*;
 use ogedit::arena::{self, Arena, ArenaString, scratch_arena};
 use ogedit::framebuffer::{self, IndexedColor};
-use ogedit::helpers::{CoordType, KIBI, MEBI, MetricFormatter, Rect, Size};
-use ogedit::input;
+use ogedit::helpers::{CoordType, KIBI, MEBI, MetricFormatter, Point, Rect, Size};
 use ogedit::oklab::StraightRgba;
 use ogedit::tui::*;
 use ogedit::vt::{self, Token};
-use ogedit::{apperr, arena_format, base64, path, sys, unicode};
-use localization::*;
+use ogedit::{apperr, arena_format, base64, input, path, sys, unicode};
 use state::{log_periodic_content_snapshot, log_state_changes, *};
 
 #[cfg(target_pointer_width = "32")]
@@ -83,6 +94,8 @@ fn run() -> apperr::Result<()> {
     if handle_args(&mut state)? {
         return Ok(());
     }
+    handle_stdin(&mut state)?;
+    workbench::initialize(&mut state);
 
     // This will reopen stdin if it's redirected (which may fail) and switch
     // the terminal to raw mode which prevents the user from pressing Ctrl+C.
@@ -95,6 +108,9 @@ fn run() -> apperr::Result<()> {
     let mut vt_parser = vt::Parser::new();
     let mut input_parser = input::Parser::new();
     let mut tui = Tui::new()?;
+    if let Ok(size) = sys::get_window_size() {
+        tui.set_size(size);
+    }
 
     logging::log_action("INIT: Terminal setup complete");
     let _restore = setup_terminal(&mut tui, &mut state, &mut vt_parser);
@@ -119,8 +135,6 @@ fn run() -> apperr::Result<()> {
     tui.set_modal_default_bg(floater_bg);
     tui.set_modal_default_fg(floater_fg);
 
-    sys::inject_window_size_into_stdin();
-
     #[cfg(feature = "debug-latency")]
     let mut last_latency_width = 0;
 
@@ -136,8 +150,9 @@ fn run() -> apperr::Result<()> {
         // Process a batch of input.
         {
             let scratch = scratch_arena(None);
-            let read_timeout = vt_parser.read_timeout().min(tui.read_timeout());
-            let Some(input) = sys::read_stdin(&scratch, read_timeout) else {
+            let read_timeout =
+                vt_parser.read_timeout().min(tui.read_timeout()).min(Duration::from_millis(100));
+            let Some((resize, input)) = sys::read_stdin(&scratch, read_timeout) else {
                 break;
             };
 
@@ -148,10 +163,11 @@ fn run() -> apperr::Result<()> {
             }
 
             let vt_iter = vt_parser.parse(&input);
-            let mut input_iter = input_parser.parse(vt_iter);
+            let mut input_iter =
+                resize.map(input::Input::Resize).into_iter().chain(input_parser.parse(vt_iter));
 
             while {
-                let input = input_iter.next();
+                let mut input = input_iter.next();
                 let more = input.is_some();
 
                 // Log input events
@@ -164,10 +180,14 @@ fn run() -> apperr::Result<()> {
                             logging::log_paste(data);
                         }
                         input::Input::Resize(size) => {
-                            logging::log_action(&format!("TERMINAL_RESIZE: {}x{}", size.width, size.height));
+                            logging::log_action(&format!(
+                                "TERMINAL_RESIZE: {}x{}",
+                                size.width, size.height
+                            ));
                         }
                         input::Input::Mouse(mouse) => {
                             use input::InputMouseState;
+
                             use crate::state::ClickTarget;
                             let button = match mouse.state {
                                 InputMouseState::Left => Some("left"),
@@ -178,9 +198,15 @@ fn run() -> apperr::Result<()> {
                             if let Some(btn) = button {
                                 // Determine click target based on position and UI state
                                 let size = tui.size();
-                                let target = if state.wants_about || state.wants_goto || state.wants_encoding_picker || state.wants_indentation_picker {
+                                let target = if state.wants_about
+                                    || state.wants_goto
+                                    || state.wants_encoding_picker
+                                    || state.wants_language_picker
+                                    || state.wants_indentation_picker
+                                {
                                     ClickTarget::Dialog
-                                } else if !matches!(state.wants_file_picker, StateFilePicker::None) {
+                                } else if !matches!(state.wants_file_picker, StateFilePicker::None)
+                                {
                                     ClickTarget::FilePicker
                                 } else if mouse.position.y == 0 {
                                     ClickTarget::Menubar
@@ -198,9 +224,77 @@ fn run() -> apperr::Result<()> {
                     }
                 }
 
+                // Capture logical editor commands before dispatch changes the clipboard.
+                if state.workbench.panel == workbench::Panel::None
+                    && matches!(
+                        &input,
+                        Some(
+                            input::Input::Text(_)
+                                | input::Input::Paste(_)
+                                | input::Input::Keyboard(_)
+                        )
+                    )
+                {
+                    state.workbench.message.clear();
+                }
+                let recording_editor = state.editor_focused
+                    && state.workbench.panel == workbench::Panel::None
+                    && state.macros.as_ref().is_some_and(|store| store.is_recording());
+                let recordable_event =
+                    input.as_ref().is_some_and(|event| !matches!(event, input::Input::Resize(_)));
+                let macro_candidate = if recording_editor {
+                    input.as_ref().and_then(|event| {
+                        shortcuts::macro_command(&state.config.hotkeys, event, tui.clipboard_ref())
+                    })
+                } else {
+                    None
+                };
+                let macro_document = state.documents.active().map(|doc| doc.buffer.clone());
+                let stop_recording_key = matches!(&input, Some(input::Input::Keyboard(key))
+                    if *key == (input::kbmod::CTRL_SHIFT | input::vk::M) || *key == input::vk::F4);
+                let stopped_before_input = recording_editor
+                    && recordable_event
+                    && macro_candidate.is_none()
+                    && !stop_recording_key;
+                if stopped_before_input {
+                    input = None;
+                    state.workbench.panel = workbench::Panel::MacroName;
+                    state.workbench.message = "Recording stopped before this action. Save or cancel, then repeat the action.".into();
+                }
+
                 let mut ctx = tui.create_context(input);
 
+                workbench::tick(&mut state);
                 draw(&mut ctx, &mut state);
+
+                if recording_editor
+                    && recordable_event
+                    && !stop_recording_key
+                    && !stopped_before_input
+                {
+                    let same_document = macro_document
+                        .as_ref()
+                        .zip(state.documents.active())
+                        .is_some_and(|(before, after)| std::rc::Rc::ptr_eq(before, &after.buffer));
+                    if state.editor_focused
+                        && state.workbench.panel == workbench::Panel::None
+                        && same_document
+                    {
+                        if let Some(command) = macro_candidate {
+                            if let Some(store) = &mut state.macros {
+                                store.record(command);
+                            }
+                        } else {
+                            state.workbench.panel = workbench::Panel::MacroName;
+                            state.workbench.message = "Recording stopped before an unsupported action. Save the recorded commands or cancel.".into();
+                            ctx.needs_rerender();
+                        }
+                    } else if state.macros.as_ref().is_some_and(|store| store.is_recording()) {
+                        state.workbench.panel = workbench::Panel::MacroName;
+                        state.workbench.message = "Recording stopped when the editor lost focus. Save the recorded commands or cancel.".into();
+                        ctx.needs_rerender();
+                    }
+                }
 
                 #[cfg(feature = "debug-latency")]
                 {
@@ -238,14 +332,18 @@ fn run() -> apperr::Result<()> {
 
         // Poll file watcher for external modifications
         for event in state.file_watcher.poll_events() {
+            state.documents.record_watch_event(&event);
             match event {
                 watch::WatchEvent::Modified(path) => {
                     // Check if this path matches the active document
-                    if let Some(doc) = state.documents.active() {
-                        if doc.path.as_ref() == Some(&path) {
-                            state.file_changed_cached = true;
-                            logging::log_action(&format!("FILE_WATCH_EVENT: Modified {}", path.display()));
-                        }
+                    if let Some(doc) = state.documents.active()
+                        && doc.path.as_ref() == Some(&path)
+                    {
+                        state.file_changed_cached = true;
+                        logging::log_action(&format!(
+                            "FILE_WATCH_EVENT: Modified {}",
+                            path.display()
+                        ));
                     }
                 }
                 watch::WatchEvent::Deleted(path) => {
@@ -253,13 +351,15 @@ fn run() -> apperr::Result<()> {
                 }
             }
         }
+        state.file_changed_cached =
+            state.documents.active().is_some_and(|doc| doc.has_file_changed_on_disk());
 
         // Render the UI and write it to the terminal.
         {
             let scratch = scratch_arena(None);
             let mut output = tui.render(&scratch);
 
-            write_terminal_title(&mut output, &mut state);
+            write_terminal_title(&scratch, &mut output, &mut state);
 
             if state.osc_clipboard_sync {
                 write_osc_clipboard(&mut tui, &mut state, &mut output);
@@ -314,21 +414,27 @@ fn run() -> apperr::Result<()> {
 // Returns true if the application should exit early.
 fn handle_args(state: &mut State) -> apperr::Result<bool> {
     let scratch = scratch_arena(None);
-    let mut paths: Vec<PathBuf, &Arena> = Vec::new_in(&*scratch);
+    let mut paths: Vec<(PathBuf, Option<Point>), &Arena> = Vec::new_in(&*scratch);
     let cwd = env::current_dir()?;
     let mut dir = None;
     let mut parse_args = true;
+    let mut goto_next = false;
 
     // The best CLI argument parser in the world.
     for arg in env::args_os().skip(1) {
         if parse_args {
             if arg == "--" {
                 parse_args = false;
+                goto_next = false;
                 continue;
             }
             if arg == "-" {
                 paths.clear();
                 break;
+            }
+            if arg == "-g" || arg == "--goto" {
+                goto_next = true;
+                continue;
             }
             if arg == "-h" || arg == "--help" || (cfg!(windows) && arg == "/?") {
                 print_help();
@@ -340,72 +446,89 @@ fn handle_args(state: &mut State) -> apperr::Result<bool> {
             }
         }
 
-        let p = cwd.join(Path::new(&arg));
+        #[cfg(windows)]
+        let argument = path::from_user_input(Path::new(&arg));
+        #[cfg(not(windows))]
+        let argument = PathBuf::from(&arg);
+        let (argument, goto) = if goto_next {
+            goto_next = false;
+            documents::DocumentManager::parse_filename_goto(&argument)
+        } else {
+            (argument.as_path(), None)
+        };
+        let p = cwd.join(argument);
         let p = path::normalize(&p);
         if p.is_dir() {
             state.wants_file_picker = StateFilePicker::Open;
             dir = Some(p);
         } else {
-            paths.push(p);
+            paths.push((p, goto));
         }
     }
 
-    for p in &paths {
+    for (p, goto) in &paths {
         logging::log_action(&format!("STARTUP_FILE: {}", p.to_string_lossy()));
-        state.documents.add_file_path(p, &state.config)?;
+        let doc = state.documents.add_file_path_literal(p, &state.config)?;
+        if let Some(goto) = goto {
+            doc.cursor_move_to_goto(*goto);
+        }
         // Track in recent files
-        state.config.add_recent_file(p);
-        // Start watching for external modifications
-        state.file_watcher.watch(p);
-    }
-
-    if let Some(mut file) = sys::open_stdin_if_redirected() {
-        logging::log_action("STARTUP_STDIN: Reading from redirected stdin");
-        let doc = state.documents.add_untitled(&state.config)?;
-        let mut tb = doc.buffer.borrow_mut();
-        tb.read_file(&mut file, None)?;
-        tb.mark_as_dirty();
-    } else if paths.is_empty() {
-        // No files were passed, and stdin is not redirected.
-        state.documents.add_untitled(&state.config)?;
-    }
-
-    if dir.is_none()
-        && let Some(parent) = paths.last().and_then(|p| p.parent())
-    {
-        dir = Some(parent.to_path_buf());
+        if let Some(resolved) = &doc.path {
+            state.config.add_recent_file(resolved);
+            state.file_watcher.watch(resolved);
+        }
     }
 
     // Determine the initial file picker directory:
     // 1. If a directory was explicitly passed as argument, use that
     // 2. Otherwise, check if we have a saved folder for this project
-    // 3. Fall back to current working directory
-    let initial_dir = if let Some(d) = dir {
-        d
-    } else if let Some(saved) = state.config.get_project_folder(&state.startup_cwd) {
-        let saved_path = PathBuf::from(saved);
-        if saved_path.is_dir() {
-            saved_path
-        } else {
-            cwd
-        }
-    } else {
-        cwd
-    };
+    // 3. Use the opened file's parent, then the current working directory.
+    let initial_dir = initial_picker_directory(
+        dir.as_deref(),
+        paths.last().and_then(|(p, _)| p.parent()),
+        state.config.get_project_folder(&state.startup_cwd).map(Path::new),
+        &cwd,
+    );
 
     state.file_picker_pending_dir = DisplayablePathBuf::from_path(initial_dir);
     Ok(false)
 }
 
+fn initial_picker_directory(
+    explicit: Option<&Path>,
+    file_parent: Option<&Path>,
+    saved: Option<&Path>,
+    cwd: &Path,
+) -> PathBuf {
+    explicit
+        .or_else(|| saved.filter(|path| path.is_dir()))
+        .or(file_parent)
+        .unwrap_or(cwd)
+        .to_owned()
+}
+
+/// Validate/reopen terminal input after help/version handling, before raw mode.
+fn handle_stdin(state: &mut State) -> apperr::Result<()> {
+    if let Some(mut file) = sys::reopen_stdin_if_redirected()? {
+        logging::log_action("STARTUP_STDIN: Reading from redirected stdin");
+        let doc = state.documents.add_untitled(&state.config)?;
+        let mut tb = doc.buffer.borrow_mut();
+        tb.read_file(&mut file, None)?;
+        tb.mark_as_dirty();
+    } else if state.documents.len() == 0 {
+        state.documents.add_untitled(&state.config)?;
+    }
+    Ok(())
+}
+
 fn print_help() {
     sys::write_stdout(concat!(
-        "Usage: ogedit [OPTIONS] [FILE[:LINE[:COLUMN]]]\n",
+        "Usage: ogedit [OPTIONS] [FILE]...\n",
         "Options:\n",
-        "    -h, --help       Print this help message\n",
-        "    -v, --version    Print the version number\n",
-        "\n",
-        "Arguments:\n",
-        "    FILE[:LINE[:COLUMN]]    The file to open, optionally with line and column (e.g., foo.txt:123:45)\n",
+        "    -g, --goto <FILE:LINE[:CHARACTER]>    Open at the specified line and character\n",
+        "    -h, --help                            Print this help message\n",
+        "    -v, --version                         Print the version number\n",
+        "\nNegative lines count from the end. --goto applies to the next file only.\n",
     ));
 }
 
@@ -414,6 +537,13 @@ fn print_version() {
 }
 
 fn draw(ctx: &mut Context, state: &mut State) {
+    native_open::poll(ctx, state);
+    if ctx
+        .keyboard_input()
+        .is_none_or(|key| shortcuts::resolve(&state.config.hotkeys, key).is_none())
+    {
+        workbench::shortcuts(ctx, state);
+    }
     draw_menubar(ctx, state);
     draw_editor(ctx, state);
     draw_statusbar(ctx, state);
@@ -436,8 +566,12 @@ fn draw(ctx: &mut Context, state: &mut State) {
     if state.wants_encoding_change != StateEncodingChange::None {
         draw_dialog_encoding_change(ctx, state);
     }
+    if state.wants_language_picker {
+        draw_dialog_language_change(ctx, state);
+    }
     if state.wants_go_to_file {
-        draw_go_to_file(ctx, state);
+        state.wants_go_to_file = false;
+        workbench::open(state, workbench::Panel::Files);
     }
     if state.wants_about {
         draw_dialog_about(ctx, state);
@@ -451,72 +585,96 @@ fn draw(ctx: &mut Context, state: &mut State) {
     if state.error_log_count != 0 {
         draw_error_log(ctx, state);
     }
+    workbench::draw(ctx, state);
 
-    if let Some(key) = ctx.keyboard_input() {
-        // Shortcuts that are not handled as part of the textarea, etc.
-        // All shortcuts are configurable via state.config.hotkeys
-        let hk = &state.config.hotkeys;
+    handle_shortcuts(ctx, state, false);
+}
 
-        if key == hk.file_new {
-            logging::log_shortcut(key, "New file");
-            draw_add_untitled_document(ctx, state);
-        } else if key == hk.file_open {
-            logging::log_shortcut(key, "Open file");
-            logging::log_dialog_open("File Open");
-            state.wants_file_picker = StateFilePicker::Open;
-        } else if key == hk.file_save {
-            logging::log_shortcut(key, "Save");
-            state.wants_save = true;
-        } else if key == hk.file_save_as {
-            logging::log_shortcut(key, "Save As");
-            logging::log_dialog_open("Save As");
-            state.wants_file_picker = StateFilePicker::SaveAs;
-        } else if key == hk.file_reload
-            && state.documents.active().is_some_and(|d| d.path.is_some())
-        {
-            logging::log_shortcut(key, "Reload from disk");
-            state.wants_reload = true;
-        } else if key == hk.file_close {
-            logging::log_shortcut(key, "Close");
-            state.wants_close = true;
-        } else if key == hk.view_go_to_file {
-            logging::log_shortcut(key, "Go to file");
-            logging::log_dialog_open("Go to File");
-            state.wants_go_to_file = true;
-        } else if key == hk.file_exit {
-            logging::log_shortcut(key, "Exit");
-            state.wants_exit = true;
-        } else if key == hk.view_go_to_line {
-            logging::log_shortcut(key, "Go to line");
-            logging::log_dialog_open("Go to Line");
-            state.wants_goto = true;
-        } else if key == hk.edit_duplicate_line {
-            logging::log_shortcut(key, "Duplicate line");
-            logging::log_duplicate_line();
-            draw_duplicate_line(state);
-        } else if key == hk.edit_find && state.wants_search.kind != StateSearchKind::Disabled
-        {
-            logging::log_shortcut(key, "Find");
-            logging::log_dialog_open("Find");
-            state.wants_search.kind = StateSearchKind::Search;
-            state.wants_search.focus = true;
-        } else if key == hk.edit_replace && state.wants_search.kind != StateSearchKind::Disabled
-        {
-            logging::log_shortcut(key, "Replace");
-            logging::log_dialog_open("Replace");
-            state.wants_search.kind = StateSearchKind::Replace;
-            state.wants_search.focus = true;
-        } else if key == hk.edit_find_next {
-            logging::log_shortcut(key, "Find next");
-            search_execute(ctx, state, SearchAction::Search);
-        } else {
-            return;
-        }
-
-        // All of the above shortcuts happen to require a rerender.
-        ctx.needs_rerender();
-        ctx.set_input_consumed();
+fn handle_shortcuts(ctx: &mut Context, state: &mut State, editor_focused: bool) {
+    use shortcuts::Command::*;
+    let Some(key) = ctx.keyboard_input() else {
+        return;
+    };
+    let Some(command) = shortcuts::resolve(&state.config.hotkeys, key) else {
+        return;
+    };
+    if command.edits_buffer() && !editor_focused {
+        return;
     }
+    match command {
+        New => draw_add_untitled_document(ctx, state),
+        Open => state.wants_file_picker = StateFilePicker::Open,
+        Save => state.wants_save = true,
+        SaveAs => state.wants_file_picker = StateFilePicker::SaveAs,
+        Reload => {
+            if state.documents.active().is_some_and(|doc| doc.path.is_some()) {
+                state.wants_reload = true;
+            }
+        }
+        Close => state.wants_close = true,
+        Exit => state.wants_exit = true,
+        Files => state.wants_go_to_file = true,
+        Goto => state.wants_goto = true,
+        Duplicate => draw_duplicate_line(state),
+        Find | Replace => {
+            if state.wants_search.kind != StateSearchKind::Disabled {
+                state.wants_search.kind = if command == Find {
+                    StateSearchKind::Search
+                } else {
+                    StateSearchKind::Replace
+                };
+                state.wants_search.focus = true;
+            }
+        }
+        FindNext => search_execute(ctx, state, SearchAction::Search),
+        Wrap => {
+            if let Some(doc) = state.documents.active() {
+                let mut tb = doc.buffer.borrow_mut();
+                state.config.word_wrap = !tb.is_word_wrap_enabled();
+                tb.set_word_wrap(state.config.word_wrap);
+                if let Err(err) = state.config.save() {
+                    drop(tb);
+                    error_log_add(ctx, state, err);
+                }
+            }
+        }
+        Undo | Redo | Cut | Copy | Paste | SelectAll => {
+            if let Some(doc) = state.documents.active() {
+                let mut tb = doc.buffer.borrow_mut();
+                match command {
+                    Undo => {
+                        tb.undo();
+                        logging::log_undo();
+                    }
+                    Redo => {
+                        tb.redo();
+                        logging::log_redo();
+                    }
+                    Cut => {
+                        tb.cut(ctx.clipboard_mut());
+                        logging::log_cut(ctx.clipboard_ref().read());
+                    }
+                    Copy => {
+                        tb.copy(ctx.clipboard_mut());
+                        logging::log_copy(ctx.clipboard_ref().read());
+                    }
+                    Paste => {
+                        logging::log_paste(ctx.clipboard_ref().read());
+                        tb.paste(ctx.clipboard_ref());
+                    }
+                    SelectAll => {
+                        tb.select_all();
+                        logging::log_select_all();
+                    }
+                    _ => unreachable!(),
+                }
+                tb.make_cursor_visible();
+            }
+        }
+    }
+    logging::log_shortcut(key, &format!("{command:?}"));
+    ctx.needs_rerender();
+    ctx.set_input_consumed();
 }
 
 fn draw_handle_wants_exit(_ctx: &mut Context, state: &mut State) {
@@ -537,7 +695,7 @@ fn draw_handle_wants_exit(_ctx: &mut Context, state: &mut State) {
     }
 }
 
-fn write_terminal_title(output: &mut ArenaString, state: &mut State) {
+fn write_terminal_title(arena: &Arena, output: &mut ArenaString, state: &mut State) {
     let (filename, dirty) = state
         .documents
         .active()
@@ -554,7 +712,8 @@ fn write_terminal_title(output: &mut ArenaString, state: &mut State) {
         if dirty {
             output.push_str("● ");
         }
-        output.push_str(&sanitize_control_chars(filename));
+        let scratch = scratch_arena(Some(arena));
+        output.push_str(&unicode::sanitize_control_chars(&scratch, filename));
         output.push_str(" - ");
     }
     output.push_str("edit\x1b\\");
@@ -730,9 +889,12 @@ fn setup_terminal(tui: &mut Tui, state: &mut State, vt_parser: &mut vt::Parser) 
         // We explicitly set a high read timeout, because we're not
         // waiting for user keyboard input. If we encounter a lone ESC,
         // it's unlikely to be from a ESC keypress, but rather from a VT sequence.
-        let Some(input) = sys::read_stdin(&scratch, Duration::from_secs(3)) else {
+        let Some((resize, input)) = sys::read_stdin(&scratch, Duration::from_secs(3)) else {
             break;
         };
+        if let Some(size) = resize {
+            tui.set_size(size);
+        }
 
         let mut vt_stream = vt_parser.parse(&input);
         while let Some(token) = vt_stream.next() {
@@ -786,11 +948,11 @@ fn setup_terminal(tui: &mut Tui, state: &mut State, vt_parser: &mut vt::Parser) 
                                 // Round from 16 bits to 8 bits.
                                 val = (val * 0xff + 0x7fff) / 0xffff;
                             }
-                            rgb = (rgb >> 8) | ((val as u32) << 16);
+                            rgb = (rgb << 8) | (val as u32);
                         }
                     }
 
-                    *color = StraightRgba::from_le(rgb | 0xff000000);
+                    *color = StraightRgba::from_rgba(rgb << 8 | 0xff);
                     color_responses += 1;
                     osc_buffer.clear();
                 }
@@ -811,22 +973,27 @@ fn setup_terminal(tui: &mut Tui, state: &mut State, vt_parser: &mut vt::Parser) 
     RestoreModes
 }
 
-/// Strips all C0 control characters from the string and replaces them with "_".
-///
-/// Jury is still out on whether this should also strip C1 control characters.
-/// That requires parsing UTF8 codepoints, which is annoying.
-fn sanitize_control_chars(text: &str) -> Cow<'_, str> {
-    if let Some(off) = text.bytes().position(|b| (..0x20).contains(&b)) {
-        let mut sanitized = text.to_string();
-        // SAFETY: We only search for ASCII and replace it with ASCII.
-        let vec = unsafe { sanitized.as_bytes_mut() };
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
 
-        for i in &mut vec[off..] {
-            *i = if (..0x20).contains(i) { b'_' } else { *i }
-        }
-
-        Cow::Owned(sanitized)
-    } else {
-        Cow::Borrowed(text)
+    #[test]
+    fn remembered_folder_is_not_shadowed_by_a_file_argument() {
+        let root = std::env::temp_dir().join(format!("ogedit-folder-order-{}", process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file_parent = Path::new("opened-file-folder");
+        let explicit = Path::new("explicit-folder");
+        let cwd = Path::new("cwd");
+        assert_eq!(initial_picker_directory(None, Some(file_parent), Some(&root), cwd), root);
+        assert_eq!(
+            initial_picker_directory(Some(explicit), Some(file_parent), Some(&root), cwd),
+            explicit
+        );
+        assert_eq!(
+            initial_picker_directory(None, Some(file_parent), Some(&root.join("missing")), cwd),
+            file_parent
+        );
+        assert_eq!(initial_picker_directory(None, None, None, cwd), cwd);
+        std::fs::remove_dir(&root).unwrap();
     }
 }

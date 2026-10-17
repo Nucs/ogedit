@@ -22,7 +22,7 @@
 #   - ogedit-linux-x64.tar.xz / .tar.gz / .zip (portable)
 #   - ogedit-linux-x64.deb (Debian/Ubuntu)
 #   - ogedit-linux-x64.rpm (Fedora/RHEL)
-#   - ogedit-linux-x64.AppImage (Universal)
+#   - ogedit-linux-x64.AppImage (bundled ICU)
 # macOS:
 #   - ogedit-macos-x64.tar.gz / .zip / .pkg
 #   - ogedit-macos-arm64.tar.gz / .zip / .pkg
@@ -34,15 +34,80 @@ on:
   push:
     tags:
       - "release/v*"
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      release_commit:
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: publish-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.TAG }}
+      commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag and version
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: python3 tools/release_metadata.py --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Verify and pin release commit
+        id: commit
+        env:
+          EXPECTED_COMMIT: ${{ inputs.release_commit || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_COMMIT=$(git rev-parse HEAD)
+          test "$ACTUAL_COMMIT" = "$EXPECTED_COMMIT"
+          echo "sha=$ACTUAL_COMMIT" >> "$GITHUB_OUTPUT"
+      - name: Check delivery regressions
+        run: python3 tools/test_delivery.py
+
+  test:
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+      - name: Install Rust
+        run: rustup show active-toolchain
+      - name: Test native editor and stress regressions
+        run: cargo test --locked --workspace --all-features --lib --bins -- --include-ignored --test-threads=1
+      - name: Test documentation
+        run: cargo test --locked --workspace --doc
+      - name: Test installers in disposable fixtures
+        shell: bash
+        run: |
+          python3 tools/test_delivery.py
+          python3 tools/test_source_installer.py
+
   build:
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -58,7 +123,7 @@ jobs:
             artifact: ogedit-windows-arm64
             binary: ogedit.exe
             arch: arm64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             artifact: ogedit-linux-x64
             binary: ogedit
@@ -80,15 +145,34 @@ jobs:
         if: matrix.os == 'windows-latest'
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
 
       - name: Install Rust
         run: |
-          rustup toolchain install nightly --no-self-update --profile minimal --component rust-src
+          rustup show active-toolchain
           rustup target add ${{ matrix.target }}
 
       - name: Build release
-        run: cargo build --config .cargo/release-nightly.toml --release --target ${{ matrix.target }}
+        run: cargo build --locked --config .cargo/release-nightly.toml --release --target ${{ matrix.target }}
+
+      - name: Locate Linux ICU runtime
+        if: matrix.os == 'ubuntu-24.04'
+        id: linux_icu
+        shell: bash
+        run: |
+          set -euo pipefail
+          ldconfig -p > icu-ldconfig.txt
+          ICU_PATH=$(awk '$1 ~ /^libicuuc\.so\.[0-9]+$/ && /x86-64/ && !found { path=$NF; found=1 } END { print path }' icu-ldconfig.txt)
+          test -f "$ICU_PATH"
+          ICU_MAJOR=${ICU_PATH##*.}
+          ICU_PACKAGE="libicu${ICU_MAJOR}"
+          test "$(dpkg-query -W -f='${Status}' "$ICU_PACKAGE")" = 'install ok installed'
+          echo "package=$ICU_PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "major=$ICU_MAJOR" >> "$GITHUB_OUTPUT"
+          echo "directory=$(dirname "$ICU_PATH")" >> "$GITHUB_OUTPUT"
 
       - name: Create artifact directory
         shell: bash
@@ -105,19 +189,14 @@ jobs:
         shell: bash
         run: |
           cp README.md artifact/
-          cp LICENSE artifact/ 2>/dev/null || echo "No LICENSE file"
+          cp LICENSE artifact/
 
       - name: Get version from Cargo.toml
         id: get_version
         shell: bash
-        run: |
-          # Use Cargo.toml as single source of truth for version
-          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          # Strip any prerelease suffix for package versions (e.g., 1.2.2-beta.1 -> 1.2.2)
-          VERSION_CLEAN=$(echo "$VERSION" | sed 's/-.*$//')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION_CLEAN=$VERSION_CLEAN" >> $GITHUB_OUTPUT
-          echo "Version from Cargo.toml: $VERSION"
+        env:
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+        run: python3 tools/release_metadata.py --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Create zip (Unix)
         if: matrix.os != 'windows-latest'
@@ -125,7 +204,7 @@ jobs:
           cd artifact
           zip -r ../${{ matrix.artifact }}.zip ./*
           cd ..
-          sha256sum ${{ matrix.artifact }}.zip > ${{ matrix.artifact }}.zip.sha256
+          shasum -a 256 ${{ matrix.artifact }}.zip > ${{ matrix.artifact }}.zip.sha256
           cat ${{ matrix.artifact }}.zip.sha256
 
       - name: Create zip (Windows)
@@ -138,14 +217,14 @@ jobs:
           Get-Content ${{ matrix.artifact }}.zip.sha256
 
       - name: Upload zip artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.zip
           retention-days: 5
 
       - name: Upload zip checksum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.sha256
           path: ${{ matrix.artifact }}.zip.sha256
@@ -175,7 +254,7 @@ jobs:
             ogedit-core-${ARCH}.pkg
 
           # Create package structure for EDITOR env var component
-          mkdir -p pkg-root-editor-env/tmp
+          mkdir -p pkg-root-editor-env
           mkdir -p pkg-scripts
           cp pkg/postinstall-editor-env pkg-scripts/postinstall
           chmod 755 pkg-scripts/postinstall
@@ -213,7 +292,7 @@ jobs:
 
       - name: Upload macOS .pkg artifact
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-pkg
           path: ${{ matrix.artifact }}.pkg
@@ -221,7 +300,7 @@ jobs:
 
       - name: Upload macOS .pkg checksum
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.pkg.sha256
           path: ${{ matrix.artifact }}.pkg.sha256
@@ -238,7 +317,7 @@ jobs:
 
       - name: Upload macOS .tar.gz artifact
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-tar
           path: ${{ matrix.artifact }}.tar.gz
@@ -246,7 +325,7 @@ jobs:
 
       - name: Upload macOS .tar.gz checksum
         if: matrix.os == 'macos-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.tar.gz.sha256
           path: ${{ matrix.artifact }}.tar.gz.sha256
@@ -256,7 +335,7 @@ jobs:
       # Linux Packages (.tar.gz, .tar.xz, .deb, .rpm, .AppImage)
       # ===========================================
       - name: Create Linux .tar.gz
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           cd artifact
           tar -czvf ../${{ matrix.artifact }}.tar.gz ./*
@@ -265,23 +344,23 @@ jobs:
           cat ${{ matrix.artifact }}.tar.gz.sha256
 
       - name: Upload Linux .tar.gz artifact
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-tar
           path: ${{ matrix.artifact }}.tar.gz
           retention-days: 5
 
       - name: Upload Linux .tar.gz checksum
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.tar.gz.sha256
           path: ${{ matrix.artifact }}.tar.gz.sha256
           retention-days: 5
 
       - name: Create Linux .tar.xz
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           cd artifact
           tar -cJvf ../${{ matrix.artifact }}.tar.xz ./*
@@ -290,25 +369,25 @@ jobs:
           cat ${{ matrix.artifact }}.tar.xz.sha256
 
       - name: Upload Linux .tar.xz artifact
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-tarxz
           path: ${{ matrix.artifact }}.tar.xz
           retention-days: 5
 
       - name: Upload Linux .tar.xz checksum
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.tar.xz.sha256
           path: ${{ matrix.artifact }}.tar.xz.sha256
           retention-days: 5
 
       - name: Build Linux .deb package
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
-          VERSION="${{ steps.get_version.outputs.VERSION_CLEAN }}"
+          VERSION="${{ steps.get_version.outputs.DEBIAN_VERSION }}"
           PKG_NAME="ogedit"
 
           # Create .deb directory structure
@@ -332,7 +411,7 @@ jobs:
           Section: editors
           Priority: optional
           Architecture: amd64
-          Depends: debconf (>= 0.5) | debconf-2.0
+          Depends: debconf (>= 0.5) | debconf-2.0, libc6 (>= 2.39), libgcc-s1, ${{ steps.linux_icu.outputs.package }}
           Maintainer: Nucs <nucs@users.noreply.github.com>
           Homepage: https://github.com/Nucs/ogedit
           Description: Terminal-based text editor inspired by MS-DOS Editor
@@ -359,25 +438,26 @@ jobs:
           cat ${{ matrix.artifact }}.deb.sha256
 
       - name: Upload Linux .deb artifact
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-deb
           path: ${{ matrix.artifact }}.deb
           retention-days: 5
 
       - name: Upload Linux .deb checksum
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.deb.sha256
           path: ${{ matrix.artifact }}.deb.sha256
           retention-days: 5
 
       - name: Build Linux .rpm package
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION_CLEAN }}"
+          RPM_RELEASE="${{ steps.get_version.outputs.RPM_RELEASE }}"
 
           # Install rpm tools
           sudo apt-get update
@@ -385,36 +465,37 @@ jobs:
 
           # Create RPM build structure
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin
-          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit
-          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/etc/profile.d
+          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin
+          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/share/doc/ogedit
+          mkdir -p rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/etc/profile.d
 
           # Copy binaries
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogmsedit
-          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit
-          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogmsedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin/ogedit
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin/ogmsedit
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin/ogedit
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin/ogmsedit
 
           # Copy helper script for EDITOR configuration
-          cp rpm/ogedit-set-editor rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/
-          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/bin/ogedit-set-editor
+          cp rpm/ogedit-set-editor rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin/
+          chmod 755 rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/bin/ogedit-set-editor
 
           # Copy sample profile.d script (disabled by default)
-          cp rpm/ogedit-editor.sh.sample rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/etc/profile.d/
-          chmod 644 rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/etc/profile.d/ogedit-editor.sh.sample
+          cp rpm/ogedit-editor.sh.sample rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/etc/profile.d/
+          chmod 644 rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/etc/profile.d/ogedit-editor.sh.sample
 
           # Copy docs
-          cp README.md rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit/
-          cp LICENSE rpmbuild/BUILDROOT/ogedit-${VERSION}-1.x86_64/usr/share/doc/ogedit/ 2>/dev/null || true
+          cp README.md rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/share/doc/ogedit/
+          cp LICENSE rpmbuild/BUILDROOT/ogedit-${VERSION}-${RPM_RELEASE}.x86_64/usr/share/doc/ogedit/ 2>/dev/null || true
 
           # Create spec file
           cat > rpmbuild/SPECS/ogedit.spec << EOF
           Name:           ogedit
           Version:        ${VERSION}
-          Release:        1
+          Release:        ${RPM_RELEASE}
           Summary:        Terminal-based text editor inspired by MS-DOS Editor
           License:        MIT
           URL:            https://github.com/Nucs/ogedit
+          Requires:       libicu
 
           %description
           OGEdit is a fast, lightweight terminal text editor built in Rust.
@@ -429,7 +510,6 @@ jobs:
           /usr/bin/ogmsedit
           /usr/bin/ogedit-set-editor
           %config(noreplace) /etc/profile.d/ogedit-editor.sh.sample
-          /usr/share/doc/ogedit/README.md
           %doc /usr/share/doc/ogedit/
 
           %post
@@ -438,8 +518,13 @@ jobs:
           echo "  sudo ogedit-set-editor --enable"
           echo ""
 
+          %preun
+          if [ "\$1" -eq 0 ]; then
+            /usr/bin/ogedit-set-editor --disable
+          fi
+
           %changelog
-          * $(date '+%a %b %d %Y') Nucs <nucs@users.noreply.github.com> - ${VERSION}-1
+          * $(date '+%a %b %d %Y') Nucs <nucs@users.noreply.github.com> - ${VERSION}-${RPM_RELEASE}
           - Release ${VERSION}
           EOF
 
@@ -447,48 +532,69 @@ jobs:
           rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/ogedit.spec
 
           # Move and rename
-          mv rpmbuild/RPMS/x86_64/ogedit-${VERSION}-1.x86_64.rpm ${{ matrix.artifact }}.rpm
+          mv rpmbuild/RPMS/x86_64/ogedit-${VERSION}-${RPM_RELEASE}.x86_64.rpm ${{ matrix.artifact }}.rpm
 
           # Generate checksum
           sha256sum ${{ matrix.artifact }}.rpm > ${{ matrix.artifact }}.rpm.sha256
           cat ${{ matrix.artifact }}.rpm.sha256
 
       - name: Upload Linux .rpm artifact
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-rpm
           path: ${{ matrix.artifact }}.rpm
           retention-days: 5
 
       - name: Upload Linux .rpm checksum
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.rpm.sha256
           path: ${{ matrix.artifact }}.rpm.sha256
           retention-days: 5
 
       - name: Build Linux .AppImage
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
 
-          # Download appimagetool and extract it (avoids FUSE requirement on CI)
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          # Pin both the builder and embedded runtime; verify before execution.
+          # Published digests: AppImage/appimagetool 1.9.1 and type2-runtime 20251108.
+          curl --fail --location --retry 3 -o appimagetool-x86_64.AppImage https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool-x86_64.AppImage" | sha256sum --check --strict
+          curl --fail --location --retry 3 -o runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+          echo "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  runtime-x86_64" | sha256sum --check --strict
           chmod +x appimagetool-x86_64.AppImage
           ./appimagetool-x86_64.AppImage --appimage-extract
           mv squashfs-root appimagetool
 
           # Create AppDir structure
           mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/lib
+          mkdir -p AppDir/usr/share/doc/icu
           mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/share/icons/hicolor/scalable/apps
 
           # Copy binary
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} AppDir/usr/bin/ogedit
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} AppDir/usr/bin/ogmsedit
           chmod 755 AppDir/usr/bin/*
+
+          # Include the matching ICU runtime; development symlinks are unnecessary.
+          for component in uc i18n data; do
+            cp -L "${{ steps.linux_icu.outputs.directory }}/libicu${component}.so.${{ steps.linux_icu.outputs.major }}" AppDir/usr/lib/
+          done
+          cp "/usr/share/doc/${{ steps.linux_icu.outputs.package }}/copyright" AppDir/usr/share/doc/icu/
+          # ICU also uses the C++ and GCC runtimes; bundle these with their licenses.
+          for library in libstdc++.so.6 libgcc_s.so.1; do
+            library_path=$(gcc -print-file-name="$library")
+            test -f "$library_path"
+            cp -L "$library_path" AppDir/usr/lib/
+          done
+          mkdir -p AppDir/usr/share/doc/gcc-runtime
+          cp /usr/share/doc/libstdc++6/copyright AppDir/usr/share/doc/gcc-runtime/libstdc++-copyright
+          cp /usr/share/doc/libgcc-s1/copyright AppDir/usr/share/doc/gcc-runtime/libgcc-copyright
 
           # Create desktop file
           cat > AppDir/ogedit.desktop << EOF
@@ -503,18 +609,10 @@ jobs:
           EOF
           cp AppDir/ogedit.desktop AppDir/usr/share/applications/
 
-          # Create a simple icon (or copy if exists)
-          if [ -f assets/edit.ico ]; then
-            # Convert ico to png if possible, or create placeholder
-            convert assets/edit.ico -resize 256x256 AppDir/ogedit.png 2>/dev/null || \
-            convert -size 256x256 xc:navy -fill white -gravity center -pointsize 48 -annotate 0 "OG" AppDir/ogedit.png 2>/dev/null || \
-            echo "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" | base64 -d > AppDir/ogedit.png
-          else
-            # Create simple placeholder icon
-            convert -size 256x256 xc:navy -fill white -gravity center -pointsize 48 -annotate 0 "OG" AppDir/ogedit.png 2>/dev/null || \
-            echo "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAACXBIWXMAAAsTAAALEwEAmpwYAAAF8ElEQVR4nO3dW3LbOhBAUWb/m870D5lEtuXHJQGCB+ecqkylYkvkoxto0PH9fr8DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACg6HP0BwDg4GMffQAA+xkA8j4+Rt8CqPhj9BcA2M8AAPACBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4iT9GfwGA/dwBAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDAS3yM/gIA+7kDAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvMQfo78AwH7uAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8xMfoLwCwnzsAgJcwAAC8hAEA4CUMAAAvYQAAeAkDAMBLGAAAXsIAAPASBgCAlzAAALyEAQDgJQwAAC9hAAB4CQMAwEsYAABewgAA8BIGAICXMAAAvIQBAOAlDAAAL2EAAHgJAwDAS/wx+gsA7OcOAOAlDAAAL2EAAHgJAwDASxgAAF7CAADwEgYAgJcwAAC8hAEA4CUMAAAvYQAAeIn/AKbwronjFqdvAAAAAElFTkSuQmCC" | base64 -d > AppDir/ogedit.png
-          fi
-          cp AppDir/ogedit.png AppDir/usr/share/icons/hicolor/256x256/apps/
+          # The repository's SVG is already a valid scalable AppDir icon.
+          cp assets/edit.svg AppDir/ogedit.svg
+          cp AppDir/ogedit.svg AppDir/usr/share/icons/hicolor/scalable/apps/
+          ln -s ogedit.svg AppDir/.DirIcon
 
           # Create AppRun
           cat > AppDir/AppRun << 'EOF'
@@ -522,28 +620,29 @@ jobs:
           SELF=$(readlink -f "$0")
           HERE=${SELF%/*}
           export PATH="${HERE}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           exec "${HERE}/usr/bin/ogedit" "$@"
           EOF
           chmod +x AppDir/AppRun
 
           # Build AppImage using extracted appimagetool (no FUSE needed)
-          ARCH=x86_64 ./appimagetool/AppRun AppDir ${{ matrix.artifact }}.AppImage
+          ARCH=x86_64 ./appimagetool/AppRun --runtime-file runtime-x86_64 AppDir ${{ matrix.artifact }}.AppImage
 
           # Generate checksum
           sha256sum ${{ matrix.artifact }}.AppImage > ${{ matrix.artifact }}.AppImage.sha256
           cat ${{ matrix.artifact }}.AppImage.sha256
 
       - name: Upload Linux .AppImage artifact
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-appimage
           path: ${{ matrix.artifact }}.AppImage
           retention-days: 5
 
       - name: Upload Linux .AppImage checksum
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.AppImage.sha256
           path: ${{ matrix.artifact }}.AppImage.sha256
@@ -582,7 +681,7 @@ jobs:
 
       - name: Upload MSI artifact
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}-msi
           path: ${{ matrix.artifact }}.msi
@@ -590,23 +689,27 @@ jobs:
 
       - name: Upload MSI checksum
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}.msi.sha256
           path: ${{ matrix.artifact }}.msi.sha256
           retention-days: 5
 
   create-release:
-    needs: build
+    needs: [verify, test, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ogedit-*
           merge-multiple: true
@@ -616,22 +719,9 @@ jobs:
 
       - name: Get version from Cargo.toml
         id: get_version
-        run: |
-          # Use Cargo.toml as single source of truth for version
-          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version from Cargo.toml: $VERSION"
-
-      - name: Check if prerelease
-        id: check_prerelease
-        run: |
-          VERSION="${{ steps.get_version.outputs.VERSION }}"
-          if [[ "$VERSION" =~ (-alpha|-beta|-rc) ]]; then
-            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
-            echo "Detected prerelease version: $VERSION"
-          else
-            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
-          fi
+        env:
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+        run: python3 tools/release_metadata.py --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         id: release_notes
@@ -639,6 +729,11 @@ jobs:
           echo "NOTES<<EOF" >> $GITHUB_OUTPUT
           echo "## OGEdit v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
+          NOTES_FILE="docs/releases/${{ steps.get_version.outputs.VERSION }}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            cat "$NOTES_FILE" >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+          fi
           echo "### Downloads" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "#### Windows" >> $GITHUB_OUTPUT
@@ -658,7 +753,7 @@ jobs:
           echo "|--------|------|-------------|" >> $GITHUB_OUTPUT
           echo "| Debian/Ubuntu | \`ogedit-linux-x64.deb\` | \`sudo dpkg -i ogedit-linux-x64.deb\` |" >> $GITHUB_OUTPUT
           echo "| Fedora/RHEL | \`ogedit-linux-x64.rpm\` | \`sudo rpm -i ogedit-linux-x64.rpm\` |" >> $GITHUB_OUTPUT
-          echo "| AppImage | \`ogedit-linux-x64.AppImage\` | Universal, run directly |" >> $GITHUB_OUTPUT
+          echo "| AppImage | \`ogedit-linux-x64.AppImage\` | Bundled ICU, run directly |" >> $GITHUB_OUTPUT
           echo "| Portable | \`ogedit-linux-x64.tar.xz\` | Best compression |" >> $GITHUB_OUTPUT
           echo "| Portable | \`ogedit-linux-x64.tar.gz\` | Standard Unix archive |" >> $GITHUB_OUTPUT
           echo "| Portable | \`ogedit-linux-x64.zip\` | Cross-platform |" >> $GITHUB_OUTPUT
@@ -702,12 +797,15 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          tag_name: ${{ needs.verify.outputs.tag }}
+          target_commitish: ${{ needs.verify.outputs.commit }}
           name: v${{ steps.get_version.outputs.VERSION }}
           body: ${{ steps.release_notes.outputs.NOTES }}
           draft: false
-          prerelease: ${{ steps.check_prerelease.outputs.IS_PRERELEASE }}
+          prerelease: ${{ steps.get_version.outputs.IS_PRERELEASE }}
+          fail_on_unmatched_files: true
           files: |
             ogedit-*.zip
             ogedit-*.zip.sha256

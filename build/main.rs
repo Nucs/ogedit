@@ -23,6 +23,7 @@ fn main() {
     };
 
     compile_i18n();
+    compile_syntax();
     configure_icu(target_os);
     #[cfg(windows)]
     configure_windows_binary(target_os);
@@ -66,6 +67,14 @@ fn configure_icu(target_os: TargetOs) {
             "Either `EDIT_CFG_ICU_RENAMING_AUTO_DETECT` or `EDIT_CFG_ICU_RENAMING_VERSION` must be set, but not both"
         );
     }
+
+    // Binary packages must work with runtime ICU packages, which commonly omit
+    // the unversioned development symlinks. Explicit SONAME overrides stay exact.
+    let versioned_fallback = target_os == TargetOs::Unix
+        && icuuc_soname.is_empty()
+        && icui18n_soname.is_empty()
+        && renaming_auto_detect;
+    println!("cargo::rustc-env=EDIT_CFG_ICU_VERSIONED_FALLBACK={versioned_fallback}");
 
     let icuuc_soname = if !icuuc_soname.is_empty() {
         &icuuc_soname
@@ -115,9 +124,18 @@ fn configure_windows_binary(target_os: TargetOs) {
     println!("cargo::rerun-if-changed={PATH}");
     winresource::WindowsResource::new()
         .set_manifest_file(PATH)
-        .set("FileDescription", "Microsoft Edit")
+        .set("FileDescription", "OGEdit")
         .set("LegalCopyright", "© Microsoft Corporation. All rights reserved.")
         .set_icon("assets/edit.ico")
         .compile()
         .unwrap();
+}
+
+fn compile_syntax() {
+    let path = lsh::compiler::builtin_definitions_path();
+    let mut generator = lsh::compiler::Generator::new();
+    generator.read_directory(path).expect("read syntax definitions");
+    let code = generator.generate_rust().expect("compile syntax definitions");
+    std::fs::write(format!("{}/lsh_definitions.rs", env_opt("OUT_DIR")), code).unwrap();
+    println!("cargo::rerun-if-changed={}", path.display());
 }

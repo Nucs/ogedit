@@ -6,20 +6,34 @@ set -e
 
 PROFILE_FILE="/etc/profile.d/ogedit-editor.sh"
 
+managed_profile() {
+    [ -f "$PROFILE_FILE" ] && [ ! -L "$PROFILE_FILE" ] &&
+        [ "$(cat "$PROFILE_FILE")" = "$(printf '%s\n' '# Set EDITOR to ogedit (installed by ogedit package)' 'export EDITOR="/usr/bin/ogedit"')" ]
+}
+
 case "$1" in
     configure)
         # Check if user wants to set EDITOR
         db_get ogedit/set-editor
         if [ "$RET" = "true" ]; then
+            if { [ -e "$PROFILE_FILE" ] || [ -L "$PROFILE_FILE" ]; } && ! managed_profile; then
+                echo "Preserving administrator-managed $PROFILE_FILE" >&2
+                exit 0
+            fi
             # Create profile.d script to set EDITOR
-            cat > "$PROFILE_FILE" << 'EOF'
+            profile_tmp=$(mktemp "${PROFILE_FILE}.XXXXXX")
+            trap 'rm -f "$profile_tmp"' EXIT
+            cat > "$profile_tmp" << 'EOF'
 # Set EDITOR to ogedit (installed by ogedit package)
 export EDITOR="/usr/bin/ogedit"
 EOF
-            chmod 644 "$PROFILE_FILE"
+            chmod 644 "$profile_tmp"
+            mv -f "$profile_tmp" "$PROFILE_FILE"
         else
             # Remove profile.d script if it exists
-            rm -f "$PROFILE_FILE"
+            if managed_profile; then
+                rm -f "$PROFILE_FILE"
+            fi
         fi
         ;;
 

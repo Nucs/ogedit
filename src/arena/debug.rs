@@ -4,13 +4,14 @@
 #![allow(clippy::missing_safety_doc, clippy::mut_from_ref)]
 
 use std::alloc::{AllocError, Allocator, Layout};
-use std::mem::{self, MaybeUninit};
+use std::mem::MaybeUninit;
 use std::ptr::NonNull;
+use std::rc::Rc;
 
 use super::release;
 use crate::apperr;
 
-/// A debug wrapper for [`release::Arena`].
+/// A borrow-checking wrapper for [`release::Arena`], enabled in every build.
 ///
 /// The problem with [`super::ScratchArena`] is that it only "borrows" an underlying
 /// [`release::Arena`]. Once the [`super::ScratchArena`] is dropped it resets the watermark
@@ -19,7 +20,7 @@ use crate::apperr;
 /// It is completely valid for the same [`release::Arena`] to be borrowed multiple times at once,
 /// *as long as* you only use the most recent borrow. Bad example:
 /// ```should_panic
-/// use edit::arena::scratch_arena;
+/// use ogedit::arena::scratch_arena;
 ///
 /// let mut scratch1 = scratch_arena(None);
 /// let mut scratch2 = scratch_arena(None);
@@ -29,22 +30,25 @@ use crate::apperr;
 /// // This will also reset `scratch1`'s allocation.
 /// drop(scratch2);
 ///
-/// *foo; // BOOM! ...if it wasn't for our debug wrapper.
+/// *foo; // The checked allocator prevents this invalid access in every build.
 /// ```
 ///
-/// To avoid this, this wraps the real [`release::Arena`] in a "debug" one, which pretends as if every
-/// instance of itself is a distinct [`release::Arena`] instance. Then we use this "debug" [`release::Arena`]
-/// for [`super::ScratchArena`] which allows us to track which borrow is the most recent one.
-pub enum Arena {
-    // Delegate is 'static, because release::Arena requires no lifetime
-    // annotations, and so this mere debug helper cannot use them either.
-    Delegated { delegate: &'static release::Arena, borrow: usize },
+/// Each scope gets a distinct checked wrapper around the shared allocator.
+/// Keeping the delegate private prevents callers from bypassing its scope checks.
+pub struct Arena {
+    kind: ArenaKind,
+}
+
+enum ArenaKind {
+    // A scope owns its backing allocator even during TLS teardown. Public
+    // references remain tied to &self, rather than the underlying Rc lifetime.
+    Delegated { delegate: Rc<release::Arena>, borrow: usize },
     Owned { arena: release::Arena },
 }
 
 impl Drop for Arena {
     fn drop(&mut self) {
-        if let Self::Delegated { delegate, borrow } = self {
+        if let ArenaKind::Delegated { delegate, borrow } = &self.kind {
             let borrows = delegate.borrows.get();
             assert_eq!(*borrow, borrows);
             delegate.borrows.set(borrows - 1);
@@ -60,38 +64,38 @@ impl Default for Arena {
 
 impl Arena {
     pub const fn empty() -> Self {
-        Self::Owned { arena: release::Arena::empty() }
+        Self { kind: ArenaKind::Owned { arena: release::Arena::empty() } }
     }
 
     pub fn new(capacity: usize) -> apperr::Result<Self> {
-        Ok(Self::Owned { arena: release::Arena::new(capacity)? })
+        Ok(Self { kind: ArenaKind::Owned { arena: release::Arena::new(capacity)? } })
     }
 
-    pub(super) fn delegated(delegate: &release::Arena) -> Self {
-        let borrow = delegate.borrows.get() + 1;
+    pub(super) fn delegated(delegate: Rc<release::Arena>) -> Self {
+        let borrow = delegate.borrows.get().checked_add(1).expect("too many scratch scopes");
         delegate.borrows.set(borrow);
-        Self::Delegated { delegate: unsafe { mem::transmute(delegate) }, borrow }
+        Self { kind: ArenaKind::Delegated { delegate, borrow } }
     }
 
     #[inline]
     pub(super) fn delegate_target(&self) -> &release::Arena {
-        match *self {
-            Self::Delegated { delegate, borrow } => {
+        match &self.kind {
+            ArenaKind::Delegated { delegate, borrow } => {
                 assert!(
-                    borrow == delegate.borrows.get(),
+                    *borrow == delegate.borrows.get(),
                     "Arena already borrowed by a newer ScratchArena"
                 );
                 delegate
             }
-            Self::Owned { ref arena } => arena,
+            ArenaKind::Owned { arena } => arena,
         }
     }
 
     #[inline]
     pub(super) fn delegate_target_unchecked(&self) -> &release::Arena {
-        match self {
-            Self::Delegated { delegate, .. } => delegate,
-            Self::Owned { arena } => arena,
+        match &self.kind {
+            ArenaKind::Delegated { delegate, .. } => delegate,
+            ArenaKind::Owned { arena } => arena,
         }
     }
 

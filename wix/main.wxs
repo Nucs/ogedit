@@ -162,7 +162,7 @@
         <Environment
           Id="OGEditEditorVar"
           Name="EDITOR"
-          Value="[INSTALLFOLDER]ogedit.exe"
+          Value="&quot;[INSTALLFOLDER]ogedit.exe&quot;"
           Permanent="no"
           Part="all"
           Action="set"

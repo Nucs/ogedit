@@ -41,3 +41,29 @@ mod test {
         text.lines().count()
     }
 }
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_is_safe_for_simultaneous_background_workers() {
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                scope.spawn(|| {
+                    let text = b"alpha\nbeta\ngamma".repeat(512);
+                    for turn in 0..128 {
+                        assert_eq!(memchr2(b'\n', b'!', &text, 0), 5);
+                        assert_eq!(lines_fwd(&text, 0, 0, 2), (11, 2));
+                        assert_eq!(lines_bwd(&text, 11, 2, 0), (0, 0));
+                        let mut values = [0u32; 257];
+                        memset(&mut values[1..256], turn);
+                        assert_eq!(values[0], 0);
+                        assert_eq!(values[256], 0);
+                        assert!(values[1..256].iter().all(|&x| x == turn));
+                    }
+                });
+            }
+        });
+    }
+}

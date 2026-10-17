@@ -1,43 +1,30 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::cell::RefCell;
 use std::ops::Deref;
+use std::ptr;
+use std::rc::Rc;
 
-#[cfg(debug_assertions)]
-use super::debug;
 use super::{Arena, release};
 use crate::apperr;
 use crate::helpers::*;
 
 /// Borrows an [`Arena`] for temporary allocations.
 ///
+/// Scopes must be used and dropped in reverse construction order. This is
+/// checked in every build before allocating or resetting their shared arena.
 /// See [`scratch_arena`].
-#[cfg(debug_assertions)]
 pub struct ScratchArena<'a> {
-    arena: debug::Arena,
+    arena: Arena,
     offset: usize,
     _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-#[cfg(not(debug_assertions))]
-pub struct ScratchArena<'a> {
-    arena: &'a Arena,
-    offset: usize,
-}
-
-#[cfg(debug_assertions)]
 impl<'a> ScratchArena<'a> {
-    fn new(arena: &'a release::Arena) -> Self {
+    fn new(arena: Rc<release::Arena>) -> Self {
         let offset = arena.offset();
         ScratchArena { arena: Arena::delegated(arena), _phantom: std::marker::PhantomData, offset }
-    }
-}
-
-#[cfg(not(debug_assertions))]
-impl<'a> ScratchArena<'a> {
-    fn new(arena: &'a release::Arena) -> Self {
-        let offset = arena.offset();
-        ScratchArena { arena, offset }
     }
 }
 
@@ -47,118 +34,154 @@ impl Drop for ScratchArena<'_> {
     }
 }
 
-#[cfg(debug_assertions)]
 impl Deref for ScratchArena<'_> {
-    type Target = debug::Arena;
+    type Target = Arena;
 
     fn deref(&self) -> &Self::Target {
         &self.arena
     }
 }
 
-#[cfg(not(debug_assertions))]
-impl Deref for ScratchArena<'_> {
-    type Target = Arena;
-
-    fn deref(&self) -> &Self::Target {
-        self.arena
-    }
+thread_local! {
+    // The application now has background workers. A process-global scratch
+    // pool was only safe when every caller happened to run on the UI thread.
+    static S_SCRATCH: [RefCell<Option<Rc<release::Arena>>>; 2] =
+        const { [RefCell::new(None), RefCell::new(None)] };
 }
 
-mod single_threaded {
-    use super::*;
-
-    static mut S_SCRATCH: [release::Arena; 2] =
-        const { [release::Arena::empty(), release::Arena::empty()] };
-
-    /// Initialize the scratch arenas with a given capacity.
-    /// Call this before using [`scratch_arena`].
-    #[allow(dead_code)]
-    pub fn init(capacity: usize) -> apperr::Result<()> {
-        unsafe {
-            for s in &mut S_SCRATCH[..] {
-                *s = release::Arena::new(capacity)?;
-            }
+/// Initialize this thread's scratch arenas with the given capacity.
+/// Existing live scopes prevent reinitialization, so references cannot be invalidated.
+pub fn init(capacity: usize) -> apperr::Result<()> {
+    S_SCRATCH.with(|pool| {
+        if pool.iter().any(|s| s.borrow().as_ref().is_some_and(|arena| arena.borrows.get() != 0)) {
+            return Err(std::io::Error::from(std::io::ErrorKind::WouldBlock).into());
+        }
+        // Construct both before replacing either one, including on allocation failure.
+        let replacements =
+            [Rc::new(release::Arena::new(capacity)?), Rc::new(release::Arena::new(capacity)?)];
+        for (slot, arena) in pool.iter().zip(replacements) {
+            slot.replace(Some(arena));
         }
         Ok(())
-    }
-
-    /// Need an arena for temporary allocations? [`scratch_arena`] got you covered.
-    /// Call [`scratch_arena`] and it'll return an [`Arena`] that resets when it goes out of scope.
-    ///
-    /// ---
-    ///
-    /// Most methods make just two kinds of allocations:
-    /// * Interior: Temporary data that can be deallocated when the function returns.
-    /// * Exterior: Data that is returned to the caller and must remain alive until the caller stops using it.
-    ///
-    /// Such methods only have two lifetimes, for which you consequently also only need two arenas.
-    /// ...even if your method calls other methods recursively! This is because the exterior allocations
-    /// of a callee are simply interior allocations to the caller, and so on, recursively.
-    ///
-    /// This works as long as the two arenas flip/flop between being used as interior/exterior allocator
-    /// along the callstack. To ensure that is the case, we use a recursion counter in debug builds.
-    ///
-    /// This approach was described among others at: <https://nullprogram.com/blog/2023/09/27/>
-    ///
-    /// # Safety
-    ///
-    /// If your function takes an [`Arena`] argument, you **MUST** pass it to `scratch_arena` as `Some(&arena)`.
-    #[allow(dead_code)]
-    pub fn scratch_arena(conflict: Option<&Arena>) -> ScratchArena<'static> {
-        unsafe {
-            #[cfg(debug_assertions)]
-            let conflict = conflict.map(|a| a.delegate_target_unchecked());
-
-            let index = opt_ptr_eq(conflict, Some(&S_SCRATCH[0])) as usize;
-            let arena = &S_SCRATCH[index];
-            ScratchArena::new(arena)
-        }
-    }
+    })
 }
 
-mod multi_threaded {
-    use std::cell::Cell;
-    use std::ptr;
-
-    use super::*;
-
-    thread_local! {
-        static S_SCRATCH: [Cell<release::Arena>; 2] =
-            const { [Cell::new(release::Arena::empty()), Cell::new(release::Arena::empty())] };
-    }
-
-    /// Does nothing.
-    #[allow(dead_code)]
-    pub fn init(_: usize) -> apperr::Result<()> {
-        Ok(())
-    }
-
-    /// See `single_threaded::scratch_arena`.
-    #[allow(dead_code)]
-    pub fn scratch_arena(conflict: Option<&Arena>) -> ScratchArena<'static> {
-        #[cfg(debug_assertions)]
-        let conflict = conflict.map(|a| a.delegate_target_unchecked());
-
-        #[cold]
-        fn init(s: &[Cell<release::Arena>; 2]) {
-            for s in s {
-                s.set(release::Arena::new(128 * 1024 * 1024).unwrap());
-            }
-        }
-
-        S_SCRATCH.with(|s| {
-            let index = ptr::eq(opt_ptr(conflict), s[0].as_ptr()) as usize;
-            let arena = unsafe { &*s[index].as_ptr() };
-            if arena.is_empty() {
-                init(s);
-            }
-            ScratchArena::new(arena)
-        })
-    }
+/// Returns a thread-local arena that resets when the scope is dropped.
+///
+/// Pass any arena holding the caller's output as `conflict`; temporary
+/// allocations will use the other arena. Nested scopes on one arena must be
+/// used and dropped in reverse construction order. Incorrect nesting is checked
+/// in release builds too, before memory can be reused under a live reference.
+///
+/// Each worker thread initializes its pool lazily and releases it on thread exit.
+/// Scratch scopes are not `Send` or `Sync` and cannot cross thread boundaries.
+pub fn scratch_arena(conflict: Option<&Arena>) -> ScratchArena<'static> {
+    let conflict = conflict.map(|a| a.delegate_target_unchecked());
+    S_SCRATCH.with(|pool| {
+        let index = conflict.is_some_and(|conflict| {
+            pool[0].borrow().as_deref().is_some_and(|arena| ptr::eq(conflict, arena))
+        }) as usize;
+        let arena = pool[index]
+            .borrow_mut()
+            .get_or_insert_with(|| Rc::new(release::Arena::new(128 * MEBI).unwrap()))
+            .clone();
+        // The scope owns the arena independently of the TLS pool. It can safely
+        // outlive that pool in another TLS destructor without a dangling reference.
+        ScratchArena::new(arena)
+    })
 }
 
 #[cfg(test)]
-pub use multi_threaded::*;
-#[cfg(not(test))]
-pub use single_threaded::*;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_scopes_restore_watermarks_and_preserve_outer_data() {
+        let outer = scratch_arena(None);
+        let original = outer.alloc_uninit_slice::<u64>(128);
+        original.fill_with(|| std::mem::MaybeUninit::new(0x1234_5678_9abc_def0));
+        let offset = outer.offset();
+        for _ in 0..1000 {
+            let inner = scratch_arena(None);
+            let bytes = inner.alloc_uninit_slice::<u8>(1024);
+            bytes.fill(std::mem::MaybeUninit::new(0xff));
+        }
+        assert_eq!(outer.offset(), offset);
+        assert!(unsafe { original.assume_init_ref() }.iter().all(|&n| n == 0x1234_5678_9abc_def0));
+    }
+
+    #[test]
+    fn live_scopes_prevent_reinitialization() {
+        let scratch = scratch_arena(None);
+        let value = scratch.alloc_uninit::<u64>().write(42);
+        assert!(init(64 * KIBI).is_err());
+        assert_eq!(*value, 42);
+    }
+
+    #[test]
+    fn older_scope_cannot_allocate_while_newer_scope_is_active() {
+        let outer = scratch_arena(None);
+        let inner = scratch_arena(None);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            outer.alloc_uninit::<u64>();
+        }));
+        assert!(result.is_err());
+        drop(inner);
+        outer.alloc_uninit::<u64>().write(42);
+    }
+
+    #[test]
+    fn concurrent_scratch_pools_are_independent_and_reclaimed() {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let threads: Vec<_> = (0..8)
+            .map(|index| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    init(2 * MEBI).unwrap();
+                    let scratch = scratch_arena(None);
+                    let bytes = scratch.alloc_uninit_slice::<u8>(64 * KIBI);
+                    bytes.fill(std::mem::MaybeUninit::new(index));
+                    barrier.wait();
+                    assert!(unsafe { bytes.assume_init_ref() }.iter().all(|&b| b == index));
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn scope_owns_its_backing_memory_during_tls_teardown() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct Survivor(Option<(ScratchArena<'static>, Arc<AtomicBool>)>);
+        impl Drop for Survivor {
+            fn drop(&mut self) {
+                if let Some((scratch, verified)) = self.0.take() {
+                    // S_SCRATCH has already been dropped on this thread.
+                    let value = scratch.alloc_uninit::<u64>().write(42);
+                    assert_eq!(*value, 42);
+                    verified.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        thread_local! {
+            static SURVIVOR: RefCell<Survivor> = const { RefCell::new(Survivor(None)) };
+        }
+        let verified = Arc::new(AtomicBool::new(false));
+        let thread_verified = verified.clone();
+        std::thread::spawn(move || {
+            // TLS destructors run in reverse initialization order.
+            SURVIVOR.with(|_| {});
+            let scratch = scratch_arena(None);
+            SURVIVOR.with(|survivor| {
+                survivor.borrow_mut().0 = Some((scratch, thread_verified));
+            });
+        })
+        .join()
+        .unwrap();
+        assert!(verified.load(Ordering::Relaxed));
+    }
+}

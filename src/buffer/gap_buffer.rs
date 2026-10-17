@@ -56,6 +56,8 @@ pub struct GapBuffer {
     gap_len: usize,
     /// Increments every time the buffer is modified.
     generation: u32,
+    /// Never rewound by undo: divergent edits must have distinct revisions.
+    generation_counter: u32,
     /// If `Vec(..)`, the buffer is optimized for small amounts of text
     /// and uses the standard heap. Otherwise, it uses virtual memory.
     buffer: BackingBuffer,
@@ -85,6 +87,7 @@ impl GapBuffer {
             gap_off: 0,
             gap_len: 0,
             generation: 0,
+            generation_counter: 0,
             buffer,
         })
     }
@@ -100,6 +103,55 @@ impl GapBuffer {
 
     pub fn set_generation(&mut self, generation: u32) {
         self.generation = generation;
+    }
+
+    pub fn bump_generation(&mut self) {
+        self.generation_counter = self.generation_counter.wrapping_add(1);
+        self.generation = self.generation_counter;
+    }
+
+    /// Continue the revision sequence when replacing a fully loaded document.
+    pub(super) fn advance_revision_from(&mut self, previous: &Self) {
+        self.generation_counter = previous.generation_counter;
+        self.bump_generation();
+    }
+
+    /// Reserve a larger address range before loading a large file. No pages are
+    /// committed, and an error leaves the existing allocation intact.
+    pub fn reserve_empty(&mut self, bytes: usize) -> apperr::Result<()> {
+        if bytes <= self.reserve {
+            return Ok(());
+        }
+        if self.text_length != 0 || !matches!(self.buffer, BackingBuffer::VirtualMemory(..)) {
+            return Err(std::io::Error::from(std::io::ErrorKind::OutOfMemory).into());
+        }
+        let bytes = bytes
+            .checked_add(MEBI + LARGE_ALLOC_CHUNK - 1)
+            .map(|n| n & !(LARGE_ALLOC_CHUNK - 1))
+            .filter(|&n| n <= isize::MAX as usize)
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::OutOfMemory))?;
+        let ptr = unsafe { sys::virtual_reserve(bytes)? };
+        // Assigning drops the previous backing once; never release it manually.
+        self.buffer = BackingBuffer::VirtualMemory(ptr, bytes);
+        self.text = ptr;
+        self.reserve = bytes;
+        self.commit = 0;
+        self.gap_off = 0;
+        self.gap_len = 0;
+        Ok(())
+    }
+
+    /// Reserve insertion space without changing document contents or generation.
+    /// A failed reservation leaves the document intact.
+    pub fn reserve_insert(&mut self, len: usize) -> bool {
+        if len <= self.gap_len {
+            return true;
+        }
+        if len > self.reserve.saturating_sub(self.text_length) {
+            return false;
+        }
+        self.enlarge_gap(len);
+        len <= self.gap_len
     }
 
     /// WARNING: The returned slice must not necessarily be the same length as `len` (due to OOM).
@@ -123,7 +175,7 @@ impl GapBuffer {
             self.enlarge_gap(len);
         }
 
-        self.generation = self.generation.wrapping_add(1);
+        self.bump_generation();
         unsafe { slice::from_raw_parts_mut(self.text.add(self.gap_off).as_ptr(), self.gap_len) }
     }
 
@@ -181,7 +233,8 @@ impl GapBuffer {
         }
 
         let gap_len_old = self.gap_len;
-        let gap_len_new = (len + gap_chunk + gap_chunk - 1) & !(gap_chunk - 1);
+        let gap_len_new = (len.saturating_add(gap_chunk + gap_chunk - 1) & !(gap_chunk - 1))
+            .min(self.reserve - self.text_length);
 
         let bytes_old = self.commit;
         let bytes_new = self.text_length + gap_len_new;
@@ -200,6 +253,9 @@ impl GapBuffer {
                     }
                 },
                 BackingBuffer::Vec(v) => {
+                    if v.try_reserve_exact(bytes_new - v.len()).is_err() {
+                        return;
+                    }
                     v.resize(bytes_new, 0);
                     self.text = unsafe { NonNull::new_unchecked(v.as_mut_ptr()) };
                 }
@@ -233,6 +289,13 @@ impl GapBuffer {
     }
 
     pub fn replace(&mut self, range: Range<usize>, src: &[u8]) {
+        // Never delete an existing selection and then discover that its replacement
+        // does not fit. Reserve first; callers can explicitly preflight larger batches.
+        let start = range.start.min(self.text_length);
+        let delete = range.end.min(self.text_length).saturating_sub(start);
+        if !self.reserve_insert(src.len().saturating_sub(delete)) {
+            return;
+        }
         let gap = self.allocate_gap(range.start, src.len(), range.end.saturating_sub(range.start));
         let len = slice_copy_safe(gap, src);
         self.commit_gap(len);
@@ -241,7 +304,7 @@ impl GapBuffer {
     pub fn clear(&mut self) {
         self.gap_off = 0;
         self.gap_len += self.text_length;
-        self.generation = self.generation.wrapping_add(1);
+        self.bump_generation();
         self.text_length = 0;
     }
 
@@ -365,5 +428,129 @@ impl ReadableDocument for GapBuffer {
         }
 
         unsafe { slice::from_raw_parts(self.text.add(beg).as_ptr(), len) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewinding_revision_does_not_reuse_the_next_edit_identity() {
+        let mut buffer = GapBuffer::new(true).unwrap();
+        buffer.replace(0..0, b"a");
+        let saved = buffer.generation();
+        buffer.clear();
+        buffer.set_generation(0);
+        buffer.replace(0..0, b"b");
+        assert_ne!(buffer.generation(), saved);
+        assert_contents(&buffer, b"b");
+    }
+
+    #[test]
+    fn oversized_reservation_is_checked_and_preserves_content() {
+        let mut buffer = GapBuffer::new(false).unwrap();
+        assert!(buffer.reserve_empty(usize::MAX).is_err());
+        assert_contents(&buffer, b"");
+        buffer.replace(0..0, b"keep");
+        assert!(buffer.reserve_empty(usize::MAX).is_err());
+        assert_contents(&buffer, b"keep");
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn large_file_address_reservation_can_exceed_four_gib_without_committing_it() {
+        let mut buffer = GapBuffer::new(false).unwrap();
+        buffer.reserve_empty(4 * GIBI + MEBI).unwrap();
+        assert!(buffer.reserve > 4 * GIBI);
+        assert_eq!(buffer.commit, 0);
+        buffer.replace(0..0, b"small committed prefix");
+        assert!(buffer.commit <= LARGE_ALLOC_CHUNK);
+        assert_contents(&buffer, b"small committed prefix");
+    }
+
+    fn assert_contents(buffer: &GapBuffer, expected: &[u8]) {
+        assert_eq!(buffer.len(), expected.len());
+        assert!(buffer.gap_off <= buffer.text_length);
+        assert!(buffer.text_length + buffer.gap_len <= buffer.commit);
+        assert!(buffer.commit <= buffer.reserve);
+        let mut actual = Vec::new();
+        buffer.extract_raw(0..usize::MAX, &mut actual, 0);
+        assert_eq!(actual, expected);
+        // Read in both directions across the gap and at clamped offsets.
+        for off in [0, expected.len() / 2, expected.len(), usize::MAX] {
+            let clamped = off.min(expected.len());
+            let forward = buffer.read_forward(off);
+            let backward = buffer.read_backward(off);
+            assert_eq!(forward, &expected[clamped..clamped + forward.len()]);
+            assert_eq!(backward, &expected[clamped - backward.len()..clamped]);
+        }
+    }
+
+    #[test]
+    fn oversized_gap_request_cannot_wrap_or_corrupt_existing_text() {
+        let mut buffer = GapBuffer::new(true).unwrap();
+        buffer.replace(0..0, b"left-right");
+        assert_eq!(buffer.allocate_gap(5, usize::MAX, 0).len(), SMALL_CAPACITY - 10);
+        assert_contents(&buffer, b"left-right");
+        let generation = buffer.generation();
+        assert!(!buffer.reserve_insert(usize::MAX));
+        assert_eq!(buffer.generation(), generation);
+        assert_contents(&buffer, b"left-right");
+    }
+
+    #[test]
+    fn deterministic_random_edits_match_a_vec_for_heap_and_virtual_memory() {
+        for small in [true, false] {
+            let mut buffer = GapBuffer::new(small).unwrap();
+            let mut oracle = Vec::new();
+            let mut seed = 0x0bad_5eed_u32;
+            let mut random = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as usize
+            };
+            for iteration in 0..25_000 {
+                let start = random() % (oracle.len() + 17);
+                let end = if iteration % 23 == 0 {
+                    usize::MAX
+                } else {
+                    start.saturating_add(random() % 97)
+                };
+                let bytes: Vec<u8> = (0..random() % 97).map(|_| random() as u8).collect();
+                buffer.replace(start..end, &bytes);
+                let start = start.min(oracle.len());
+                let end = end.min(oracle.len()).max(start);
+                oracle.splice(start..end, bytes);
+                if iteration % 137 == 0 {
+                    // Moving/enlarging the gap does not change committed text.
+                    let off = random() % (oracle.len() + 1);
+                    buffer.allocate_gap(off, random() % 4096, 0);
+                }
+                assert_contents(&buffer, &oracle);
+                if iteration % 997 == 0 {
+                    buffer.clear();
+                    oracle.clear();
+                    assert_contents(&buffer, &oracle);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn capacity_failure_preserves_selection_and_neighbors() {
+        let mut buffer = GapBuffer::new(true).unwrap();
+        let original = vec![0xa5; SMALL_CAPACITY];
+        buffer.replace(0..0, &original);
+        assert_contents(&buffer, &original);
+        let generation = buffer.generation();
+        buffer.replace(100..101, &[1, 2]);
+        assert_eq!(buffer.generation(), generation);
+        assert_contents(&buffer, &original);
+        buffer.replace(100..102, &[1, 2]);
+        let mut expected = original;
+        expected[100..102].copy_from_slice(&[1, 2]);
+        assert_contents(&buffer, &expected);
     }
 }

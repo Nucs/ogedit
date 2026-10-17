@@ -8,6 +8,7 @@
 pub struct Clipboard {
     data: Vec<u8>,
     line_copy: bool,
+    fragments: Option<Vec<Vec<u8>>>,
     wants_host_sync: bool,
 }
 
@@ -41,9 +42,27 @@ impl Clipboard {
     pub fn write(&mut self, data: Vec<u8>) {
         if !data.is_empty() {
             self.data = data;
+            self.fragments = None;
             self.line_copy = false;
             self.wants_host_sync = true;
         }
+    }
+
+    /// Preserve separate selections for lossless multi-cursor copy/paste.
+    pub fn write_fragments(&mut self, fragments: Vec<Vec<u8>>, newline: &[u8]) {
+        let mut data = Vec::new();
+        for (i, fragment) in fragments.iter().enumerate() {
+            if i > 0 {
+                data.extend_from_slice(newline);
+            }
+            data.extend_from_slice(fragment);
+        }
+        self.write(data);
+        self.fragments = Some(fragments);
+    }
+
+    pub fn fragments(&self) -> Option<&[Vec<u8>]> {
+        self.fragments.as_deref()
     }
 
     /// See [`Clipboard::is_line_copy`].

@@ -11,6 +11,8 @@ use crate::arena::{Arena, scratch_arena};
 use crate::icu;
 
 const NO_MATCH: i32 = 0;
+pub const MAX_QUERY_BYTES: usize = 16 * 1024;
+const MAX_MATRIX_CELLS: usize = 256 * 1024;
 
 pub fn score_fuzzy<'a>(
     arena: &'a Arena,
@@ -18,26 +20,39 @@ pub fn score_fuzzy<'a>(
     needle: &str,
     allow_non_contiguous_matches: bool,
 ) -> (i32, Vec<usize, &'a Arena>) {
-    if haystack.is_empty() || needle.is_empty() {
+    if haystack.is_empty() || needle.is_empty() || needle.len() > MAX_QUERY_BYTES {
         // return early if target or query are empty
         return (NO_MATCH, Vec::new_in(arena));
     }
 
-    let scratch = scratch_arena(Some(arena));
-    let target = map_chars(&scratch, haystack);
-    let query = map_chars(&scratch, needle);
-
-    if target.len() < query.len() {
+    let target_len = haystack.chars().count();
+    let query_len = needle.chars().count();
+    if target_len < query_len {
         // impossible for query to be contained in target
         return (NO_MATCH, Vec::new_in(arena));
     }
+
+    let Some(area) = query_len.checked_mul(target_len).filter(|&area| area <= MAX_MATRIX_CELLS)
+    else {
+        return score_linear(arena, haystack, needle, allow_non_contiguous_matches);
+    };
+
+    let scratch = scratch_arena(Some(arena));
+    let target = map_chars(&scratch, haystack);
+    let query = map_chars(&scratch, needle);
 
     let target_lower = icu::fold_case(&scratch, haystack);
     let query_lower = icu::fold_case(&scratch, needle);
     let target_lower = map_chars(&scratch, &target_lower);
     let query_lower = map_chars(&scratch, &query_lower);
 
-    let area = query.len() * target.len();
+    // Full case folding can expand a character (e.g. ß -> ss). Matrix indices
+    // address original characters; indexing an expanded fold shifts all later
+    // highlights and can lose matches. Use the position-preserving fallback.
+    if target_lower.len() != target.len() || query_lower.len() != query.len() {
+        return score_linear(arena, haystack, needle, allow_non_contiguous_matches);
+    }
+
     let mut scores = vec::from_elem_in(0, area, &*scratch);
     let mut matches = vec::from_elem_in(0, area, &*scratch);
 
@@ -152,6 +167,73 @@ pub fn score_fuzzy<'a>(
     (scores[area - 1], positions)
 }
 
+/// Linear-space, linear-time fallback for large inputs. Ranking is deliberately
+/// simpler than the matrix scorer, but positions always refer to source chars.
+fn score_linear<'a>(
+    arena: &'a Arena,
+    haystack: &str,
+    needle: &str,
+    non_contiguous: bool,
+) -> (i32, Vec<usize, &'a Arena>) {
+    // Keep ICU's case-fold equivalences (e.g. final sigma and long s), not
+    // just lowercase equality. The query owns at most MAX_QUERY_BYTES chars;
+    // each target character's temporary key is released before the next one.
+    let query: Vec<String> = needle
+        .chars()
+        .map(|ch| {
+            let scratch = scratch_arena(Some(arena));
+            let mut bytes = [0; 4];
+            let ch = if ch == '\\' { '/' } else { ch };
+            icu::fold_case(&scratch, ch.encode_utf8(&mut bytes)).to_string()
+        })
+        .collect();
+    let mut positions = Vec::new_in(arena);
+    let mut prefix = Vec::new();
+    if !non_contiguous {
+        // KMP avoids rescanning a large repeated prefix for every candidate.
+        prefix.resize(query.len(), 0usize);
+        let mut matched = 0;
+        for index in 1..query.len() {
+            while matched > 0 && query[index] != query[matched] {
+                matched = prefix[matched - 1];
+            }
+            if query[index] == query[matched] {
+                matched += 1;
+            }
+            prefix[index] = matched;
+        }
+    }
+    let mut matched = 0;
+    for (index, target) in haystack.chars().enumerate() {
+        let equal = {
+            let scratch = scratch_arena(Some(arena));
+            let mut bytes = [0; 4];
+            let target = if target == '\\' { '/' } else { target };
+            let folded = icu::fold_case(&scratch, target.encode_utf8(&mut bytes));
+            if !non_contiguous {
+                while matched > 0 && folded.as_str() != query[matched] {
+                    matched = prefix[matched - 1];
+                }
+            }
+            folded.as_str() == query[matched]
+        };
+        if equal {
+            matched += 1;
+            if non_contiguous {
+                positions.push(index);
+            }
+            if matched == query.len() {
+                if !non_contiguous {
+                    positions.extend(index + 1 - matched..=index);
+                }
+                return (positions.len() as i32, positions);
+            }
+        }
+    }
+    positions.clear();
+    (NO_MATCH, positions)
+}
+
 fn compute_char_score(
     query: char,
     query_lower: char,
@@ -218,4 +300,58 @@ fn map_chars<'a>(arena: &'a Arena, s: &str) -> Vec<char, &'a Arena> {
     chars.extend(s.chars());
     chars.shrink_to_fit();
     chars
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_fuzzy_inputs_use_bounded_work_and_correct_source_positions() {
+        let arena = Arena::new(1024 * 1024).unwrap();
+        let text = format!("{}Z", "é".repeat(40_000));
+        let needle = format!("{}z", "é".repeat(100));
+        let (score, positions) = score_fuzzy(&arena, &text, &needle, true);
+        assert!(score > 0);
+        assert_eq!(positions.len(), 101);
+        assert_eq!(positions[100], 40_000);
+        let (score, positions) = score_fuzzy(&arena, &text, &needle, false);
+        assert!(score > 0);
+        assert_eq!(positions[0], 39_900);
+        assert_eq!(positions[100], 40_000);
+        assert!(arena.offset() < 32 * 1024);
+    }
+
+    #[test]
+    fn oversized_fuzzy_query_returns_without_allocating_a_matrix() {
+        let arena = Arena::new(4096).unwrap();
+        let text = "x".repeat(MAX_QUERY_BYTES + 1);
+        let (score, positions) = score_fuzzy(&arena, &text, &text, true);
+        assert_eq!(score, NO_MATCH);
+        assert!(positions.is_empty());
+        assert_eq!(arena.offset(), 0);
+    }
+
+    #[test]
+    fn case_fold_expansion_keeps_later_character_positions() {
+        let arena = Arena::new(4096).unwrap();
+        let (score, positions) = score_fuzzy(&arena, "Straße", "e", true);
+        assert!(score > 0);
+        assert_eq!(&positions[..], &[5]);
+        let (score, positions) = score_fuzzy(&arena, "Straße", "ẞe", false);
+        assert!(score > 0);
+        assert_eq!(&positions[..], &[4, 5]);
+    }
+
+    #[test]
+    fn expanding_folds_preserve_icu_equivalences_in_linear_fallback() {
+        let arena = Arena::new(4096).unwrap();
+        for contiguous in [false, true] {
+            for (target, query) in [("ςß", "σ"), ("ſß", "S"), ("µß", "Μ")] {
+                let (score, positions) = score_fuzzy(&arena, target, query, !contiguous);
+                assert!(score > 0, "{target:?} must match {query:?}");
+                assert_eq!(&positions[..], &[0]);
+            }
+        }
+    }
 }

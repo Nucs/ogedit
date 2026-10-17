@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::num::ParseIntError;
-
 use ogedit::framebuffer::IndexedColor;
 use ogedit::helpers::*;
 use ogedit::icu;
@@ -26,10 +24,27 @@ pub fn draw_editor(ctx: &mut Context, state: &mut State) {
         _ => 2,
     };
 
-    if let Some(doc) = state.documents.active() {
-        ctx.textarea("textarea", doc.buffer.clone());
+    if let Some(buffer) = state.documents.active().map(|doc| doc.buffer.clone()) {
+        {
+            let doc = state.documents.active().unwrap();
+            let mut text = buffer.borrow_mut();
+            let path = doc.path.as_deref().unwrap_or(std::path::Path::new("untitled.txt"));
+            let language =
+                doc.language_override.as_deref().or_else(|| state.settings.language_for_path(path));
+            text.set_syntax_path_with_language(path, language);
+            text.set_syntax_enabled(!state.workbench.syntax_disabled);
+        }
+        ctx.textarea_with_shortcuts("textarea", buffer.clone(), |ctx| {
+            crate::handle_shortcuts(ctx, state, true);
+        });
         ctx.inherit_focus();
+        state.editor_focused = ctx.is_focused();
+        if buffer.borrow_mut().take_edit_capacity_error() {
+            state.workbench.message =
+                "Edit exceeds the document capacity; the text was preserved.".into();
+        }
     } else {
+        state.editor_focused = false;
         ctx.block_begin("empty");
         ctx.block_end();
     }
@@ -59,7 +74,10 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
         // If the selection is empty, focus the search input field.
         // Otherwise, focus the replace input field, if it exists.
         if let Some(selection) = doc.buffer.borrow_mut().extract_user_selection(false) {
-            state.search_needle = String::from_utf8_lossy_owned(selection);
+            state.search_needle = match String::from_utf8(selection) {
+                Ok(text) => text,
+                Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+            };
             focus = state.wants_search.kind;
         }
     }
@@ -132,7 +150,10 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
                 &mut state.search_options.match_case,
             );
             if old_match_case != state.search_options.match_case {
-                logging::log_action(&format!("SEARCH_OPTION: match_case={}", state.search_options.match_case));
+                logging::log_action(&format!(
+                    "SEARCH_OPTION: match_case={}",
+                    state.search_options.match_case
+                ));
             }
 
             let old_whole_word = state.search_options.whole_word;
@@ -142,7 +163,10 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
                 &mut state.search_options.whole_word,
             );
             if old_whole_word != state.search_options.whole_word {
-                logging::log_action(&format!("SEARCH_OPTION: whole_word={}", state.search_options.whole_word));
+                logging::log_action(&format!(
+                    "SEARCH_OPTION: whole_word={}",
+                    state.search_options.whole_word
+                ));
             }
 
             let old_use_regex = state.search_options.use_regex;
@@ -152,7 +176,10 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
                 &mut state.search_options.use_regex,
             );
             if old_use_regex != state.search_options.use_regex {
-                logging::log_action(&format!("SEARCH_OPTION: use_regex={}", state.search_options.use_regex));
+                logging::log_action(&format!(
+                    "SEARCH_OPTION: use_regex={}",
+                    state.search_options.use_regex
+                ));
             }
 
             if state.wants_search.kind == StateSearchKind::Replace
@@ -169,8 +196,6 @@ fn draw_search(ctx: &mut Context, state: &mut State) {
 
             if change {
                 action = change_action;
-                state.wants_search.focus = true;
-                ctx.needs_rerender();
             }
         }
         ctx.table_end();
@@ -195,7 +220,8 @@ pub fn search_execute(ctx: &mut Context, state: &mut State, action: SearchAction
 
     state.search_success = match action {
         SearchAction::Search => {
-            let result = doc.buffer.borrow_mut().find_and_select(&state.search_needle, state.search_options);
+            let result =
+                doc.buffer.borrow_mut().find_and_select(&state.search_needle, state.search_options);
             logging::log_search(&state.search_needle, result.is_ok());
             result
         }
@@ -217,7 +243,10 @@ pub fn search_execute(ctx: &mut Context, state: &mut State, action: SearchAction
                 state.search_replacement.as_bytes(),
             );
             // Note: We don't have the count here, but we log that replace all was executed
-            logging::log_action(&format!("Replace all '{}' with '{}'", state.search_needle, state.search_replacement));
+            logging::log_action(&format!(
+                "Replace all '{}' with '{}'",
+                state.search_needle, state.search_replacement
+            ));
             result
         }
     }
@@ -229,14 +258,30 @@ pub fn search_execute(ctx: &mut Context, state: &mut State, action: SearchAction
 pub fn draw_handle_save(ctx: &mut Context, state: &mut State) {
     if let Some(doc) = state.documents.active_mut() {
         if doc.path.is_some() {
-            let path_str = doc.path.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            let path_str =
+                doc.path.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
             if let Err(err) = doc.save(None) {
                 logging::log_error(&format!("Failed to save: {}", path_str));
-                error_log_add(ctx, state, err);
+                if err == crate::safe_save::APP_SAVE_CONFLICT {
+                    state.wants_close = false;
+                    state.wants_exit = false;
+                    let mut workbench = std::mem::take(&mut state.workbench);
+                    workbench.compare(state);
+                    workbench.message = "Disk changed · compare before saving".into();
+                    state.workbench = workbench;
+                    ctx.needs_rerender();
+                } else {
+                    error_log_add(ctx, state, err);
+                }
             } else {
                 logging::log_file_save(&path_str);
                 // Clear file changed indicator since we just saved
                 state.file_changed_cached = false;
+                if doc.path.as_ref().is_some_and(|p| state.settings.is_settings_path(p))
+                    && let Err(error) = state.settings.reload()
+                {
+                    error_log_add_message(ctx, state, error);
+                }
             }
         } else {
             // No path? Show the file picker.
@@ -392,11 +437,8 @@ pub fn draw_handle_wants_reload(ctx: &mut Context, state: &mut State) {
     };
 
     // Button labels depend on whether we have local changes to discard
-    let reload_button_label = if is_dirty {
-        loc(LocId::ReloadConfirmDiscard)
-    } else {
-        loc(LocId::ReloadButton)
-    };
+    let reload_button_label =
+        if is_dirty { loc(LocId::ReloadConfirmDiscard) } else { loc(LocId::ReloadButton) };
 
     enum Action {
         None,
@@ -426,11 +468,7 @@ pub fn draw_handle_wants_reload(ctx: &mut Context, state: &mut State) {
             ctx.table_next_row();
             ctx.inherit_focus();
 
-            if ctx.button(
-                "reload",
-                reload_button_label,
-                ButtonStyle::default().accelerator('R'),
-            ) {
+            if ctx.button("reload", reload_button_label, ButtonStyle::default().accelerator('R')) {
                 action = Action::Reload;
             }
             ctx.inherit_focus();
@@ -486,15 +524,15 @@ pub fn draw_goto_menu(ctx: &mut Context, state: &mut State) {
 
             if ctx.consume_shortcut(vk::RETURN) {
                 match validate_goto_point(&state.goto_target) {
-                    Ok(point) => {
-                        logging::log_goto(point);
-                        logging::log_dialog_close("Go to Line", &format!("Ln {}", point.y + 1));
-                        let mut buf = doc.buffer.borrow_mut();
-                        buf.cursor_move_to_logical(point);
-                        buf.make_cursor_visible();
+                    Some(point) => {
+                        doc.cursor_move_to_goto(point);
+                        let pos = doc.buffer.borrow().cursor_logical_pos();
+                        logging::log_goto(pos);
+                        logging::log_dialog_close("Go to Line", &format!("Ln {}", pos.y + 1));
+                        doc.buffer.borrow_mut().make_cursor_visible();
                         done = true;
                     }
-                    Err(_) => {
+                    None => {
                         logging::log_error(&format!("Invalid goto target: {}", state.goto_target));
                         state.goto_invalid = true;
                     }
@@ -526,13 +564,27 @@ pub fn draw_duplicate_line(state: &mut State) {
     doc.buffer.borrow_mut().duplicate_line_or_selection();
 }
 
-fn validate_goto_point(line: &str) -> Result<Point, ParseIntError> {
+fn validate_goto_point(line: &str) -> Option<Point> {
     let mut coords = [0; 2];
-    let (y, x) = line.split_once(':').unwrap_or((line, "0"));
+    let (y, x) = line.split_once(':').unwrap_or((line, "1"));
     // Using a loop here avoids 2 copies of the str->int code.
     // This makes the binary more compact.
     for (i, s) in [x, y].iter().enumerate() {
-        coords[i] = s.parse::<CoordType>()?.saturating_sub(1);
+        coords[i] = s.parse::<CoordType>().ok()?;
     }
-    Ok(Point { x: coords[0], y: coords[1] })
+    (coords[0] >= 1).then_some(Point { x: coords[0], y: coords[1] })
+}
+
+#[cfg(test)]
+mod goto_tests {
+    use super::*;
+
+    #[test]
+    fn negative_lines_and_character_validation() {
+        assert_eq!(validate_goto_point("-1"), Some(Point { x: 1, y: -1 }));
+        assert_eq!(validate_goto_point("-10:5"), Some(Point { x: 5, y: -10 }));
+        for invalid in ["", "-", "a", "1:0", "1:-1", "1:2:3", "999999999999999999999999999999"] {
+            assert_eq!(validate_goto_point(invalid), None, "{invalid}");
+        }
+    }
 }

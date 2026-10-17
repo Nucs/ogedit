@@ -1,11 +1,17 @@
+[workspace]
+members = ["vendor/lsh"]
+default-members = ["."]
+exclude = ["fuzz"]
+resolver = "3"
+
 [package]
 name = "ogedit"
 version = "1.2.4"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.93"
 readme = "README.md"
-repository = "https://github.com/microsoft/edit"
-homepage = "https://github.com/microsoft/edit"
+repository = "https://github.com/Nucs/ogedit"
+homepage = "https://github.com/Nucs/ogedit"
 license = "MIT"
 categories = ["text-editors"]
 build = "build/main.rs"
@@ -39,17 +45,41 @@ codegen-units = 16          # Make compiling criterion faster (16 is the default
 lto = "thin"                # Similarly, speed up linking by a ton
 
 [dependencies]
+atomicwrites = "0.4.4"
+notify = "8.2"
+similar = "3.2"
+csv = "1.4"
+jsonc-parser = { version = "0.34", features = ["cst", "serde"] }
+regex = "1.13"
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+nucleo = "0.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lsh = { path = "vendor/lsh", default-features = false, features = ["glob"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [build-dependencies]
+lsh = { path = "vendor/lsh", default-features = false, features = ["compiler", "glob"] }
 # The default toml crate bundles its dependencies with bad compile times. Thanks.
 # Thankfully toml-span exists. FWIW the alternative is yaml-rust (without the 2 suffix).
 toml-span = { version = "0.5", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = { version = "0.1.22", default-features = false }
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.59"
+features = [
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Console",
+]
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.59"
@@ -67,6 +97,4 @@ features = [
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
 zstd = { version = "0.13", default-features = false }

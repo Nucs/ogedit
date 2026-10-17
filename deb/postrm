@@ -4,17 +4,30 @@ set -e
 
 PROFILE_FILE="/etc/profile.d/ogedit-editor.sh"
 
+remove_editor_profile() {
+    # Do not remove a replacement created by the administrator.
+    if [ -f "$PROFILE_FILE" ] && [ ! -L "$PROFILE_FILE" ] &&
+       [ "$(cat "$PROFILE_FILE")" = "$(printf '%s\n' '# Set EDITOR to ogedit (installed by ogedit package)' 'export EDITOR="/usr/bin/ogedit"')" ]; then
+        rm -f "$PROFILE_FILE"
+    fi
+}
+
 case "$1" in
     purge)
         # Remove profile.d script and debconf data
-        rm -f "$PROFILE_FILE"
+        remove_editor_profile
         if [ -e /usr/share/debconf/confmodule ]; then
             . /usr/share/debconf/confmodule
             db_purge
         fi
         ;;
 
-    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    remove|disappear)
+        # A normal uninstall must not leave EDITOR pointing at a missing binary.
+        remove_editor_profile
+        ;;
+
+    upgrade|failed-upgrade|abort-install|abort-upgrade)
         ;;
 
     *)
