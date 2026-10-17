@@ -13,7 +13,7 @@
   - Feature tree selection
 
   Build:
-    wix build wix/main.wxs -arch x64 -d Version=1.2.2 -d BinaryPath=target/release -d AssetPath=assets -ext WixToolset.UI.wixext -o ogedit.msi
+    wix build wix/main.wxs -arch x64 -d Version=2.0.0 -d BinaryPath=target/release -d AssetPath=assets -ext WixToolset.UI.wixext -o ogedit.msi
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
