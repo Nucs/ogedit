@@ -323,7 +323,13 @@ mod tests {
         {
             let canonical = std::fs::canonicalize(&file).unwrap();
             let prepared = initial_selection(&canonical, &std::fs::canonicalize(&root).unwrap());
-            assert_eq!(prepared.directory, folder);
+            // TEMP may use an 8.3 alias (RUNNER~1 on hosted Windows runners),
+            // while canonicalization expands it to the same long-name folder.
+            assert_eq!(
+                std::fs::canonicalize(&prepared.directory).unwrap(),
+                std::fs::canonicalize(&folder).unwrap()
+            );
+            assert!(!prepared.directory.as_os_str().to_string_lossy().starts_with(r"\\?\"));
             assert_eq!(prepared.filename.as_deref(), file.file_name());
             assert!(canonical.as_os_str().to_string_lossy().starts_with(r"\\?\"));
             // Exercise Shell path parsing without displaying a dialog: this is
